@@ -43,15 +43,15 @@ interface LibraryActionState {
 }
 
 // --- Layout Constants ---
-const MAT_W = 700;
+const MAT_W = 840; // Wider to fit more cards
 const MAT_H = 400;
-const GAP = 300; 
+const GAP = 100; // Closer together
 
 // World Coordinates (Absolute)
 const LOCAL_MAT_POS = { x: -MAT_W / 2, y: GAP }; // Seat 0 (Bottom)
-const LEFT_MAT_POS = { x: -1200, y: -MAT_H / 2 }; // Seat 1 (Left)
 const TOP_MAT_POS = { x: -MAT_W / 2, y: -MAT_H - GAP }; // Seat 2 (Top)
-const RIGHT_MAT_POS = { x: 500, y: -MAT_H / 2 }; // Seat 3 (Right)
+const LEFT_MAT_POS = { x: -MAT_W / 2 - MAT_H - GAP, y: -MAT_H / 2 }; // Seat 1 (Left)
+const RIGHT_MAT_POS = { x: MAT_W / 2 + GAP, y: -MAT_H / 2 }; // Seat 3 (Right)
 
 const SEAT_POSITIONS = [
     LOCAL_MAT_POS, // 0: Bottom
@@ -912,7 +912,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const untapAll = () => {
-        setBoardObjects(prev => prev.map(o => o.controllerId === socket.id ? { ...o, rotation: 0, tappedQuantity: 0 } : o));
+        const mySeatPosIndex = getSeatMapping(mySeatIndex, playersList.length);
+        const myDefaultRotation = SEAT_ROTATIONS[mySeatPosIndex];
+
+        const myCards = boardObjects.filter(o => o.controllerId === socket.id && (o.tappedQuantity > 0 || o.rotation !== myDefaultRotation));
+        if (myCards.length === 0) return;
+        
+        setBoardObjects(prev => prev.map(o => {
+            if (o.controllerId === socket.id && (o.tappedQuantity > 0 || o.rotation !== myDefaultRotation)) {
+                return { ...o, rotation: myDefaultRotation, tappedQuantity: 0 };
+            }
+            return o;
+        }));
+
+        myCards.forEach(obj => {
+            socket.emit('game_action', { room: roomId, action: 'UPDATE_OBJECT', data: { id: obj.id, updates: { rotation: myDefaultRotation, tappedQuantity: 0 } } });
+        });
+
         addLog("untapped all permanents");
     };
 
@@ -2056,7 +2072,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <div className="absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none">
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
                             <div className="relative w-full px-8 pb-8 flex items-end justify-center pointer-events-auto">
-                                <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-4 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50" style={{ maxWidth: '85vw' }}>
+                                <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-6 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50 hover:scrollbar-thumb-gray-400" style={{ maxWidth: '85vw' }}>
                                     {cardsInHand.map((card, idx) => (
                                         <HandCard 
                                             key={card.id} 
@@ -2072,7 +2088,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div className="flex flex-col items-center justify-end h-full pb-1">
                                             {!areTokensExpanded ? (
                                                 <div 
-                                                    className={`w-24 h-32 bg-gray-800 border-2 ${tokensInHand.length > 0 ? 'border-yellow-500' : 'border-gray-600 border-dashed'} rounded-lg flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg`}
+                                                    className={`relative flex-shrink-0 bg-gray-800 border-2 ${tokensInHand.length > 0 ? 'border-yellow-500' : 'border-gray-600 border-dashed'} rounded-xl flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg`}
+                                                    style={{ width: 140 * handScale, height: 196 * handScale }}
                                                     onClick={() => tokensInHand.length > 0 ? setAreTokensExpanded(true) : openSearch('TOKENS')}
                                                     title={tokensInHand.length > 0 ? "Expand Tokens" : "Add Tokens"}
                                                 >

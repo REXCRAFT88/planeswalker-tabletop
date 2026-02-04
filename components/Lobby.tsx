@@ -31,6 +31,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [searchResults, setSearchResults] = useState<CardData[]>([]);
   const [roomCode, setRoomCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
+  const [joinStatus, setJoinStatus] = useState('');
   const hasAutoAttempted = useRef(false);
 
   // Auto-join if session exists
@@ -80,6 +81,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     }
     
     setIsJoining(true);
+    setJoinStatus('Connecting...');
     const socket = connectSocket();
     
     socket.off('join_error');
@@ -91,11 +93,12 @@ export const Lobby: React.FC<LobbyProps> = ({
     socket.on('join_error', ({ message }) => {
         alert(message);
         setIsJoining(false);
+        setJoinStatus('');
         socket.disconnect();
     });
 
     socket.on('join_pending', ({ message }) => {
-        alert(message);
+        setJoinStatus(message);
     });
 
     socket.on('join_success', ({ room, isGameStarted }) => {
@@ -348,7 +351,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait"
               >
                 {isJoining ? <Loader className="animate-spin"/> : <Play size={20} />}
-                {savedDeckCount > 0 ? 'Create New Table' : 'Import Deck to Play'}
+                {isJoining ? (joinStatus || 'Joining...') : (savedDeckCount > 0 ? 'Create New Table' : 'Import Deck to Play')}
               </button>
            </div>
            
