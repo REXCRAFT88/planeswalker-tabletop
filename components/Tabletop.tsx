@@ -750,6 +750,49 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog("added a counter");
     };
 
+    const shuffleLibrary = () => {
+        setLibrary(prev => {
+            const newLib = [...prev];
+            for (let i = newLib.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newLib[i], newLib[j]] = [newLib[j], newLib[i]];
+            }
+            return newLib;
+        });
+        setIsShuffling(true);
+        setTimeout(() => setIsShuffling(false), 500);
+        addLog("shuffled library");
+    };
+
+    const drawCard = (count: number = 1) => {
+        if (library.length < count) {
+             addLog(`tried to draw ${count} but only ${library.length} in library`);
+             return;
+        }
+        setLibrary(prev => {
+             const drawn = prev.slice(0, count);
+             setHand(h => [...h, ...drawn]);
+             return prev.slice(count);
+        });
+        addLog(`drew ${count} card${count > 1 ? 's' : ''}`);
+    };
+
+    const playCommander = (card: CardData) => {
+        setCommandZone(prev => prev.filter(c => c.id !== card.id));
+        const defaultX = LOCAL_MAT_POS.x + MAT_W / 2 - CARD_WIDTH / 2;
+        const defaultY = LOCAL_MAT_POS.y + MAT_H / 2 - CARD_HEIGHT / 2;
+        const newObject: BoardObject = {
+            id: crypto.randomUUID(), type: 'CARD', cardData: card,
+            x: defaultX, y: defaultY, z: maxZ + 1, rotation: 0, isFaceDown: false, isTransformed: false,
+            counters: {}, commanderDamage: {}, controllerId: 'local-player',
+            quantity: 1, tappedQuantity: 0
+        };
+        setMaxZ(prev => prev + 1);
+        setBoardObjects(prev => [...prev, newObject]);
+        emitAction('ADD_OBJECT', newObject);
+        addLog(`cast commander ${card.name}`);
+    };
+
     const playTopLibrary = () => {
         if (library.length === 0) return;
         const card = library[0];
