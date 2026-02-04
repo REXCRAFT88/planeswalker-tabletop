@@ -5,11 +5,12 @@ import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2 } from 'lu
 
 interface DeckBuilderProps {
   initialDeck: CardData[];
+  initialTokens: CardData[];
   onDeckReady: (deck: CardData[], tokens: CardData[]) => void;
   onBack: () => void;
 }
 
-export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckReady, onBack }) => {
+export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, onDeckReady, onBack }) => {
   const [deckText, setDeckText] = useState('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{current: number, total: number} | null>(null);
@@ -19,7 +20,28 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
   // Staging area after fetching but before confirming commander
   // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
   const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
-  const [stagedTokens, setStagedTokens] = useState<CardData[]>([]);
+  const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+          const file = files[0];
+          if (file.type === "text/plain" || file.name.endsWith('.txt')) {
+              const text = await file.text();
+              setDeckText(text);
+          } else {
+              alert("Please drop a valid .txt file");
+          }
+      }
+  };
 
   const handleImport = async () => {
     setLoading(true);
@@ -73,7 +95,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
             setError("Could not load any cards. Please check your card names.");
         } else {
             setStagedDeck(deck);
-            setStagedTokens(tokens);
+            // Append new tokens found in the imported list to the existing tokens
+            setStagedTokens(prev => [...prev, ...tokens]);
         }
 
     } catch (e) {
@@ -127,13 +150,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
             <label className="block text-sm font-medium text-gray-300 mb-2">
             Paste Deck List (Moxfield/Arena format)
             </label>
-            <textarea
-            className="flex-1 w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
-            placeholder={`1 Sol Ring\n1 Arcane Signet\n1 Command Tower...`}
-            value={deckText}
-            onChange={(e) => setDeckText(e.target.value)}
-            disabled={loading}
-            />
+            <div 
+                className="flex-1 flex flex-col relative"
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+            >
+                <textarea
+                className="flex-1 w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                placeholder={`1 Sol Ring\n1 Arcane Signet\n1 Command Tower...`}
+                value={deckText}
+                onChange={(e) => setDeckText(e.target.value)}
+                disabled={loading}
+                />
+                {deckText.length === 0 && (
+                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div className="text-gray-600 text-sm text-center">
+                            <span className="block mb-1 opacity-50">Drag & Drop .txt file here</span>
+                        </div>
+                    </div>
+                )}
+            </div>
             
             {error && (
                 <div className="mt-4 p-3 bg-red-900/50 border border-red-700 rounded-lg flex items-center gap-2 text-red-200 shrink-0">

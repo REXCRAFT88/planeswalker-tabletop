@@ -79,6 +79,7 @@ function App() {
       {currentView === View.DECK_BUILDER && (
         <DeckBuilder 
             initialDeck={activeDeck}
+            initialTokens={lobbyTokens}
             onDeckReady={handleDeckReady} 
             onBack={() => setCurrentView(View.LOBBY)} 
         />
