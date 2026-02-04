@@ -42,6 +42,15 @@ export const Lobby: React.FC<LobbyProps> = ({
       }
   }, [playerName, savedDeckCount]);
 
+  const getUserId = () => {
+      let id = localStorage.getItem('planeswalker_user_id');
+      if (!id) {
+          id = crypto.randomUUID();
+          localStorage.setItem('planeswalker_user_id', id);
+      }
+      return id;
+  };
+
   const joinRoom = (code: string) => {
     if (savedDeckCount === 0) {
         alert("Please import a deck first!");
@@ -54,7 +63,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     
     setIsJoining(true);
     const socket = connectSocket();
-    socket.emit('join_room', { room: code, name: playerName, color: playerSleeve });
+    socket.emit('join_room', { room: code, name: playerName, color: playerSleeve, userId: getUserId() });
     
     socket.on('join_error', ({ message }) => {
         alert(message);
@@ -199,8 +208,10 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-6 animate-in fade-in duration-700 relative">
-      <div className="text-center mb-10">
+    <div className="w-full h-full overflow-y-auto relative">
+      <div className="min-h-full flex flex-col items-center justify-center p-4 animate-in fade-in duration-700">
+        <div className="w-full max-w-md">
+      <div className="text-center mb-8">
         <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3">
           <Shield size={40} className="text-white" />
         </div>
@@ -367,6 +378,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                )}
            </div>
         </div>
+      </div>
+      </div>
       </div>
 
       {/* Token Modal - Centered and in front */}

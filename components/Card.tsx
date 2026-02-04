@@ -13,12 +13,14 @@ interface CardProps {
   object: BoardObject;
   sleeveColor: string;
   players?: PlayerProfile[];
+  isControlledByMe: boolean;
   onUpdate: (id: string, updates: Partial<BoardObject>) => void;
   onBringToFront: (id: string) => void;
   onRelease: (id: string, x: number, y: number) => void;
   onInspect: (card: CardData) => void; 
   onReturnToHand: (id: string) => void;
   onUnstack: (id: string) => void;
+  onRemoveOne: (id: string) => void;
   onLog: (msg: string) => void;
   scale?: number;
   viewScale?: number;
@@ -26,7 +28,7 @@ interface CardProps {
   initialDragEvent?: React.PointerEvent | null; 
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onLog, scale = 1, viewScale = 1, viewRotation = 0, initialDragEvent }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, initialDragEvent }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ startX: number, startY: number, initialObjX: number, initialObjY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -47,7 +49,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.interactive-ui')) {
+    if (!isControlledByMe || (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.interactive-ui')) {
         return;
     }
 
@@ -111,6 +113,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   }
 
   const toggleTap = (e: React.MouseEvent | null) => {
+    if (!isControlledByMe) return;
     if (e) e.stopPropagation();
     
     if (object.quantity > 1) {
@@ -127,6 +130,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   };
 
   const adjustStackTap = (delta: number) => {
+      if (!isControlledByMe) return;
       const newTapped = Math.min(Math.max(0, object.tappedQuantity + delta), object.quantity);
       if (newTapped !== object.tappedQuantity) {
           onUpdate(object.id, { tappedQuantity: newTapped });
@@ -136,16 +140,19 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   }
 
   const toggleFaceDown = (e: React.MouseEvent) => {
+    if (!isControlledByMe) return;
     e.stopPropagation();
     onUpdate(object.id, { isFaceDown: !object.isFaceDown });
   };
 
   const toggleTransform = (e: React.MouseEvent) => {
+    if (!isControlledByMe) return;
     e.stopPropagation();
     onUpdate(object.id, { isTransformed: !object.isTransformed });
   };
   
   const updateCounter = (e: React.MouseEvent, delta: number) => {
+      if (!isControlledByMe) return;
       e.preventDefault(); // Stop double click
       e.stopPropagation();
       const current = object.counters["+1/+1"] || 0;
@@ -154,6 +161,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
+      if (!isControlledByMe) return;
       e.preventDefault(); 
       e.stopPropagation();
   };
@@ -179,7 +187,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
             ref={cardRef}
             className={`absolute touch-none select-none rounded-full flex items-center justify-center font-bold text-white shadow-lg cursor-grab active:cursor-grabbing group ${isDragging ? 'z-[9999] scale-110' : ''}`}
             style={{
-                left: object.x,
+                left: object.x, 
                 top: object.y,
                 width: 25 * scale,
                 height: 25 * scale,
@@ -193,6 +201,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onContextMenu={(e) => { 
+                if (!isControlledByMe) return;
                 e.preventDefault(); 
                 e.stopPropagation(); 
                 onReturnToHand(object.id); // Triggers removal logic in Tabletop
@@ -201,7 +210,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
           >
              <span className="text-xs drop-shadow-md z-10 pointer-events-none select-none">{object.quantity}</span>
 
-             {/* Controls (visible on hover) */}
+             {/* Controls (visible on hover) - Only if controlled */}
+             {isControlledByMe && (
              <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-gray-900/80 rounded-full p-0.5 border border-gray-600">
                  <button 
                     className="w-4 h-4 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-red-500 border border-gray-600 transition-colors"
@@ -218,6 +228,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
                      <Plus size={8} />
                  </button>
              </div>
+             )}
 
              <div className="pointer-events-none">
                  {/* Visual Shine */}
@@ -230,7 +241,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
   return (
       <div
         ref={cardRef}
-        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} cursor-grab active:cursor-grabbing`}
+        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
         style={{
           left: object.x,
           top: object.y,
@@ -285,7 +296,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
                 
                 {/* Stack Controls */}
-                {isStack ? (
+                {isStack && isControlledByMe ? (
                     <div className="flex flex-col gap-1 items-center interactive-ui mb-1">
                          <div className="flex items-center gap-1">
                              <span className="text-[10px] text-gray-300 font-bold uppercase">Tap</span>
@@ -295,30 +306,48 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
                                 <button onClick={(e) => { e.stopPropagation(); adjustStackTap(-1); }} className="text-gray-300 hover:text-white"><RefreshCcw size={14} /></button>
                              </div>
                          </div>
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); onUnstack(object.id); }}
-                            className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-[10px] font-bold"
-                         >
-                             <Copy size={10} /> Unstack
-                         </button>
+                         <div className="flex gap-1">
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); onRemoveOne(object.id); }}
+                                className="flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-[10px] font-bold"
+                                title="Split 1"
+                             >
+                                 <Minus size={10} /> 1
+                             </button>
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); onUnstack(object.id); }}
+                                className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-[10px] font-bold"
+                                title="Unstack All"
+                             >
+                                 <Copy size={10} /> All
+                             </button>
+                         </div>
                     </div>
-                ) : (
+                ) : isControlledByMe ? (
                     <div className="flex gap-1 interactive-ui">
                         <button onClick={toggleTap} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-600" title="Tap/Untap">
                             <RotateCw size={12} />
                         </button>
                     </div>
-                )}
+                ) : null}
 
                 <div className="flex gap-1 interactive-ui">
-                    <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
-                        <Reply size={12} />
-                    </button>
-                    <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
-                        <EyeOff size={12} />
-                    </button>
+                    {isControlledByMe && (
+                        <>
+                            <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
+                                <Reply size={12} />
+                            </button>
+                            <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
+                                <EyeOff size={12} />
+                            </button>
+                        </>
+                    )}
                     <button 
-                        onClick={(e) => { e.stopPropagation(); onInspect(object.cardData); }} 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            if (!isControlledByMe) onLog(`inspected ${object.cardData.name}`);
+                            onInspect(object.cardData); 
+                        }} 
                         className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-green-600" 
                         title="Inspect"
                     >
@@ -326,18 +355,20 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], o
                     </button>
                 </div>
 
-                {object.cardData.backImageUrl && (
+                {object.cardData.backImageUrl && isControlledByMe && (
                     <button onClick={toggleTransform} className="p-1 px-3 bg-gray-800 text-white rounded-full hover:bg-amber-600 flex items-center gap-1 text-[10px] interactive-ui" title="Transform">
                         <RefreshCcw size={10} /> Transform
                     </button>
                 )}
                 
                 {/* Counter Controls */}
+                {isControlledByMe && (
                 <div className="flex items-center gap-2 mt-1 interactive-ui pointer-events-auto" onDoubleClick={(e) => e.stopPropagation()}>
                     <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, -1)} className="text-red-400 hover:text-red-200 p-1"><MinusCircle size={20}/></button>
                     <span className="text-white text-xs font-bold select-none">+1/+1</span>
                     <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, 1)} className="text-green-400 hover:text-green-200 p-1"><PlusCircle size={20}/></button>
                 </div>
+                )}
              </div>
           </div>
           

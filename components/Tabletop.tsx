@@ -31,6 +31,7 @@ interface SearchState {
     source: 'LIBRARY' | 'GRAVEYARD' | 'EXILE' | 'TOKENS';
     items: { card: CardData; isRevealed: boolean }[];
     tray: CardData[];
+    isReadOnly?: boolean;
     tokenQuery?: string;
 }
 
@@ -319,7 +320,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
     const [hand, setHand] = useState<CardData[]>([]);
-    const [tokens, setTokens] = useState<CardData[]>(initialTokens); 
     const [library, setLibrary] = useState<CardData[]>([]);
     const [graveyard, setGraveyard] = useState<CardData[]>([]);
     const [exile, setExile] = useState<CardData[]>([]);
@@ -333,6 +333,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [opponentsCounts, setOpponentsCounts] = useState<Record<string, { library: number, graveyard: number, exile: number, hand: number, command: number }>>({});
     const [opponentsCommanders, setOpponentsCommanders] = useState<Record<string, CardData[]>>({});
 
+    const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
     // UI State
@@ -392,10 +393,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Save session on mount
         localStorage.setItem('active_game_session', roomId);
         
+        const getUserId = () => {
+            let id = localStorage.getItem('planeswalker_user_id');
+            if (!id) {
+                id = crypto.randomUUID();
+                localStorage.setItem('planeswalker_user_id', id);
+            }
+            return id;
+        };
+
         // Handle socket reconnection
         const handleReconnection = () => {
             console.log("Socket reconnected, re-joining room...");
-            socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor });
+            socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId: getUserId() });
         };
 
         socket.on('connect', handleReconnection);
@@ -457,7 +467,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             type
         };
         setLogs(prev => [entry, ...prev]);
-        setStatusMessage(`${overrideName || playerName} ${message.toLowerCase()}`);
+        const displayMsg = type === 'SYSTEM' ? message : `${overrideName || playerName} ${message.toLowerCase()}`;
+        setStatusMessage(displayMsg);
         setTimeout(() => setStatusMessage(""), 3000);
         
         if (!overrideName) {
@@ -485,7 +496,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              if (gamePhaseRef.current === 'SETUP' && 
                  ['ADD_OBJECT', 'UPDATE_LIFE', 'PASS_TURN', 'UPDATE_COUNTS', 'UPDATE_COMMANDER_DAMAGE'].includes(action)) {
                  setGamePhase('PLAYING');
-                 addLog("reconnected to game in progress");
+                 addLog("Reconnected to game in progress", 'SYSTEM');
              }
 
              if (action === 'START_GAME') {
@@ -500,11 +511,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      setTurn(data.turnNumber);
                      const prevDuration = data.prevDuration;
                      if (prevDuration && sender) {
-                         addLog(`ended their turn (Duration: ${prevDuration})`, 'SYSTEM', sender.name);
+                         addLog(`${sender.name} ended their turn (Duration: ${prevDuration})`, 'SYSTEM');
                      }
                      const nextPlayer = currentPlayers.find(p => p.id === data.nextPlayerSocketId);
                      if (nextPlayer) {
-                         addLog(`Turn passed to ${nextPlayer.name}`, 'SYSTEM');
+                         addLog(`It is now ${nextPlayer.name}'s turn`, 'SYSTEM');
                      }
                      setTurnStartTime(Date.now());
                  }
@@ -520,6 +531,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      if (data.commanders) {
                          setOpponentsCommanders(prev => ({ ...prev, [sender.id]: data.commanders }));
                      }
+                 }
+             }
+             else if (action === 'REQUEST_VIEW') {
+                 if (data.targetPlayerId === socket.id) {
+                     const requester = currentPlayers.find(p => p.id === data.requesterId);
+                     setIncomingViewRequest({ 
+                         requesterId: data.requesterId, 
+                         requesterName: requester ? requester.name : 'Unknown', 
+                         zone: data.zone 
+                     });
+                 }
+             }
+             else if (action === 'ALLOW_VIEW') {
+                 if (data.requesterId === socket.id) {
+                     const cards: CardData[] = data.cards;
+                     const items = cards.map(c => ({ card: c, isRevealed: true }));
+                     setSearchModal({ isOpen: true, source: data.zone, items, tray: [], isReadOnly: true });
                  }
              }
              else if (action === 'UPDATE_COMMANDER_DAMAGE') {
@@ -569,7 +597,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         
         setLibrary(shuffled);
         setCommandZone(commanders);
-        setHand([]);
+        setHand(initialTokens);
         setGraveyard([]);
         setExile([]);
 
@@ -635,11 +663,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          const shouldUseMulligans = options?.mulligansAllowed ?? true;
          setMulligansAllowed(shouldUseMulligans);
          
-         const lib = libraryRef.current;
+         const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
          if (lib.length >= 7) {
              const initialHand = lib.slice(0, 7);
              const remaining = lib.slice(7);
-             setHand(initialHand);
+             setHand([...initialHand, ...initialTokens]);
              setLibrary(remaining);
          }
          
@@ -655,8 +683,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const startGame = () => {
         if (!isHost) return;
-        emitAction('START_GAME', { mulligansAllowed });
+        const startingPlayer = playersList[Math.floor(Math.random() * playersList.length)];
+        emitAction('START_GAME', { mulligansAllowed, firstPlayerId: startingPlayer.id });
         handleStartGameLogic({ mulligansAllowed });
+        setCurrentTurnPlayerId(startingPlayer.id);
     };
 
     const handleMulliganChoice = (keep: boolean) => {
@@ -674,10 +704,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 addLog(`kept hand with ${mulliganCount} mulligans`);
             }
         } else {
-            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
+            const currentTokens = hand.filter(c => c.isToken);
+            const cardsToShuffle = [...hand.filter(c => !c.isToken), ...library].sort(() => Math.random() - 0.5);
             const newHand = cardsToShuffle.slice(0, 7);
             const newLib = cardsToShuffle.slice(7);
-            setHand(newHand);
+            setHand([...newHand, ...currentTokens]);
             setLibrary(newLib);
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
@@ -750,6 +781,29 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('UPDATE_OBJECT', { id, updates: { quantity: 1, tappedQuantity: 0 } });
         newObjects.forEach(newObj => emitAction('ADD_OBJECT', newObj));
         addLog(`unstacked ${obj.cardData.name}`);
+    };
+
+    const removeCardFromStack = (id: string) => {
+        const obj = boardObjects.find(o => o.id === id);
+        if (!obj || obj.quantity <= 1) return;
+        
+        const newQuantity = obj.quantity - 1;
+        const newTapped = Math.min(obj.tappedQuantity, newQuantity);
+        updateBoardObject(id, { quantity: newQuantity, tappedQuantity: newTapped });
+        
+        const newObject: BoardObject = {
+            ...obj, 
+            id: crypto.randomUUID(), 
+            quantity: 1, 
+            tappedQuantity: 0,
+            x: obj.x + 20, 
+            y: obj.y + 20, 
+            z: maxZ + 1
+        };
+        setMaxZ(prev => prev + 1);
+        setBoardObjects(prev => [...prev, newObject]);
+        emitAction('ADD_OBJECT', newObject);
+        addLog(`split 1 ${obj.cardData.name} from stack`);
     };
 
     const updateBoardObject = (id: string, updates: Partial<BoardObject>) => {
@@ -1074,6 +1128,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const mySeatIdx = getSeatMapping(mySeatIndex, playersList.length);
                 updateBoardObject(id, { controllerId: socket.id, rotation: SEAT_ROTATIONS[mySeatIdx] });
                 addLog(`regained control of ${obj.cardData.name}`);
+                return;
+            }
+
+            // Stacking Logic
+            const collision = boardObjects.find(target => 
+                target.id !== id && 
+                target.type === 'CARD' &&
+                target.controllerId === obj.controllerId &&
+                target.cardData.name === obj.cardData.name &&
+                x < target.x + CARD_WIDTH && x + CARD_WIDTH > target.x &&
+                y < target.y + CARD_HEIGHT && y + CARD_HEIGHT > target.y
+            );
+
+            if (collision) {
+                const newQuantity = collision.quantity + obj.quantity;
+                const newTapped = collision.tappedQuantity + obj.tappedQuantity;
+                updateBoardObject(collision.id, { quantity: newQuantity, tappedQuantity: newTapped });
+                setBoardObjects(prev => prev.filter(o => o.id !== id));
+                emitAction('REMOVE_OBJECT', { id });
+                addLog(`stacked ${obj.cardData.name}`);
+                return;
             }
         }
     };
@@ -1102,6 +1177,35 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             isSpacePressed.current = false;
             setView(v => ({...v})); // Force re-render for cursor update
         }
+    };
+
+    const requestViewZone = (zone: string, targetPlayerId: string) => {
+        const target = playersList.find(p => p.id === targetPlayerId);
+        if (target) {
+            emitAction('REQUEST_VIEW', { zone, targetPlayerId, requesterId: socket.id });
+            addLog(`requested to view ${target.name}'s ${zone.toLowerCase()}`);
+        }
+    };
+
+    const resolveViewRequest = (accepted: boolean) => {
+        if (!incomingViewRequest) return;
+        
+        if (accepted) {
+            let cards: CardData[] = [];
+            if (incomingViewRequest.zone === 'LIBRARY') cards = library;
+            else if (incomingViewRequest.zone === 'GRAVEYARD') cards = graveyard;
+            else if (incomingViewRequest.zone === 'EXILE') cards = exile;
+
+            emitAction('ALLOW_VIEW', { 
+                requesterId: incomingViewRequest.requesterId, 
+                zone: incomingViewRequest.zone,
+                cards: cards
+            });
+            addLog(`allowed ${incomingViewRequest.requesterName} to view ${incomingViewRequest.zone.toLowerCase()}`);
+        } else {
+            addLog(`denied request from ${incomingViewRequest.requesterName}`);
+        }
+        setIncomingViewRequest(null);
     };
 
     // --- Search / Tray / Library Action Helpers ---
@@ -1314,9 +1418,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 commanders={isMe ? commandZone : (opponentsCommanders[p.id] || [])}
-                                onDraw={isMe ? () => drawCard(1) : () => {}}
+                                onDraw={isMe ? () => drawCard(1) : () => requestViewZone('LIBRARY', p.id)}
                                 onShuffle={isMe ? shuffleLibrary : () => {}}
-                                onOpenSearch={isMe ? openSearch : () => {}}
+                                onOpenSearch={isMe ? openSearch : (source) => requestViewZone(source, p.id)}
                                 onPlayCommander={isMe ? playCommander : () => {}}
                                 onPlayTopLibrary={isMe ? playTopLibrary : () => {}}
                                 onPlayTopGraveyard={isMe ? playTopGraveyard : () => {}}
@@ -1342,6 +1446,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <Card 
                             object={obj} 
                             sleeveColor={sleeveColor}
+                            isControlledByMe={obj.controllerId === socket.id}
                             players={playersList} 
                             onUpdate={updateBoardObject} 
                             onBringToFront={(id) => { setMaxZ(p => p+1); updateBoardObject(id, {z: maxZ+1}); }}
@@ -1349,6 +1454,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             onInspect={(card) => setInspectCard(card)}
                             onReturnToHand={returnToHand}
                             onUnstack={unstackCards}
+                            onRemoveOne={removeCardFromStack}
                             onLog={addLog}
                             viewScale={viewState.scale}
                             viewRotation={rotation}
@@ -1573,40 +1679,42 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             {/* --- UI: Top Bar --- */}
             <div className="flex-none h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-6 z-50 backdrop-blur-md relative">
                  <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-2">
-                        <div 
-                            className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg border-2 border-white/20 shadow-lg"
-                            style={{ backgroundColor: sleeveColor }}
-                        >
-                            {playerName.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                            <div className="font-bold text-sm text-gray-200">{playerName}</div>
-                            <div className="flex gap-2 text-xs">
-                                <span className="text-gray-400">Life: {life}</span>
-                                <div className="flex gap-1 items-center ml-2 border-l border-gray-700 pl-2">
-                                     {playersList.filter(p => p.id !== socket.id).map(p => {
-                                         const dmg = (commanderDamage[`cmd-${p.id}`] || {})[socket.id] || 0;
-                                         if (dmg === 0) return null;
-                                         return (
-                                             <div key={p.id} className="flex items-center gap-0.5" title={`Damage from ${p.name}'s Commander`}>
-                                                 <div className="w-2 h-2 rounded-full" style={{backgroundColor: p.color}}></div>
-                                                 <span className={`font-bold ${dmg >= 21 ? 'text-red-500' : 'text-white'}`}>{dmg}</span>
-                                             </div>
-                                         )
-                                     })}
+                    {/* Players List */}
+                    <div className="flex items-center gap-4">
+                        {playersList.map(p => {
+                            const isMe = p.id === socket.id;
+                            const pLife = isMe ? life : (opponentsLife[p.id] ?? 40);
+                            const cmdDmg = (commanderDamage[`cmd-${p.id}`] || {})[socket.id] || 0;
+                            const isTurn = currentTurnPlayerId === p.id;
+
+                            return (
+                                <div key={p.id} className={`flex items-center gap-2 bg-gray-800/50 rounded-full pr-3 pl-1 py-1 border ${isTurn ? 'border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : 'border-gray-700'}`}>
+                                    <div 
+                                        className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border border-white/20 shadow-lg shrink-0"
+                                        style={{ backgroundColor: p.color }}
+                                    >
+                                        {p.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="flex flex-col leading-none">
+                                        <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
+                                        <div className="flex items-center gap-2 text-[10px]">
+                                            <span className="text-white font-mono">{pLife} HP</span>
+                                            {cmdDmg > 0 && (
+                                                <span className={`font-bold ${cmdDmg >= 21 ? 'text-red-500' : 'text-red-300'}`} title="Commander Damage taken">
+                                                    -{cmdDmg}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
+                            );
+                        })}
                     </div>
                     
-                    <div className="flex items-center gap-3 bg-gray-800 rounded-lg p-1 px-3 border border-gray-600 shadow-inner">
-                        <button onClick={() => {setLife(l => l - 1); addLog("lost 1 life");}} className="text-red-400 hover:text-red-300 font-bold text-xl px-2 active:scale-90 transition">-</button>
-                        <div className="flex flex-col items-center min-w-[30px]">
-                            <span className="text-xl font-bold text-white">{life}</span>
-                            <span className="text-[9px] uppercase text-gray-400 tracking-wider">Life</span>
-                        </div>
-                        <button onClick={() => {setLife(l => l + 1); addLog("gained 1 life");}} className="text-green-400 hover:text-green-300 font-bold text-xl px-2 active:scale-90 transition">+</button>
+                    {/* Life Controls (Local) */}
+                    <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1 border border-gray-600 shadow-inner">
+                        <button onClick={() => {setLife(l => l - 1); addLog("lost 1 life");}} className="text-red-400 hover:text-red-300 font-bold text-lg px-2 active:scale-90 transition">-</button>
+                        <button onClick={() => {setLife(l => l + 1); addLog("gained 1 life");}} className="text-green-400 hover:text-green-300 font-bold text-lg px-2 active:scale-90 transition">+</button>
                     </div>
                     
                     <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-2">
@@ -1620,7 +1728,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                          <button 
                             onClick={nextTurn} 
                             disabled={currentTurnPlayerId !== socket.id}
-                            className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600 disabled:hover:bg-transparent" 
+                            className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed" 
                             title="Pass Turn"
                          >
                              <ChevronRight size={16} />
@@ -1650,6 +1758,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  </div>
 
                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-end mr-2">
+                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Room Code</span>
+                        <span className="text-sm font-mono font-bold text-gray-300 select-all">{roomId}</span>
+                    </div>
+
                     <button 
                         onClick={() => setIsOpponentViewOpen(!isOpponentViewOpen)}
                         className={`p-2 rounded-lg transition-colors ${isOpponentViewOpen ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
@@ -1758,7 +1871,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         </div>
                                     )}
                                 </div>
-                                {hand.length === 0 && tokens.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
+                                {hand.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
                             </div>
                         </div>
                         
@@ -1777,30 +1890,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
 
                         <div className="absolute bottom-60 right-6 z-40 flex flex-col items-end gap-2">
-                            {tokens.length > 0 && (
-                                <div className="flex flex-col items-end pointer-events-auto">
-                                    <div className="text-yellow-500 text-xs font-bold uppercase mb-2 mr-2 bg-black/50 px-2 rounded">Tokens</div>
-                                    <div className="flex gap-2">
-                                        {tokens.map((card, idx) => (
-                                            <div 
-                                                key={card.id}
-                                                className="relative w-24 h-32 hover:scale-125 hover:z-50 cursor-pointer shadow-lg rounded-lg border border-yellow-500 bg-gray-800 origin-bottom-right transition-transform"
-                                                onClick={() => setInspectCard(card)}
-                                            >
-                                                <img src={card.imageUrl} className="w-full h-full object-cover rounded-lg" alt={card.name} />
-                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 bg-black/60 rounded-lg">
-                                                    <button 
-                                                        onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
-                                                        className="bg-yellow-600 text-black font-bold text-xs px-2 py-1 rounded"
-                                                    >
-                                                        Create
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                             <button 
                                 onClick={() => openSearch('TOKENS')}
                                 className="flex items-center gap-2 bg-yellow-600/20 border border-yellow-600/50 hover:bg-yellow-600/40 text-yellow-200 px-4 py-2 rounded-full backdrop-blur transition shadow-lg pointer-events-auto"
@@ -1935,6 +2024,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
+            {/* View Request Modal */}
+            {incomingViewRequest && (
+                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full text-center">
+                        <h3 className="text-xl font-bold text-white mb-2">View Request</h3>
+                        <p className="text-gray-300 mb-6"><span className="font-bold text-blue-400">{incomingViewRequest.requesterName}</span> wants to look through your <span className="font-bold text-yellow-400">{incomingViewRequest.zone}</span>.</p>
+                        <div className="flex gap-4 justify-center">
+                            <button onClick={() => resolveViewRequest(false)} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold">Deny</button>
+                            <button onClick={() => resolveViewRequest(true)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Allow</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {libraryAction.isOpen && (
                 <div className="fixed inset-0 z-[10000] bg-black/50 backdrop-blur-sm flex items-center justify-center">
                     <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-sm w-full">
@@ -2046,7 +2149,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
                     </div>
 
-                    {searchModal.source !== 'TOKENS' && (
+                    {searchModal.source !== 'TOKENS' && !searchModal.isReadOnly && (
                         <div className="absolute bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 p-4 h-80 flex flex-col shadow-2xl z-20">
                             <div className="flex justify-between items-center mb-2">
                                 <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide flex items-center gap-2">
