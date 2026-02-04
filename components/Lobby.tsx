@@ -42,6 +42,24 @@ export const Lobby: React.FC<LobbyProps> = ({
       }
   }, [playerName, savedDeckCount]);
 
+  // Load tokens from local storage on mount
+  useEffect(() => {
+      const savedTokens = localStorage.getItem('planeswalker_tokens');
+      if (savedTokens) {
+          try {
+              const parsed = JSON.parse(savedTokens);
+              if (Array.isArray(parsed) && parsed.length > 0 && currentTokens.length === 0) {
+                  onTokensChange(parsed);
+              }
+          } catch (e) { console.error("Failed to load tokens", e); }
+      }
+  }, []);
+
+  // Save tokens to local storage when they change
+  useEffect(() => {
+      localStorage.setItem('planeswalker_tokens', JSON.stringify(currentTokens));
+  }, [currentTokens]);
+
   const getUserId = () => {
       let id = localStorage.getItem('planeswalker_user_id');
       if (!id) {
@@ -63,12 +81,20 @@ export const Lobby: React.FC<LobbyProps> = ({
     
     setIsJoining(true);
     const socket = connectSocket();
+    
+    socket.off('join_error');
+    socket.off('join_pending');
+
     socket.emit('join_room', { room: code, name: playerName, color: playerSleeve, userId: getUserId() });
     
     socket.on('join_error', ({ message }) => {
         alert(message);
         setIsJoining(false);
         socket.disconnect();
+    });
+
+    socket.on('join_pending', ({ message }) => {
+        alert(message);
     });
 
     // Give a small delay for connection or wait for ack (ack not implemented yet, so just timeout)

@@ -71,7 +71,7 @@ const getSeatMapping = (playerIndex: number, totalPlayers: number) => {
     if (totalPlayers === 2) {
         return playerIndex === 0 ? 0 : 2;
     }
-    return playerIndex;
+    return playerIndex % 4;
 };
 
 // Zone Offsets (Relative to Mat Top-Left)
@@ -334,6 +334,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [opponentsCommanders, setOpponentsCommanders] = useState<Record<string, CardData[]>>({});
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
+    const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
     // UI State
@@ -378,6 +379,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const playersListRef = useRef(playersList);
     const turnStartTimeRef = useRef(turnStartTime);
     const gamePhaseRef = useRef(gamePhase);
+    const prevIsHost = useRef(isHost);
+    const startingGameRef = useRef(false);
     
     useEffect(() => { libraryRef.current = library; }, [library]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
@@ -387,6 +390,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         rootRef.current?.focus();
     }, []);
+
+    useEffect(() => {
+        if (!prevIsHost.current && isHost) {
+            addLog("You are now the Host", "SYSTEM");
+        }
+        prevIsHost.current = isHost;
+    }, [isHost]);
 
     // --- Session Persistence & Reconnect ---
     useEffect(() => {
@@ -480,12 +490,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         const handleRoomUpdate = (roomPlayers: any[]) => {
             console.log("Room Update Received:", roomPlayers);
-            setPlayersList(roomPlayers);
             const myIndex = roomPlayers.findIndex(p => p.id === socket.id);
+
+            if (myIndex >= 4) {
+                alert("The room is full (Max 4 players).");
+                localStorage.removeItem('active_game_session');
+                onExit();
+                return;
+            }
+
+            setPlayersList(roomPlayers);
             if (myIndex !== -1) {
                 setMySeatIndex(myIndex);
                 setIsHost(myIndex === 0);
             }
+        };
+
+        const handleHostApprovalRequest = (data: any) => {
+            setIncomingJoinRequest(data);
         };
 
         const handleAction = ({ action, data, playerId }: { action: string, data: any, playerId: string }) => {
@@ -493,17 +515,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              const currentPlayers = playersListRef.current;
              const sender = currentPlayers.find(p => p.id === playerId);
 
-             if (gamePhaseRef.current === 'SETUP' && 
+             if (gamePhaseRef.current === 'SETUP' && !startingGameRef.current &&
                  ['ADD_OBJECT', 'UPDATE_LIFE', 'PASS_TURN', 'UPDATE_COUNTS', 'UPDATE_COMMANDER_DAMAGE'].includes(action)) {
                  setGamePhase('PLAYING');
                  addLog("Reconnected to game in progress", 'SYSTEM');
              }
 
              if (action === 'START_GAME') {
+                 startingGameRef.current = true;
                  handleStartGameLogic(data);
                  if (data.firstPlayerId) {
                      setCurrentTurnPlayerId(data.firstPlayerId);
                  }
+             }
+             else if (action === 'UPDATE_SETTINGS') {
+                 if (data.mulligansAllowed !== undefined) setMulligansAllowed(data.mulligansAllowed);
+                 if (data.freeMulligan !== undefined) setFreeMulligan(data.freeMulligan);
              }
              else if (action === 'PASS_TURN') {
                  if (data.nextPlayerSocketId) {
@@ -580,12 +607,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         socket.on('room_players_update', handleRoomUpdate);
         socket.on('game_action', handleAction);
+        socket.on('host_approval_request', handleHostApprovalRequest);
         
         socket.emit('get_players', { room: roomId });
 
         return () => {
             socket.off('room_players_update', handleRoomUpdate);
             socket.off('game_action', handleAction);
+            socket.off('host_approval_request', handleHostApprovalRequest);
         };
     }, []);
 
@@ -667,7 +696,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (lib.length >= 7) {
              const initialHand = lib.slice(0, 7);
              const remaining = lib.slice(7);
-             setHand([...initialHand, ...initialTokens]);
+             if (shouldUseMulligans) {
+                 setHand(initialHand);
+             } else {
+                 setHand([...initialHand, ...initialTokens]);
+             }
              setLibrary(remaining);
          }
          
@@ -704,11 +737,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 addLog(`kept hand with ${mulliganCount} mulligans`);
             }
         } else {
-            const currentTokens = hand.filter(c => c.isToken);
-            const cardsToShuffle = [...hand.filter(c => !c.isToken), ...library].sort(() => Math.random() - 0.5);
+            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
             const newHand = cardsToShuffle.slice(0, 7);
             const newLib = cardsToShuffle.slice(7);
-            setHand([...newHand, ...currentTokens]);
+            setHand(newHand);
             setLibrary(newLib);
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
@@ -737,6 +769,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMulliganSelectionMode(false);
     };
     
+    const updateMulliganSetting = (val: boolean) => {
+        if (!isHost) return;
+        setMulligansAllowed(val);
+        emitAction('UPDATE_SETTINGS', { mulligansAllowed: val });
+    };
+    
+    const updateFreeMulliganSetting = (val: boolean) => {
+        if (!isHost) return;
+        setFreeMulligan(val);
+        emitAction('UPDATE_SETTINGS', { freeMulligan: val });
+    };
+
     const nextTurn = () => {
         if (playersList.length <= 1) return;
         const myIndex = playersList.findIndex(p => p.id === socket.id);
@@ -1208,6 +1252,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setIncomingViewRequest(null);
     };
 
+    const resolveJoinRequest = (approved: boolean) => {
+        if (!incomingJoinRequest) return;
+        socket.emit('resolve_join_request', { 
+            room: roomId, 
+            applicantId: incomingJoinRequest.applicantId, 
+            approved 
+        });
+        setIncomingJoinRequest(null);
+    };
+
     // --- Search / Tray / Library Action Helpers ---
     const openSearch = (source: any) => {
         let items: any[] = [];
@@ -1481,8 +1535,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             
             {/* --- Lobby / Waiting Room Overlay --- */}
             {gamePhase === 'SETUP' && (
-                <div className="absolute inset-0 z-[100] bg-gray-900/95 backdrop-blur-md flex items-center justify-center animate-in fade-in">
-                    <div className="max-w-2xl w-full bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
+                <div className="absolute inset-0 z-[100] bg-gray-900/95 backdrop-blur-md flex items-center justify-center animate-in fade-in p-4">
+                    <div className="max-w-2xl w-full bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8 max-h-full overflow-y-auto">
                         <div className="text-center mb-8">
                             <h2 className="text-3xl font-extrabold text-white mb-2">Waiting for Players</h2>
                             <p className="text-gray-400">Share the room code below to invite friends.</p>
@@ -1527,7 +1581,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div className={`w-5 h-5 rounded border flex items-center justify-center ${mulligansAllowed ? 'bg-blue-600 border-blue-500' : 'border-gray-500'}`}>
                                         {mulligansAllowed && <CheckCircle size={14} className="text-white"/>}
                                     </div>
-                                    <input type="checkbox" className="hidden" checked={mulligansAllowed} onChange={() => setMulligansAllowed(!mulligansAllowed)} disabled={!isHost} />
+                                        <input type="checkbox" className="hidden" checked={mulligansAllowed} onChange={() => updateMulliganSetting(!mulligansAllowed)} disabled={!isHost} />
                                     <div>
                                         <div className="font-bold text-white text-sm">Enable Mulligans</div>
                                     </div>
@@ -1537,7 +1591,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div className={`w-5 h-5 rounded border flex items-center justify-center ${freeMulligan ? 'bg-green-600 border-green-500' : 'border-gray-500'}`}>
                                         {freeMulligan && <CheckCircle size={14} className="text-white"/>}
                                     </div>
-                                    <input type="checkbox" className="hidden" checked={freeMulligan} onChange={() => setFreeMulligan(!freeMulligan)} disabled={!isHost || !mulligansAllowed} />
+                                    <input type="checkbox" className="hidden" checked={freeMulligan} onChange={() => updateFreeMulliganSetting(!freeMulligan)} disabled={!isHost || !mulligansAllowed} />
                                     <div>
                                         <div className="font-bold text-white text-sm">Free 1st Mulligan</div>
                                     </div>
@@ -1546,18 +1600,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             {!isHost && <p className="text-xs text-gray-500 mt-2 text-center italic">Only the host can change these settings.</p>}
                         </div>
 
-                        {isHost ? (
+                        <div className="flex gap-4 flex-col sm:flex-row">
                             <button 
-                                onClick={startGame}
-                                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3"
+                                onClick={handleExit}
+                                className="flex-1 bg-red-900/50 hover:bg-red-900/80 border border-red-800 text-red-200 font-bold py-4 rounded-xl text-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                             >
-                                <Play size={24} fill="currentColor" /> Start Game
+                                <LogOut size={20} /> Leave
                             </button>
-                        ) : (
-                            <div className="w-full bg-gray-700/50 text-gray-400 font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 border border-gray-600 border-dashed">
-                                <Loader className="animate-spin" /> Waiting for Host to Start...
-                            </div>
-                        )}
+
+                            {isHost ? (
+                                <button 
+                                    onClick={startGame}
+                                    className="flex-[2] bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3"
+                                >
+                                    <Play size={24} fill="currentColor" /> Start Game
+                                </button>
+                            ) : (
+                                <div className="flex-[2] bg-gray-700/50 text-gray-400 font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 border border-gray-600 border-dashed">
+                                    <Loader className="animate-spin" /> Waiting for Host...
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
@@ -2033,6 +2096,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <div className="flex gap-4 justify-center">
                             <button onClick={() => resolveViewRequest(false)} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold">Deny</button>
                             <button onClick={() => resolveViewRequest(true)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Allow</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Join Request Modal */}
+            {incomingJoinRequest && (
+                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full text-center">
+                        <h3 className="text-xl font-bold text-white mb-2">Player Joining</h3>
+                        <p className="text-gray-300 mb-6">
+                            <span className="font-bold text-blue-400">{incomingJoinRequest.name}</span> wants to join the game.
+                            <br/><span className="text-xs text-gray-500">Color: {incomingJoinRequest.color}</span>
+                        </p>
+                        <div className="flex gap-4 justify-center">
+                            <button onClick={() => resolveJoinRequest(false)} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold">Deny</button>
+                            <button onClick={() => resolveJoinRequest(true)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Allow</button>
                         </div>
                     </div>
                 </div>
