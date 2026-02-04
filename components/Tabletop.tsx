@@ -163,7 +163,8 @@ const Playmat: React.FC<{
       style={{
         left: x, top: y, width, height,
         borderColor: sleeveColor,
-        boxShadow: `0 0 15px ${sleeveColor}20` 
+        boxShadow: `0 0 15px ${sleeveColor}20`,
+        transform: `rotate(${rotation}deg)`
       }}
     >
       <div className="absolute bottom-4 left-6 text-white/30 font-bold text-xl uppercase tracking-widest pointer-events-none">
@@ -297,15 +298,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [elapsedTime, setElapsedTime] = useState(0);
     const [round, setRound] = useState(1);
     const [turn, setTurn] = useState(1);
-    const [activePlayerIndex, setActivePlayerIndex] = useState(0);
+    const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string>('');
+    const [activePlayerIndex, setActivePlayerIndex] = useState(0); // Deprecated, keep for safely removing refs if needed, or remove if safe. Let's remove it.
 
-    const [playersList, setPlayersList] = useState<{id: string, name: string, color: string, socketId?: string}[]>([
-        { id: 'local-player', name: playerName, color: sleeveColor }
+    const [playersList, setPlayersList] = useState<{id: string, name: string, color: string, socketId: string}[]>([
+        { id: 'local-player', name: playerName, color: sleeveColor, socketId: socket.id || 'local' }
     ]);
 
     const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
     const [hand, setHand] = useState<CardData[]>([]);
-    const [tokens, setTokens] = useState<CardData[]>(initialTokens); 
     const [library, setLibrary] = useState<CardData[]>([]);
     const [graveyard, setGraveyard] = useState<CardData[]>([]);
     const [exile, setExile] = useState<CardData[]>([]);
@@ -314,6 +315,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [commanderDamage, setCommanderDamage] = useState<Record<string, Record<string, number>>>({}); 
     const [opponentsLife, setOpponentsLife] = useState<Record<string, number>>({});
+    
+    // Opponent Counts State
+    const [opponentsCounts, setOpponentsCounts] = useState<Record<string, { library: number, graveyard: number, exile: number, hand: number, command: number }>>({});
+
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
     // UI State
@@ -356,12 +361,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     
     // State Refs for Socket Handlers
     const libraryRef = useRef(library);
-    const activePlayerIndexRef = useRef(activePlayerIndex);
     const playersListRef = useRef(playersList);
+    const turnStartTimeRef = useRef(turnStartTime);
     
     useEffect(() => { libraryRef.current = library; }, [library]);
-    useEffect(() => { activePlayerIndexRef.current = activePlayerIndex; }, [activePlayerIndex]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
+    useEffect(() => { turnStartTimeRef.current = turnStartTime; }, [turnStartTime]);
 
     // Emit life changes
     useEffect(() => {
@@ -369,6 +374,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             socket.emit('game_action', { room: roomId, action: 'UPDATE_LIFE', data: { life } });
         }
     }, [life, gamePhase, roomId]);
+
+    // Emit Count Changes
+    useEffect(() => {
+        if (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN') {
+             socket.emit('game_action', { 
+                 room: roomId, 
+                 action: 'UPDATE_COUNTS', 
+                 data: { 
+                     library: library.length, 
+                     graveyard: graveyard.length, 
+                     exile: exile.length, 
+                     hand: hand.filter(c => !c.isToken).length,
+                     command: commandZone.length
+                 } 
+             });
+        }
+    }, [library.length, graveyard.length, exile.length, hand.length, commandZone.length, gamePhase, roomId]);
 
     // --- Helper Logic ---
     const emitAction = (action: string, data: any) => {
@@ -415,6 +437,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             console.log(`Setting isHost to ${isNowHost} (Index: ${myIndex})`); // LOG
             setIsHost(isNowHost);
 
+            // If we are host and no current turn player, set it to us
+            if (isNowHost && !currentTurnPlayerId) {
+                // Wait for game start to actually set it, or set it here if game already running?
+                // Better to let START_GAME handle it.
+            }
+
             const count = roomPlayers.length;
             const getPlayerAt = (offset: number) => roomPlayers[(myIndex + offset) % count];
 
@@ -445,26 +473,61 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              if (action === 'START_GAME') {
                  console.log("START_GAME action triggering handleStartGameLogic"); // LOG
                  handleStartGameLogic(data);
+                 if (data.firstPlayerId) {
+                     setCurrentTurnPlayerId(data.firstPlayerId);
+                 }
              }
              else if (action === 'PASS_TURN') {
                  if (data.nextPlayerSocketId) {
-                     const nextIdx = currentPlayers.findIndex(p => p.socketId === data.nextPlayerSocketId);
-                     if (nextIdx !== -1) {
-                         setActivePlayerIndex(nextIdx);
-                         setTurn(data.turnNumber);
-                         setTurnStartTime(Date.now());
-                         addLog(`Turn passed to ${currentPlayers[nextIdx].name}`);
-                     }
-                 } else if (data.nextPlayerIndex !== undefined) {
-                     // Fallback for old events
-                     setActivePlayerIndex(data.nextPlayerIndex);
+                     setCurrentTurnPlayerId(data.nextPlayerSocketId);
                      setTurn(data.turnNumber);
+                     const prevDuration = data.prevDuration;
+                     if (prevDuration && sender) {
+                         addLog(`ended their turn (Duration: ${prevDuration})`, 'SYSTEM', sender.name);
+                     }
+                     const nextPlayer = currentPlayers.find(p => p.socketId === data.nextPlayerSocketId);
+                     if (nextPlayer) {
+                         addLog(`Turn passed to ${nextPlayer.name}`, 'SYSTEM');
+                     }
                      setTurnStartTime(Date.now());
                  }
              }
              else if (action === 'UPDATE_LIFE') {
                  if (sender && sender.id !== 'local-player') {
                      setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
+                 }
+             }
+             else if (action === 'UPDATE_COUNTS') {
+                 if (sender && sender.id !== 'local-player') {
+                     setOpponentsCounts(prev => ({ ...prev, [sender.id]: data }));
+                 }
+             }
+             else if (action === 'UPDATE_COMMANDER_DAMAGE') {
+                 // data: { commanderId: string, victimId: string, damage: number }
+                 // Since we are receiving this, we just update our state map.
+                 // The 'victimId' might be 'local-player' (us) or someone else.
+                 // We need to map socket IDs to our local IDs.
+                 
+                 const victim = currentPlayers.find(p => p.socketId === data.victimId);
+                 const victimLocalId = victim ? victim.id : data.victimId;
+                 
+                 // commanderId is likely 'cmd-SOCKETID'. We need to map it to 'cmd-LOCALID'.
+                 // But wait, the sender defines the commanderId.
+                 // If sender is 'opponent-top', they sent 'cmd-local-player' (their local id).
+                 // We need to reconstruct the commander ID based on who sent it.
+                 // Actually, let's simplify: The data should contain { ownerId: socketId, victimId: socketId, damage: number }
+                 
+                 if (data.ownerId && data.victimId) {
+                     const owner = currentPlayers.find(p => p.socketId === data.ownerId);
+                     const victimP = currentPlayers.find(p => p.socketId === data.victimId);
+                     
+                     if (owner && victimP) {
+                         const cmdId = `cmd-${owner.id}`;
+                         setCommanderDamage(prev => {
+                             const cmdrRecord = prev[cmdId] || {};
+                             return { ...prev, [cmdId]: { ...cmdrRecord, [victimP.id]: data.damage } };
+                         });
+                     }
                  }
              }
              else if (action === 'ADD_OBJECT') {
@@ -563,7 +626,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         
         setLibrary(shuffled);
         setCommandZone(commanders);
-        setHand([]);
+        
+        // Initialize hand with tokens
+        const startTokens = initialTokens.map(t => ({...t, isToken: true}));
+        setHand(startTokens);
         setGraveyard([]);
         setExile([]);
 
@@ -574,7 +640,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
             scale: startScale
         });
-    }, [initialDeck]);
+    }, [initialDeck, initialTokens]);
     
     // Auto-center opponent view
     useEffect(() => {
@@ -629,7 +695,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (lib.length >= 7) {
              const initialHand = lib.slice(0, 7);
              const remaining = lib.slice(7);
-             setHand(initialHand);
+             setHand(prev => {
+                 const tokens = prev.filter(c => c.isToken);
+                 return [...initialHand, ...tokens];
+             });
              setLibrary(remaining);
          }
          
@@ -665,10 +734,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         } else {
             // London Mulligan: Shuffle hand back, draw 7
-            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
-            const newHand = cardsToShuffle.slice(0, 7);
+            // Filter out tokens from hand before shuffling
+            const currentHand = hand;
+            const tokensInHand = currentHand.filter(c => c.isToken);
+            const cardsInHand = currentHand.filter(c => !c.isToken);
+
+            const cardsToShuffle = [...cardsInHand, ...library].sort(() => Math.random() - 0.5);
+            const newHandCards = cardsToShuffle.slice(0, 7);
             const newLib = cardsToShuffle.slice(7);
-            setHand(newHand);
+            setHand([...newHandCards, ...tokensInHand]);
             setLibrary(newLib);
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
@@ -702,14 +776,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
     
     const nextTurn = () => {
-        const nextIndex = (activePlayerIndex + 1) % playersList.length;
-        const nextPlayer = playersList[nextIndex];
-        const nextTurnNum = nextIndex === 0 ? turn + 1 : turn;
+        if (playersList.length <= 1) return;
+        
+        // Pass to the "left" player (index 1 in our rotated list)
+        const nextPlayer = playersList[1];
+        const nextTurnNum = turn + 1;
+        
+        const duration = formatTime(Date.now() - turnStartTime);
         
         emitAction('PASS_TURN', { 
-            nextPlayerIndex: nextIndex, // Keep for backward compat if needed, but ID is better
             nextPlayerSocketId: nextPlayer.socketId, 
-            turnNumber: nextTurnNum 
+            turnNumber: nextTurnNum,
+            prevDuration: duration
         });
     };
 
@@ -792,10 +870,31 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const updateCommanderDamage = (commanderId: string, victimId: string, delta: number) => {
+        // Find owner of commander and victim socket IDs
+        let ownerSocketId: string | undefined;
+        if (commanderId.startsWith('cmd-')) {
+             const internalId = commanderId.replace('cmd-', '');
+             const owner = playersList.find(p => p.id === internalId);
+             ownerSocketId = owner?.socketId;
+        }
+        
+        const victim = playersList.find(p => p.id === victimId);
+        const victimSocketId = victim?.socketId;
+        
         setCommanderDamage(prev => {
             const cmdrRecord = prev[commanderId] || {};
             const currentVal = cmdrRecord[victimId] || 0;
-            return { ...prev, [commanderId]: { ...cmdrRecord, [victimId]: Math.max(0, currentVal + delta) } };
+            const newVal = Math.max(0, currentVal + delta);
+            
+            if (ownerSocketId && victimSocketId) {
+                emitAction('UPDATE_COMMANDER_DAMAGE', {
+                    ownerId: ownerSocketId,
+                    victimId: victimSocketId,
+                    damage: newVal
+                });
+            }
+            
+            return { ...prev, [commanderId]: { ...cmdrRecord, [victimId]: newVal } };
         });
     };
 
@@ -1076,12 +1175,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleTrayAction = (action: any) => {
-        // Use functional state update or ensure we have fresh state.
-        // Since this is a complex multi-state update, we trust 'searchModal' from render scope.
-        // If 'searchModal' is stale, the tray is stale.
-        // We can't easily make this fully functional without a reducer.
-        // But reordering SHOULD have updated 'searchModal.tray'.
-        
         const trayCards = searchModal.tray;
         const trayIds = new Set(trayCards.map(c => c.id));
         if (trayCards.length === 0) return;
@@ -1093,12 +1186,30 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         else if (searchModal.source === 'GRAVEYARD') newGrave = rest;
         else if (searchModal.source === 'EXILE') newExile = rest;
 
-        if (action === 'HAND') newHand = [...newHand, ...trayCards];
-        else if (action === 'TOP') newLib = [...trayCards, ...newLib];
-        else if (action === 'BOTTOM') newLib = [...newLib, ...trayCards];
-        else if (action === 'GRAVEYARD') newGrave = [...trayCards, ...newGrave];
-        else if (action === 'EXILE') newExile = [...trayCards, ...newExile];
-        else if (action === 'SHUFFLE') newLib = [...newLib, ...trayCards].sort(() => Math.random() - 0.5);
+        if (action === 'HAND') { 
+            newHand = [...newHand, ...trayCards]; 
+            addLog(`added ${trayCards.length} cards from tray to hand`);
+        }
+        else if (action === 'TOP') { 
+            newLib = [...trayCards, ...newLib]; 
+            addLog(`put ${trayCards.length} cards from tray on top of library`);
+        }
+        else if (action === 'BOTTOM') { 
+            newLib = [...newLib, ...trayCards]; 
+            addLog(`put ${trayCards.length} cards from tray on bottom of library`);
+        }
+        else if (action === 'GRAVEYARD') { 
+            newGrave = [...trayCards, ...newGrave]; 
+            addLog(`put ${trayCards.length} cards from tray into graveyard`);
+        }
+        else if (action === 'EXILE') { 
+            newExile = [...trayCards, ...newExile]; 
+            addLog(`exiled ${trayCards.length} cards from tray`);
+        }
+        else if (action === 'SHUFFLE') { 
+            newLib = [...newLib, ...trayCards].sort(() => Math.random() - 0.5); 
+            addLog(`shuffled ${trayCards.length} cards from tray into library`);
+        }
 
         setLibrary(newLib); setGraveyard(newGrave); setExile(newExile); setHand(newHand);
         // Refresh view
@@ -1110,23 +1221,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const newItems = [...prev.items];
             if (newItems[index]) {
                 const wasRevealed = newItems[index].isRevealed;
-                // Log if revealing
                 if (!wasRevealed) {
-                     // We need to call addLog outside of the pure state updater if possible, 
-                     // or just accept side effect here (not ideal but works in this context)
-                     // However, addLog calls setState (setLogs), which is bad inside another setState.
-                     // So we must detect it outside.
+                     // Anonymized Log
+                     addLog(`revealed card at position ${index + 1} of ${searchModal.source.toLowerCase()}`);
                 }
                 newItems[index] = { ...newItems[index], isRevealed: !wasRevealed };
             }
             return { ...prev, items: newItems };
         });
-
-        // Trigger log if it WAS NOT revealed
-        const item = searchModal.items[index];
-        if (item && !item.isRevealed) {
-             addLog(`revealed ${item.card.name} at position ${index + 1} of ${searchModal.source.toLowerCase()}`);
-        }
     };
     const handleSearchAction = (id: string, action: 'HAND') => {
          const item = searchModal.items.find(i => i.card.id === id);
@@ -1265,53 +1367,96 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     onPlayTopLibrary={playTopLibrary}
                     onPlayTopGraveyard={playTopGraveyard}
                 />
-                <PlaymatGhost 
-                    x={TOP_MAT_POS.x} y={TOP_MAT_POS.y} width={MAT_W} height={MAT_H} 
-                    rotation={180} 
-                    playerName={playersList.find(p => p.id === 'opponent-top')?.name || 'Opponent 1'} 
-                />
-                <div 
-                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
-                    style={{ 
-                        left: TOP_MAT_POS.x + MAT_W/2, 
-                        top: TOP_MAT_POS.y + MAT_H + 20, 
-                        transform: 'translate(-50%, 0) rotate(180deg)' 
-                    }}
-                >
-                    {opponentsLife['opponent-top'] ?? 40} HP
-                </div>
+                
+                {/* Opponent Top */}
+                {(() => {
+                    const p = playersList.find(pl => pl.id === 'opponent-top');
+                    const counts = opponentsCounts['opponent-top'] || { library: 0, graveyard: 0, exile: 0, command: 0 };
+                    return p ? (
+                        <>
+                            <Playmat 
+                                x={TOP_MAT_POS.x} y={TOP_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                                playerName={p.name} rotation={180}
+                                zones={{library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET}}
+                                counts={counts}
+                                sleeveColor={p.color}
+                                isShuffling={false}
+                                commanders={[]} // We don't track opponent commanders in zone individually yet, just count
+                                onDraw={() => {}} onShuffle={() => {}} onOpenSearch={() => {}} onPlayCommander={() => {}} onPlayTopLibrary={() => {}} onPlayTopGraveyard={() => {}}
+                            />
+                            <div 
+                                className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded pointer-events-none"
+                                style={{ 
+                                    left: TOP_MAT_POS.x + MAT_W/2, 
+                                    top: TOP_MAT_POS.y + MAT_H + 20, 
+                                    transform: 'translate(-50%, 0) rotate(180deg)' 
+                                }}
+                            >
+                                {opponentsLife['opponent-top'] ?? 40} HP
+                            </div>
+                        </>
+                    ) : <PlaymatGhost x={TOP_MAT_POS.x} y={TOP_MAT_POS.y} width={MAT_W} height={MAT_H} rotation={180} playerName="Empty" />;
+                })()}
 
-                <PlaymatGhost 
-                    x={RIGHT_MAT_POS.x} y={RIGHT_MAT_POS.y} width={MAT_W} height={MAT_H} 
-                    rotation={-90} 
-                    playerName={playersList.find(p => p.id === 'opponent-right')?.name || 'Opponent 2'} 
-                />
-                <div 
-                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
-                    style={{ 
-                        left: RIGHT_MAT_POS.x - 20, 
-                        top: RIGHT_MAT_POS.y + MAT_H/2, 
-                        transform: 'translate(0, -50%) rotate(-90deg)' 
-                    }}
-                >
-                    {opponentsLife['opponent-right'] ?? 40} HP
-                </div>
+                {/* Opponent Right */}
+                {(() => {
+                    const p = playersList.find(pl => pl.id === 'opponent-right');
+                    const counts = opponentsCounts['opponent-right'] || { library: 0, graveyard: 0, exile: 0, command: 0 };
+                    return p ? (
+                        <>
+                            <Playmat 
+                                x={RIGHT_MAT_POS.x} y={RIGHT_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                                playerName={p.name} rotation={-90}
+                                zones={{library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET}}
+                                counts={counts}
+                                sleeveColor={p.color}
+                                isShuffling={false}
+                                commanders={[]}
+                                onDraw={() => {}} onShuffle={() => {}} onOpenSearch={() => {}} onPlayCommander={() => {}} onPlayTopLibrary={() => {}} onPlayTopGraveyard={() => {}}
+                            />
+                            <div 
+                                className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded pointer-events-none"
+                                style={{ 
+                                    left: RIGHT_MAT_POS.x - 20, 
+                                    top: RIGHT_MAT_POS.y + MAT_H/2, 
+                                    transform: 'translate(0, -50%) rotate(-90deg)' 
+                                }}
+                            >
+                                {opponentsLife['opponent-right'] ?? 40} HP
+                            </div>
+                        </>
+                    ) : null;
+                })()}
 
-                <PlaymatGhost 
-                    x={LEFT_MAT_POS.x} y={LEFT_MAT_POS.y} width={MAT_W} height={MAT_H} 
-                    rotation={90} 
-                    playerName={playersList.find(p => p.id === 'opponent-left')?.name || 'Opponent 3'} 
-                />
-                <div 
-                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
-                    style={{ 
-                        left: LEFT_MAT_POS.x + MAT_W + 20, 
-                        top: LEFT_MAT_POS.y + MAT_H/2, 
-                        transform: 'translate(0, -50%) rotate(90deg)' 
-                    }}
-                >
-                    {opponentsLife['opponent-left'] ?? 40} HP
-                </div>
+                {/* Opponent Left */}
+                {(() => {
+                    const p = playersList.find(pl => pl.id === 'opponent-left');
+                    const counts = opponentsCounts['opponent-left'] || { library: 0, graveyard: 0, exile: 0, command: 0 };
+                    return p ? (
+                        <>
+                            <Playmat 
+                                x={LEFT_MAT_POS.x} y={LEFT_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                                playerName={p.name} rotation={90}
+                                zones={{library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET}}
+                                counts={counts}
+                                sleeveColor={p.color}
+                                isShuffling={false}
+                                commanders={[]}
+                                onDraw={() => {}} onShuffle={() => {}} onOpenSearch={() => {}} onPlayCommander={() => {}} onPlayTopLibrary={() => {}} onPlayTopGraveyard={() => {}}
+                            />
+                            <div 
+                                className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded pointer-events-none"
+                                style={{ 
+                                    left: LEFT_MAT_POS.x + MAT_W + 20, 
+                                    top: LEFT_MAT_POS.y + MAT_H/2, 
+                                    transform: 'translate(0, -50%) rotate(90deg)' 
+                                }}
+                            >
+                                {opponentsLife['opponent-left'] ?? 40} HP
+                            </div>
+                        </>
+                    ) : null;
+                })()}
 
                 {boardObjects.map(obj => (
                     <div key={obj.id} className="pointer-events-auto"> 
@@ -1480,6 +1625,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                      <h3 className="text-gray-300 font-bold mb-4 uppercase text-xs tracking-wider">Hand</h3>
                                      <div className="flex flex-wrap gap-4">
                                          {hand.map((card) => {
+                                             if (card.isToken) return null; // Don't show tokens for bottoming
                                              const isSelected = cardsToBottom.find(c => c.id === card.id);
                                              if (isSelected) return null; // Don't show if moved
                                              return (
@@ -1583,9 +1729,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                              <span className="text-sm font-bold text-white">Turn {turn}</span>
                          </div>
                          <div className="px-2 text-sm text-blue-400 font-bold max-w-[100px] truncate">
-                             {playersList[activePlayerIndex].name}
+                             {playersList.find(p => p.socketId === currentTurnPlayerId)?.name || '...'}
                          </div>
-                         <button onClick={nextTurn} className="p-1 hover:bg-gray-700 rounded text-green-400" title="Pass Turn">
+                         <button 
+                            onClick={nextTurn} 
+                            disabled={currentTurnPlayerId !== (playersList.find(p => p.id === 'local-player')?.socketId)}
+                            className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600 disabled:hover:bg-transparent" 
+                            title="Pass Turn"
+                         >
                              <ChevronRight size={16} />
                          </button>
                     </div>
@@ -1721,7 +1872,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         </div>
                                     )}
                                 </div>
-                                {hand.length === 0 && tokens.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
+                                {hand.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
                             </div>
                         </div>
                         
@@ -1740,30 +1891,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
 
                         <div className="absolute bottom-60 right-6 z-40 flex flex-col items-end gap-2">
-                            {tokens.length > 0 && (
-                                <div className="flex flex-col items-end pointer-events-auto">
-                                    <div className="text-yellow-500 text-xs font-bold uppercase mb-2 mr-2 bg-black/50 px-2 rounded">Tokens</div>
-                                    <div className="flex gap-2">
-                                        {tokens.map((card, idx) => (
-                                            <div 
-                                                key={card.id}
-                                                className="relative w-24 h-32 hover:scale-125 hover:z-50 cursor-pointer shadow-lg rounded-lg border border-yellow-500 bg-gray-800 origin-bottom-right transition-transform"
-                                                onClick={() => setInspectCard(card)}
-                                            >
-                                                <img src={card.imageUrl} className="w-full h-full object-cover rounded-lg" alt={card.name} />
-                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 bg-black/60 rounded-lg">
-                                                    <button 
-                                                        onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
-                                                        className="bg-yellow-600 text-black font-bold text-xs px-2 py-1 rounded"
-                                                    >
-                                                        Create
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                             <button 
                                 onClick={() => openSearch('TOKENS')}
                                 className="flex items-center gap-2 bg-yellow-600/20 border border-yellow-600/50 hover:bg-yellow-600/40 text-yellow-200 px-4 py-2 rounded-full backdrop-blur transition shadow-lg pointer-events-auto"

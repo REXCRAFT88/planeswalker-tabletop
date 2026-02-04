@@ -1,0 +1,5 @@
+{
+  "name": "Planeswalker Tabletop",
+  "description": "A virtual tabletop for playing Magic: The Gathering Commander online. Features deck import, physics-based card interaction, and an AI-powered Rules Judge.",
+  "requestFramePermissions": []
+}
