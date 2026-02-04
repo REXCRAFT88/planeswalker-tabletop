@@ -581,17 +581,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (oppId === 'opponent-top') {
                 targetX = TOP_MAT_POS.x + MAT_W / 2; targetY = TOP_MAT_POS.y + MAT_H / 2; rotation = 180;
             } else if (oppId === 'opponent-right') {
-                targetX = RIGHT_MAT_POS.x + MAT_W / 2; targetY = RIGHT_MAT_POS.y + MAT_H / 2; rotation = -90;
+                targetX = RIGHT_MAT_POS.x + MAT_W / 2; targetY = RIGHT_MAT_POS.y + MAT_H / 2; rotation = 90; // Inverted to be upright
             } else if (oppId === 'opponent-left') {
-                targetX = LEFT_MAT_POS.x + MAT_W / 2; targetY = LEFT_MAT_POS.y + MAT_H / 2; rotation = 90;
+                targetX = LEFT_MAT_POS.x + MAT_W / 2; targetY = LEFT_MAT_POS.y + MAT_H / 2; rotation = -90; // Inverted to be upright
             }
 
             const paneW = window.innerWidth / 2;
             const paneH = window.innerHeight;
             const rad = rotation * Math.PI / 180;
+            // We need to inverse rotate the target point relative to 0,0 because the whole world rotates?
+            // Actually, simply: translate(view.x, view.y) scale(s) rotate(r).
+            // We want the resulting point on screen to be center (paneW/2, paneH/2).
+            // The transform origin is 0,0.
+            // ScreenPoint = (WorldPoint * RotationMatrix * Scale) + ViewOffset
+            // ViewOffset = ScreenPoint - (WorldPoint * RotationMatrix * Scale)
+            
             const rx = targetX * Math.cos(rad) - targetY * Math.sin(rad);
             const ry = targetX * Math.sin(rad) + targetY * Math.cos(rad);
-            const s = 0.6;
+            
+            const s = 1.1; // Zoomed in to fill
             const vx = (paneW / 2) - s * rx;
             const vy = (paneH / 2) - s * ry;
             
@@ -1800,8 +1808,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                  onWheel: handleOpponentWheel
                              }, 
                              opponentIds[selectedOpponentIndex] === 'opponent-top' ? 180 :
-                             opponentIds[selectedOpponentIndex] === 'opponent-right' ? -90 : 
-                             90 
+                             opponentIds[selectedOpponentIndex] === 'opponent-right' ? 90 : 
+                             -90 
                              , true)}
                         </div>
                     </div>
@@ -2016,10 +2024,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col justify-between p-1 transition-opacity">
                                                  <div className="flex justify-end">
                                                      <button onClick={() => removeFromTray(card.id)} className="bg-red-500 hover:bg-red-400 p-1 rounded-full text-white"><X size={10}/></button>
-                                                 </div>
-                                                 <div className="flex justify-between mt-auto">
-                                                     <button onClick={() => onTrayReorder(idx, 'LEFT')} disabled={idx===0} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 p-1 rounded text-white"><ChevronLeft size={12}/></button>
-                                                     <button onClick={() => onTrayReorder(idx, 'RIGHT')} disabled={idx===searchModal.tray.length-1} className="bg-gray-700 hover:bg-gray-600 disabled:opacity-30 p-1 rounded text-white"><ChevronRight size={12}/></button>
                                                  </div>
                                             </div>
                                             <div className="absolute -top-2 -left-2 bg-blue-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border border-gray-900 z-10">
