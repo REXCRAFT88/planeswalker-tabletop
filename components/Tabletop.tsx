@@ -307,6 +307,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
     const [hand, setHand] = useState<CardData[]>([]);
+    const [tokens, setTokens] = useState<CardData[]>(initialTokens); 
     const [library, setLibrary] = useState<CardData[]>([]);
     const [graveyard, setGraveyard] = useState<CardData[]>([]);
     const [exile, setExile] = useState<CardData[]>([]);
@@ -626,10 +627,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         
         setLibrary(shuffled);
         setCommandZone(commanders);
-        
-        // Initialize hand with tokens
-        const startTokens = initialTokens.map(t => ({...t, isToken: true}));
-        setHand(startTokens);
+        setHand([]);
         setGraveyard([]);
         setExile([]);
 
@@ -640,7 +638,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
             scale: startScale
         });
-    }, [initialDeck, initialTokens]);
+    }, [initialDeck]);
     
     // Auto-center opponent view
     useEffect(() => {
@@ -695,10 +693,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (lib.length >= 7) {
              const initialHand = lib.slice(0, 7);
              const remaining = lib.slice(7);
-             setHand(prev => {
-                 const tokens = prev.filter(c => c.isToken);
-                 return [...initialHand, ...tokens];
-             });
+             setHand(initialHand);
              setLibrary(remaining);
          }
          
@@ -734,15 +729,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         } else {
             // London Mulligan: Shuffle hand back, draw 7
-            // Filter out tokens from hand before shuffling
-            const currentHand = hand;
-            const tokensInHand = currentHand.filter(c => c.isToken);
-            const cardsInHand = currentHand.filter(c => !c.isToken);
-
-            const cardsToShuffle = [...cardsInHand, ...library].sort(() => Math.random() - 0.5);
-            const newHandCards = cardsToShuffle.slice(0, 7);
+            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
+            const newHand = cardsToShuffle.slice(0, 7);
             const newLib = cardsToShuffle.slice(7);
-            setHand([...newHandCards, ...tokensInHand]);
+            setHand(newHand);
             setLibrary(newLib);
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
@@ -1625,7 +1615,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                      <h3 className="text-gray-300 font-bold mb-4 uppercase text-xs tracking-wider">Hand</h3>
                                      <div className="flex flex-wrap gap-4">
                                          {hand.map((card) => {
-                                             if (card.isToken) return null; // Don't show tokens for bottoming
                                              const isSelected = cardsToBottom.find(c => c.id === card.id);
                                              if (isSelected) return null; // Don't show if moved
                                              return (
@@ -1872,7 +1861,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         </div>
                                     )}
                                 </div>
-                                {hand.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
+                                {hand.length === 0 && tokens.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
                             </div>
                         </div>
                         
@@ -1891,6 +1880,30 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
 
                         <div className="absolute bottom-60 right-6 z-40 flex flex-col items-end gap-2">
+                            {tokens.length > 0 && (
+                                <div className="flex flex-col items-end pointer-events-auto">
+                                    <div className="text-yellow-500 text-xs font-bold uppercase mb-2 mr-2 bg-black/50 px-2 rounded">Tokens</div>
+                                    <div className="flex gap-2">
+                                        {tokens.map((card, idx) => (
+                                            <div 
+                                                key={card.id}
+                                                className="relative w-24 h-32 hover:scale-125 hover:z-50 cursor-pointer shadow-lg rounded-lg border border-yellow-500 bg-gray-800 origin-bottom-right transition-transform"
+                                                onClick={() => setInspectCard(card)}
+                                            >
+                                                <img src={card.imageUrl} className="w-full h-full object-cover rounded-lg" alt={card.name} />
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 bg-black/60 rounded-lg">
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); playCardFromHand(card); }}
+                                                        className="bg-yellow-600 text-black font-bold text-xs px-2 py-1 rounded"
+                                                    >
+                                                        Create
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                             <button 
                                 onClick={() => openSearch('TOKENS')}
                                 className="flex items-center gap-2 bg-yellow-600/20 border border-yellow-600/50 hover:bg-yellow-600/40 text-yellow-200 px-4 py-2 rounded-full backdrop-blur transition shadow-lg pointer-events-auto"
