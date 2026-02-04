@@ -109,7 +109,7 @@ const PlaymatGhost: React.FC<{
 }> = ({ x, y, width, height, rotation, playerName }) => {
   return (
     <div
-      className="absolute border-2 border-dashed border-white/10 rounded-3xl flex items-center justify-center bg-white/5 pointer-events-none"
+      className="absolute border-2 border-dashed border-white/10 rounded-3xl flex flex-col items-center justify-center bg-white/5 pointer-events-none"
       style={{
         left: x,
         top: y,
@@ -118,6 +118,16 @@ const PlaymatGhost: React.FC<{
         transform: `rotate(${rotation}deg)`,
       }}
     >
+      <div className="absolute top-0 right-0 p-4 flex flex-col gap-2">
+          {/* Library Ghost */}
+          <div className="w-[100px] h-[140px] border border-white/10 rounded flex items-center justify-center text-xs text-white/20">Lib</div>
+          {/* Graveyard Ghost */}
+          <div className="w-[100px] h-[140px] border border-white/10 rounded flex items-center justify-center text-xs text-white/20">Grave</div>
+      </div>
+      <div className="absolute top-0 left-0 p-4 flex flex-col gap-2">
+          {/* Command Ghost */}
+          <div className="w-[100px] h-[140px] border border-white/10 rounded flex items-center justify-center text-xs text-white/20">Cmd</div>
+      </div>
       <div className="text-2xl font-bold text-white/20">{playerName}</div>
     </div>
   );
@@ -470,21 +480,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     if (senderId === 'opponent-top') {
                         x = -x; y = -y; rotation = (rotation + 180) % 360;
                     } else if (senderId === 'opponent-left') {
-                        // Corrected: Left Sender (-90 deg visually) -> We want on Left.
-                        // Maps (0, GAP) [Their Bottom] -> (-GAP, 0) [Our Left].
-                        // x = -y, y = x.
                         const tempX = x;
                         x = -y;
                         y = tempX;
-                        rotation = (rotation - 90) % 360;
+                        rotation = (rotation + 90) % 360;
                     } else if (senderId === 'opponent-right') {
-                        // Corrected: Right Sender (+90 deg visually) -> We want on Right.
-                        // Maps (0, GAP) [Their Bottom] -> (GAP, 0) [Our Right].
-                        // x = y, y = -x.
                         const tempX = x;
                         x = y;
                         y = -tempX;
-                        rotation = (rotation + 90) % 360;
+                        rotation = (rotation - 90) % 360;
                     }
 
                     const mappedObj = { ...data, x, y, rotation, controllerId: senderId };
@@ -513,7 +517,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                      updates.x = -ty;
                                      updates.y = tx;
                                  }
-                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation - 90) % 360;
+                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation + 90) % 360;
                              } else if (senderId === 'opponent-right') {
                                  if(updates.x !== undefined || updates.y !== undefined) {
                                      const rawX = updates.x !== undefined ? updates.x : 0;
@@ -521,7 +525,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                      updates.x = rawY;
                                      updates.y = -rawX;
                                  }
-                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation + 90) % 360;
+                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation - 90) % 360;
                              }
                          }
 
@@ -2035,6 +2039,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+            {isLogOpen && (
+                <div className="fixed top-16 right-0 bottom-0 w-80 bg-gray-900/95 backdrop-blur border-l border-gray-700 z-[8000] flex flex-col">
+                    <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+                        <h3 className="font-bold text-gray-200">Game Log</h3>
+                        <button onClick={() => setIsLogOpen(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                        {logs.map(log => (
+                            <div key={log.id} className="text-sm text-gray-300">
+                                <span className="font-bold text-blue-400">{log.playerName}</span> {log.message}
+                                <div className="text-[10px] text-gray-600">{new Date(log.timestamp).toLocaleTimeString()}</div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
         </div>
