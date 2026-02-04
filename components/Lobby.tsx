@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Users, Play, Plus, Palette, Edit3, Layers, Search, X, Loader2, ArrowRight } from 'lucide-react';
+import { Shield, Users, Play, Plus, Palette, Edit3, Layers, Search, X, Loader, ArrowRight } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -258,7 +258,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 disabled={isJoining}
                 className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait"
               >
-                {isJoining ? <Loader2 className="animate-spin"/> : <Play size={20} />}
+                {isJoining ? <Loader className="animate-spin"/> : <Play size={20} />}
                 {savedDeckCount > 0 ? 'Create New Table' : 'Import Deck to Play'}
               </button>
            </div>
@@ -338,7 +338,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         onKeyDown={(e) => e.key === 'Enter' && searchToken()}
                                     />
                                     <button onClick={searchToken} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-white font-bold flex items-center gap-2">
-                                        {isSearching ? <Loader2 className="animate-spin" size={16}/> : <Search size={16} />}
+                                        {isSearching ? <Loader className="animate-spin" size={16}/> : <Search size={16} />}
                                         Search
                                     </button>
                                 </div>
@@ -346,7 +346,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 <div className="flex-1 border-2 border-dashed border-gray-700 rounded-lg bg-gray-900/50 p-4 overflow-y-auto">
                                     {isSearching ? (
                                         <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                                            <Loader2 className="animate-spin" size={32}/>
+                                            <Loader className="animate-spin" size={32}/>
                                             <span>Searching Scryfall...</span>
                                         </div>
                                     ) : searchResults.length > 0 ? (
@@ -401,7 +401,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     disabled={isImporting || !importText}
                                     className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2"
                                 >
-                                    {isImporting ? <Loader2 className="animate-spin" size={16}/> : <Plus size={16} />}
+                                    {isImporting ? <Loader className="animate-spin" size={16}/> : <Plus size={16} />}
                                     Import Tokens
                                 </button>
                           </div>

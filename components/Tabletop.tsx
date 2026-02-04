@@ -8,7 +8,7 @@ import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { 
     LogOut, MessageSquare, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, 
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader2
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -1336,7 +1336,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </button>
                         ) : (
                             <div className="w-full bg-gray-700/50 text-gray-400 font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 border border-gray-600 border-dashed">
-                                <Loader2 className="animate-spin" /> Waiting for Host to Start...
+                                <Loader className="animate-spin" /> Waiting for Host to Start...
                             </div>
                         )}
                     </div>
