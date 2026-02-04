@@ -45,13 +45,13 @@ interface LibraryActionState {
 // --- Layout Constants ---
 const MAT_W = 840; // Wider to fit more cards
 const MAT_H = 400;
-const GAP = 100; // Closer together
+const RADIUS = 1100;
 
 // World Coordinates (Absolute)
-const LOCAL_MAT_POS = { x: -MAT_W / 2, y: GAP }; // Seat 0 (Bottom)
-const TOP_MAT_POS = { x: -MAT_W / 2, y: -MAT_H - GAP }; // Seat 2 (Top)
-const LEFT_MAT_POS = { x: -MAT_W / 2 - MAT_H - GAP, y: -MAT_H / 2 }; // Seat 1 (Left)
-const RIGHT_MAT_POS = { x: MAT_W / 2 + GAP, y: -MAT_H / 2 }; // Seat 3 (Right)
+const LOCAL_MAT_POS = { x: -MAT_W / 2, y: RADIUS - MAT_H / 2 }; // Seat 0 (Bottom)
+const TOP_MAT_POS = { x: -MAT_W / 2, y: -RADIUS - MAT_H / 2 }; // Seat 2 (Top)
+const LEFT_MAT_POS = { x: -RADIUS - MAT_W / 2, y: -MAT_H / 2 }; // Seat 1 (Left)
+const RIGHT_MAT_POS = { x: RADIUS - MAT_W / 2, y: -MAT_H / 2 }; // Seat 3 (Right)
 
 const SEAT_POSITIONS = [
     LOCAL_MAT_POS, // 0: Bottom
@@ -817,6 +817,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const handleRestartGame = () => {
         emitAction('RESTART_GAME', {});
         setShowEndGameModal(false);
+        setGamePhase('SETUP');
+        setBoardObjects([]);
+        setHand(initialTokens);
+        setGraveyard([]);
+        setExile([]);
+        setLife(40);
+        setTurn(1);
+        setRound(1);
+        setGameStats({});
+        addLog("The host has restarted the game", "SYSTEM");
     };
 
     const handleMulliganChoice = (keep: boolean) => {
