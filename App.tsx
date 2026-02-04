@@ -37,6 +37,7 @@ function App() {
   const [activeDeck, setActiveDeck] = useState<CardData[]>(() => loadState('activeDeck', []));
   const [lobbyTokens, setLobbyTokens] = useState<CardData[]>(() => loadState('lobbyTokens', []));
   const [roomId, setRoomId] = useState<string>("");
+  const [isGameStarted, setIsGameStarted] = useState(false);
 
   // Persist state changes to Local Storage
   useEffect(() => {
@@ -55,8 +56,9 @@ function App() {
     setCurrentView(View.LOBBY);
   };
 
-  const handleJoinGame = (code?: string) => {
+  const handleJoinGame = (code?: string, isStarted?: boolean) => {
     if (code) setRoomId(code);
+    setIsGameStarted(!!isStarted);
     setCurrentView(View.GAME);
   };
 
@@ -92,6 +94,7 @@ function App() {
             playerName={playerName}
             sleeveColor={playerSleeve}
             roomId={roomId}
+            initialGameStarted={isGameStarted}
             onExit={() => setCurrentView(View.LOBBY)}
         />
       )}

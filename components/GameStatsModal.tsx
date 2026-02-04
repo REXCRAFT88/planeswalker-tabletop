@@ -1,6 +1,6 @@
 import React from 'react';
 import { PlayerStats } from '../types';
-import { X, Clock, Layers, BarChart3 } from 'lucide-react';
+import { X, Clock, BarChart3 } from 'lucide-react';
 
 interface GameStatsModalProps {
     isOpen: boolean;
@@ -55,7 +55,7 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                             const mostTapped = getMost(s.tappedCounts);
                             const mostDamaging = getMost(s.cardDamageCounts);
                             const mostBlocking = getMost(s.blockCounts);
-                            const totalDamageDealt = Object.values(s.damageDealt || {}).reduce((a,b)=>a+b,0);
+                            const totalDamageDealt = (Object.values(s.damageDealt || {}) as number[]).reduce((a, b) => a + b, 0);
 
                             return (
                                 <div key={p.id} className="bg-gray-700/50 rounded-xl border border-gray-600 overflow-hidden flex flex-col">

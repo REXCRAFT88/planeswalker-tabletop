@@ -18,6 +18,7 @@ interface TabletopProps {
     playerName: string;
     sleeveColor?: string;
     roomId: string;
+    initialGameStarted?: boolean;
     onExit: () => void;
 }
 
@@ -78,10 +79,12 @@ const getSeatMapping = (playerIndex: number, totalPlayers: number) => {
 // Zone Offsets (Relative to Mat Top-Left)
 const ZONE_OFFSET_X = MAT_W + 30; 
 const ZONE_LIBRARY_OFFSET = { x: ZONE_OFFSET_X, y: 0 };
+// Command Zone: Right of Library
+const ZONE_COMMAND_OFFSET = { x: ZONE_OFFSET_X + CARD_WIDTH + 20, y: 0 }; 
+// Graveyard: Below Library
 const ZONE_GRAVEYARD_OFFSET = { x: ZONE_OFFSET_X, y: CARD_HEIGHT + 20 };
-// Exile to the RIGHT of Graveyard (L-shape)
+// Exile: Below Command (Right of Graveyard)
 const ZONE_EXILE_OFFSET = { x: ZONE_OFFSET_X + CARD_WIDTH + 20, y: CARD_HEIGHT + 20 };
-const ZONE_COMMAND_OFFSET = { x: -150, y: 0 }; 
 
 // --- Hand Card Component ---
 const HandCard: React.FC<{
@@ -315,7 +318,7 @@ const emptyStats: PlayerStats = {
     cardsExiled: 0, cardsDrawn: 0
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -424,6 +427,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
         prevIsHost.current = isHost;
     }, [isHost]);
+
+    useEffect(() => {
+        if (initialGameStarted && gamePhase === 'SETUP') {
+             handleStartGameLogic({ mulligansAllowed: true });
+        }
+    }, [initialGameStarted]);
 
     // --- Game Phase Persistence ---
     useEffect(() => {
@@ -556,8 +565,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             if (myIndex >= 4) {
                 alert("The room is full (Max 4 players).");
-                localStorage.removeItem('active_game_session');
-                onExit();
+                handleExit();
                 return;
             }
 
@@ -570,6 +578,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         const handleHostApprovalRequest = (data: any) => {
             setIncomingJoinRequest(data);
+        };
+
+        const handlePlayerLeft = (id: string) => {
+            setBoardObjects(prev => prev.filter(o => o.controllerId !== id));
         };
 
         const handleAction = ({ action, data, playerId }: { action: string, data: any, playerId: string }) => {
@@ -1786,7 +1798,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <>
                              {/* Larger Card Grid for visibility */}
                              <div className="flex justify-center gap-6 mb-12 flex-wrap max-w-[90vw]">
-                                {hand.map((card, idx) => (
+                                {hand.filter(c => !c.isToken).map((card, idx) => (
                                      <div 
                                         key={idx} 
                                         className="w-48 aspect-[2.5/3.5] rounded-xl overflow-hidden shadow-2xl transform hover:-translate-y-4 transition-transform cursor-pointer group relative"
@@ -2043,7 +2055,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <>
                         <div className="absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none">
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
-                            <div className="relative w-full px-8 pb-4 flex items-end justify-center pointer-events-auto">
+                            <div className="relative w-full px-8 pb-8 flex items-end justify-center pointer-events-auto">
                                 <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-4 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50" style={{ maxWidth: '85vw' }}>
                                     {cardsInHand.map((card, idx) => (
                                         <HandCard 
@@ -2056,19 +2068,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         />
                                     ))}
                                     
-                                    {/* Tokens Pile */}
-                                    {tokensInHand.length > 0 && (
-                                        <div className="flex flex-col items-center">
+                                    {/* Tokens Pile / Add Button */}
+                                    <div className="flex flex-col items-center justify-end h-full pb-1">
                                             {!areTokensExpanded ? (
                                                 <div 
-                                                    className="w-24 h-32 bg-gray-800 border-2 border-yellow-500 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg"
-                                                    onClick={() => setAreTokensExpanded(true)}
+                                                    className={`w-24 h-32 bg-gray-800 border-2 ${tokensInHand.length > 0 ? 'border-yellow-500' : 'border-gray-600 border-dashed'} rounded-lg flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg`}
+                                                    onClick={() => tokensInHand.length > 0 ? setAreTokensExpanded(true) : openSearch('TOKENS')}
+                                                    title={tokensInHand.length > 0 ? "Expand Tokens" : "Add Tokens"}
                                                 >
-                                                    <Layers className="text-yellow-500 mb-2" size={24} />
-                                                    <span className="text-white font-bold text-xs">Tokens ({tokensInHand.length})</span>
+                                                    <Layers className={tokensInHand.length > 0 ? "text-yellow-500 mb-2" : "text-gray-500 mb-2"} size={24} />
+                                                    <span className={`font-bold text-xs ${tokensInHand.length > 0 ? "text-white" : "text-gray-500"}`}>{tokensInHand.length > 0 ? `Tokens (${tokensInHand.length})` : "Add Tokens"}</span>
                                                 </div>
                                             ) : (
-                                                <div className="flex gap-2 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                                                <div className="flex gap-2 animate-in slide-in-from-bottom-10 fade-in duration-300 items-end">
                                                     {tokensInHand.map((card) => (
                                                         <HandCard 
                                                             key={card.id} 
@@ -2079,17 +2091,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                             onSendToZone={sendToZone}
                                                         />
                                                     ))}
-                                                    <button 
-                                                        onClick={() => setAreTokensExpanded(false)}
-                                                        className="self-center bg-gray-800 p-2 rounded-full border border-gray-600 hover:bg-gray-700 text-gray-400"
-                                                        title="Collapse Tokens"
-                                                    >
-                                                        <X size={16}/>
-                                                    </button>
+                                                    <div className="flex flex-col gap-2 pb-10">
+                                                        <button 
+                                                            onClick={() => openSearch('TOKENS')}
+                                                            className="w-8 h-8 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg"
+                                                            title="Add Token"
+                                                        >
+                                                            <Plus size={16}/>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => setAreTokensExpanded(false)}
+                                                            className="w-8 h-8 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-full flex items-center justify-center shadow-lg border border-gray-600"
+                                                            title="Collapse"
+                                                        >
+                                                            <X size={16}/>
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             )}
-                                        </div>
-                                    )}
+                                    </div>
                                 </div>
                                 {hand.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
                             </div>
@@ -2107,15 +2127,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 className="h-24 w-1 bg-gray-600 rounded-lg appearance-none cursor-pointer vertical-range"
                                 style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                             />
-                        </div>
-
-                        <div className="absolute bottom-60 right-6 z-40 flex flex-col items-end gap-2">
-                            <button 
-                                onClick={() => openSearch('TOKENS')}
-                                className="flex items-center gap-2 bg-yellow-600/20 border border-yellow-600/50 hover:bg-yellow-600/40 text-yellow-200 px-4 py-2 rounded-full backdrop-blur transition shadow-lg pointer-events-auto"
-                            >
-                                <Layers size={18} /> Tokens
-                            </button>
                         </div>
                         </>
                     )}

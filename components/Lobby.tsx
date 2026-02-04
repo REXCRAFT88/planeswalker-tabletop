@@ -10,7 +10,7 @@ interface LobbyProps {
   setPlayerName: (name: string) => void;
   playerSleeve: string;
   setPlayerSleeve: (color: string) => void;
-  onJoin: (code?: string) => void;
+  onJoin: (code?: string, isStarted?: boolean) => void;
   onImportDeck: () => void;
   savedDeckCount: number;
   currentTokens: CardData[];
@@ -84,6 +84,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     
     socket.off('join_error');
     socket.off('join_pending');
+    socket.off('join_success');
 
     socket.emit('join_room', { room: code, name: playerName, color: playerSleeve, userId: getUserId() });
     
@@ -97,12 +98,10 @@ export const Lobby: React.FC<LobbyProps> = ({
         alert(message);
     });
 
-    // Give a small delay for connection or wait for ack (ack not implemented yet, so just timeout)
-    setTimeout(() => {
-        if (!socket.connected) return; // If error happened, don't proceed
+    socket.on('join_success', ({ room, isGameStarted }) => {
         setIsJoining(false);
-        onJoin(code);
-    }, 500);
+        onJoin(room, isGameStarted);
+    });
   };
 
   const handleCreateRoom = () => {
