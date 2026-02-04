@@ -46,9 +46,9 @@ const GAP = 300;
 
 // World Coordinates (Absolute)
 const LOCAL_MAT_POS = { x: -MAT_W / 2, y: GAP }; // Seat 0 (Bottom)
-const LEFT_MAT_POS = { x: -MAT_W / 2 - GAP - MAT_H, y: -MAT_H / 2 }; // Seat 1 (Left)
+const LEFT_MAT_POS = { x: -1200, y: -MAT_H / 2 }; // Seat 1 (Left)
 const TOP_MAT_POS = { x: -MAT_W / 2, y: -MAT_H - GAP }; // Seat 2 (Top)
-const RIGHT_MAT_POS = { x: MAT_W / 2 + GAP, y: -MAT_H / 2 }; // Seat 3 (Right)
+const RIGHT_MAT_POS = { x: 500, y: -MAT_H / 2 }; // Seat 3 (Right)
 
 const SEAT_POSITIONS = [
     LOCAL_MAT_POS, // 0: Bottom
@@ -79,7 +79,7 @@ const ZONE_LIBRARY_OFFSET = { x: ZONE_OFFSET_X, y: 0 };
 const ZONE_GRAVEYARD_OFFSET = { x: ZONE_OFFSET_X, y: CARD_HEIGHT + 20 };
 // Exile to the RIGHT of Graveyard (L-shape)
 const ZONE_EXILE_OFFSET = { x: ZONE_OFFSET_X + CARD_WIDTH + 20, y: CARD_HEIGHT + 20 };
-const ZONE_COMMAND_OFFSET = { x: -160, y: 0 }; 
+const ZONE_COMMAND_OFFSET = { x: -150, y: 0 }; 
 
 // --- Hand Card Component ---
 const HandCard: React.FC<{
@@ -331,6 +331,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     
     // Opponent Counts State
     const [opponentsCounts, setOpponentsCounts] = useState<Record<string, { library: number, graveyard: number, exile: number, hand: number, command: number }>>({});
+    const [opponentsCommanders, setOpponentsCommanders] = useState<Record<string, CardData[]>>({});
 
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
@@ -362,6 +363,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
     const isSpacePressed = useRef(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
     const opponentContainerRef = useRef<HTMLDivElement>(null);
     
     // View Control Refs
@@ -374,10 +376,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const libraryRef = useRef(library);
     const playersListRef = useRef(playersList);
     const turnStartTimeRef = useRef(turnStartTime);
+    const gamePhaseRef = useRef(gamePhase);
     
     useEffect(() => { libraryRef.current = library; }, [library]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
     useEffect(() => { turnStartTimeRef.current = turnStartTime; }, [turnStartTime]);
+    useEffect(() => { gamePhaseRef.current = gamePhase; }, [gamePhase]);
+
+    useEffect(() => {
+        rootRef.current?.focus();
+    }, []);
 
     // --- Session Persistence & Reconnect ---
     useEffect(() => {
@@ -420,11 +428,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      graveyard: graveyard.length, 
                      exile: exile.length, 
                      hand: hand.filter(c => !c.isToken).length,
-                     command: commandZone.length
+                     command: commandZone.length,
+                     commanders: commandZone
                  } 
              });
         }
-    }, [library.length, graveyard.length, exile.length, hand.length, commandZone.length, gamePhase, roomId]);
+    }, [library.length, graveyard.length, exile.length, hand.length, commandZone.length, commandZone, gamePhase, roomId]);
 
     // --- Helper Logic ---
     const emitAction = (action: string, data: any) => {
@@ -473,6 +482,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              const currentPlayers = playersListRef.current;
              const sender = currentPlayers.find(p => p.id === playerId);
 
+             if (gamePhaseRef.current === 'SETUP' && 
+                 ['ADD_OBJECT', 'UPDATE_LIFE', 'PASS_TURN', 'UPDATE_COUNTS', 'UPDATE_COMMANDER_DAMAGE'].includes(action)) {
+                 setGamePhase('PLAYING');
+                 addLog("reconnected to game in progress");
+             }
+
              if (action === 'START_GAME') {
                  handleStartGameLogic(data);
                  if (data.firstPlayerId) {
@@ -502,6 +517,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              else if (action === 'UPDATE_COUNTS') {
                  if (sender && sender.id !== socket.id) {
                      setOpponentsCounts(prev => ({ ...prev, [sender.id]: data }));
+                     if (data.commanders) {
+                         setOpponentsCommanders(prev => ({ ...prev, [sender.id]: data.commanders }));
+                     }
                  }
              }
              else if (action === 'UPDATE_COMMANDER_DAMAGE') {
@@ -1060,6 +1078,32 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+        switch (e.key.toLowerCase()) {
+            case ' ':
+                if (!isSpacePressed.current) {
+                    isSpacePressed.current = true;
+                    setView(v => ({...v})); // Force re-render for cursor update
+                }
+                break;
+            case 'd': drawCard(1); break;
+            case 'u': untapAll(); break;
+            case 's': shuffleLibrary(); break;
+            case 'l': setIsLogOpen(prev => !prev); break;
+            case 'j': setIsJudgeOpen(prev => !prev); break;
+            case '?': setShowShortcuts(prev => !prev); break;
+        }
+    };
+
+    const handleKeyUp = (e: React.KeyboardEvent) => {
+        if (e.key === ' ') {
+            isSpacePressed.current = false;
+            setView(v => ({...v})); // Force re-render for cursor update
+        }
+    };
+
     // --- Search / Tray / Library Action Helpers ---
     const openSearch = (source: any) => {
         let items: any[] = [];
@@ -1269,7 +1313,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 sleeveColor={p.color}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
-                                commanders={isMe ? commandZone : []}
+                                commanders={isMe ? commandZone : (opponentsCommanders[p.id] || [])}
                                 onDraw={isMe ? () => drawCard(1) : () => {}}
                                 onShuffle={isMe ? shuffleLibrary : () => {}}
                                 onOpenSearch={isMe ? openSearch : () => {}}
@@ -1321,7 +1365,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const mySeatPosIndex = getSeatMapping(mySeatIndex, playersList.length);
 
     return (
-        <div className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col">
+        <div 
+            ref={rootRef}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col outline-none"
+        >
             
             {/* --- Lobby / Waiting Room Overlay --- */}
             {gamePhase === 'SETUP' && (

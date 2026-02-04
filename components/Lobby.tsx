@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Users, Play, Plus, Palette, Edit3, Layers, Search, X, Loader, ArrowRight } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
@@ -31,14 +31,16 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [searchResults, setSearchResults] = useState<CardData[]>([]);
   const [roomCode, setRoomCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
+  const hasAutoAttempted = useRef(false);
 
   // Auto-join if session exists
   useEffect(() => {
       const activeSession = localStorage.getItem('active_game_session');
-      if (activeSession && playerName && savedDeckCount > 0) {
+      if (activeSession && playerName && savedDeckCount > 0 && !hasAutoAttempted.current) {
+          hasAutoAttempted.current = true;
           joinRoom(activeSession);
       }
-  }, []);
+  }, [playerName, savedDeckCount]);
 
   const joinRoom = (code: string) => {
     if (savedDeckCount === 0) {
