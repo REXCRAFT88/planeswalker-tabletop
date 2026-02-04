@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, Users, Play, Plus, Palette, Edit3, Layers, Search, X, Loader2, ArrowRight } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
-import { searchCards } from '../services/scryfall';
+import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
 import { connectSocket } from '../services/socket';
 
 interface LobbyProps {
@@ -26,6 +26,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
   const [tokenSearchTerm, setTokenSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
   const [searchResults, setSearchResults] = useState<CardData[]>([]);
   const [roomCode, setRoomCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
@@ -63,6 +65,71 @@ export const Lobby: React.FC<LobbyProps> = ({
           return;
       }
       joinRoom(roomCode);
+  };
+
+  const handleTokenImport = async () => {
+      if (!importText) return;
+      setIsImporting(true);
+      
+      try {
+          const parsed = parseDeckList(importText);
+          const names = parsed.map(p => p.name);
+          
+          if (names.length === 0) {
+              alert("No valid card names found.");
+              setIsImporting(false);
+              return;
+          }
+
+          // Fetch cards in batch
+          const cardMap = await fetchBatch(names);
+          
+          const newTokens: CardData[] = [];
+          
+          parsed.forEach(entry => {
+              const card = cardMap.get(entry.name.toLowerCase());
+              if (card) {
+                  // Add specific count
+                  for (let i = 0; i < entry.count; i++) {
+                       newTokens.push({ ...card, isToken: true, id: crypto.randomUUID() });
+                  }
+              }
+          });
+
+          if (newTokens.length > 0) {
+              onTokensChange([...currentTokens, ...newTokens]);
+              setImportText('');
+              setIsTokenModalOpen(false);
+          } else {
+              alert("Could not find any of the specified tokens.");
+          }
+      } catch (e) {
+          console.error("Token import failed", e);
+          alert("Failed to import tokens.");
+      } finally {
+          setIsImporting(false);
+      }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+          const file = files[0];
+          if (file.type === "text/plain" || file.name.endsWith('.txt')) {
+              const text = await file.text();
+              setImportText(text);
+          } else {
+              alert("Please drop a valid .txt file");
+          }
+      }
   };
 
   const searchToken = async () => {
@@ -259,46 +326,85 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </div>
                   
                   <div className="p-4 bg-gray-800 flex flex-col gap-4 flex-1 overflow-hidden">
-                      <div className="flex gap-2">
-                          <input 
-                            className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                            placeholder="e.g. Goblin, Treasure, Clue..."
-                            value={tokenSearchTerm}
-                            onChange={(e) => setTokenSearchTerm(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && searchToken()}
-                          />
-                          <button onClick={searchToken} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-white font-bold flex items-center gap-2">
-                             {isSearching ? <Loader2 className="animate-spin" size={16}/> : <Search size={16} />}
-                             Search
-                          </button>
-                      </div>
+                      <div className="flex gap-4 h-full">
+                          {/* Left: Search */}
+                          <div className="flex-1 flex flex-col gap-4">
+                                <div className="flex gap-2">
+                                    <input 
+                                        className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="e.g. Goblin, Treasure, Clue..."
+                                        value={tokenSearchTerm}
+                                        onChange={(e) => setTokenSearchTerm(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && searchToken()}
+                                    />
+                                    <button onClick={searchToken} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-white font-bold flex items-center gap-2">
+                                        {isSearching ? <Loader2 className="animate-spin" size={16}/> : <Search size={16} />}
+                                        Search
+                                    </button>
+                                </div>
 
-                      <div className="flex-1 border-2 border-dashed border-gray-700 rounded-lg bg-gray-900/50 p-4 overflow-y-auto">
-                          {isSearching ? (
-                              <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                                  <Loader2 className="animate-spin" size={32}/>
-                                  <span>Searching Scryfall...</span>
-                              </div>
-                          ) : searchResults.length > 0 ? (
-                              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                                  {searchResults.map((card) => (
-                                       <div key={card.scryfallId} className="flex flex-col items-center gap-2 bg-gray-800 p-3 rounded-xl hover:bg-gray-700 transition shadow-md hover:shadow-xl border border-transparent hover:border-gray-600">
-                                          <div className="relative w-full aspect-[2.5/3.5]">
-                                             <img src={card.imageUrl} className="w-full h-full object-cover rounded-lg shadow-black/50 shadow-lg" alt={card.name} loading="lazy" />
-                                          </div>
-                                          <button 
-                                            onClick={() => addToken(card)}
-                                            className="w-full bg-green-600 hover:bg-green-500 text-white text-sm py-2 rounded-lg font-bold shadow flex items-center justify-center gap-2 mt-2"
-                                          >
-                                              <Plus size={16}/> Add
-                                          </button>
-                                          <div className="text-xs text-gray-400 truncate w-full text-center font-medium">{card.typeLine}</div>
-                                      </div>
-                                  ))}
-                              </div>
-                          ) : (
-                              <div className="h-full flex items-center justify-center text-gray-500 text-sm">Search for a token to add it to your collection</div>
-                          )}
+                                <div className="flex-1 border-2 border-dashed border-gray-700 rounded-lg bg-gray-900/50 p-4 overflow-y-auto">
+                                    {isSearching ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
+                                            <Loader2 className="animate-spin" size={32}/>
+                                            <span>Searching Scryfall...</span>
+                                        </div>
+                                    ) : searchResults.length > 0 ? (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            {searchResults.map((card) => (
+                                                <div key={card.scryfallId} className="flex flex-col items-center gap-2 bg-gray-800 p-2 rounded-xl hover:bg-gray-700 transition shadow-md border border-transparent hover:border-gray-600">
+                                                    <div className="relative w-full aspect-[2.5/3.5]">
+                                                        <img src={card.imageUrl} className="w-full h-full object-cover rounded-lg shadow-black/50 shadow-lg" alt={card.name} loading="lazy" />
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => addToken(card)}
+                                                        className="w-full bg-green-600 hover:bg-green-500 text-white text-xs py-1.5 rounded-lg font-bold shadow flex items-center justify-center gap-2 mt-1"
+                                                    >
+                                                        <Plus size={14}/> Add
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="h-full flex items-center justify-center text-gray-500 text-sm">Search results will appear here</div>
+                                    )}
+                                </div>
+                          </div>
+
+                          {/* Right: Import/Paste */}
+                          <div className="w-1/3 flex flex-col gap-4 border-l border-gray-700 pl-4">
+                                <h4 className="font-bold text-gray-300 flex items-center gap-2">
+                                    <Edit3 size={16}/> Bulk Import
+                                </h4>
+                                <div 
+                                    className="flex-1 relative"
+                                    onDragOver={handleDragOver}
+                                    onDrop={handleDrop}
+                                >
+                                    <textarea 
+                                        className="w-full h-full bg-gray-900 border border-gray-600 rounded-lg p-3 text-xs font-mono text-gray-300 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                        placeholder={`Paste token list here...\n\nExample:\n1 Goblin\n2 Treasure\n1 Clue`}
+                                        value={importText}
+                                        onChange={(e) => setImportText(e.target.value)}
+                                    />
+                                    {/* Overlay for Drag Hint */}
+                                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                                        {importText.length === 0 && (
+                                            <div className="text-gray-600 text-xs text-center">
+                                                <span className="block mb-1 opacity-50">Drag & Drop .txt file here</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={handleTokenImport}
+                                    disabled={isImporting || !importText}
+                                    className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-2"
+                                >
+                                    {isImporting ? <Loader2 className="animate-spin" size={16}/> : <Plus size={16} />}
+                                    Import Tokens
+                                </button>
+                          </div>
                       </div>
                   </div>
               </div>

@@ -195,12 +195,20 @@ export const parseDeckList = (text: string): { count: number; name: string }[] =
     const trimmed = line.trim();
     if (!trimmed) continue;
     
-    // Match "1 Sol Ring" or just "Sol Ring"
-    const match = trimmed.match(/^(\d+x?|x\d+)?\s*(.+)$/);
+    // Match "1 Sol Ring" or "1x Sol Ring"
+    // Also strip set codes like "(SET) 123" or "[SET] #123" at the end
+    const match = trimmed.match(/^(\d+x?|x\d+)?\s*(.+?)(?:\s*[\(\[]\w+[\)\]]\s*\S+)?$/);
+    
     if (match) {
       const countStr = match[1] ? match[1].replace('x', '') : '1';
       const count = parseInt(countStr, 10) || 1;
-      const name = match[2];
+      let name = match[2].trim();
+      
+      // Additional cleanup for specific formats if regex didn't catch all
+      // Remove trailing set codes in parentheses if they are at the end
+      name = name.replace(/\s*\(.*?\)\s*\d+.*$/, '');
+      name = name.replace(/\s*\[.*?\]\s*#?\d+.*$/, '');
+
       cards.push({ count, name });
     }
   }

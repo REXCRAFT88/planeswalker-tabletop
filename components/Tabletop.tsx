@@ -8,7 +8,7 @@ import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { 
     LogOut, MessageSquare, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, 
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -327,6 +327,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [tokenSearchTerm, setTokenSearchTerm] = useState("token");
     const [libraryAction, setLibraryAction] = useState<LibraryActionState>({ isOpen: false, cardId: '' });
     const [showCmdrDamage, setShowCmdrDamage] = useState(false);
+    const [isHost, setIsHost] = useState(false);
 
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
@@ -382,9 +383,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // --- Socket Logic ---
     useEffect(() => {
         const handleRoomUpdate = (roomPlayers: any[]) => {
+            console.log("Room Update Received:", roomPlayers); // LOG
             const myId = socket.id;
             const myIndex = roomPlayers.findIndex(p => p.id === myId);
-            if (myIndex === -1) return;
+            if (myIndex === -1) {
+                console.warn("Local player not found in room update!"); // LOG
+                return;
+            }
+
+            const isNowHost = myIndex === 0;
+            console.log(`Setting isHost to ${isNowHost} (Index: ${myIndex})`); // LOG
+            setIsHost(isNowHost);
 
             const count = roomPlayers.length;
             const getPlayerAt = (offset: number) => roomPlayers[(myIndex + offset) % count];
@@ -408,21 +417,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         };
 
         const handleAction = ({ action, data, playerId }: { action: string, data: any, playerId: string }) => {
+             console.log(`Game Action Received: ${action} from ${playerId}`, data); // LOG
              const currentPlayers = playersListRef.current;
              const sender = currentPlayers.find(p => p.socketId === playerId);
              const senderId = sender ? sender.id : 'unknown';
 
              if (action === 'START_GAME') {
-                 setGamePhase('MULLIGAN');
-                 const lib = libraryRef.current;
-                 if (lib.length >= 7) {
-                     const initialHand = lib.slice(0, 7);
-                     const remaining = lib.slice(7);
-                     setHand(initialHand);
-                     setLibrary(remaining);
-                 }
-                 setTurnStartTime(Date.now());
-                 addLog("Game Started", "SYSTEM", "Host");
+                 console.log("START_GAME action triggering handleStartGameLogic"); // LOG
+                 handleStartGameLogic(data);
              }
              else if (action === 'PASS_TURN') {
                  if (data.nextPlayerIndex !== undefined) {
@@ -618,8 +620,84 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [turnStartTime, gamePhase]);
 
     // --- Game Flow Methods ---
+    const handleStartGameLogic = (options?: { mulligansAllowed: boolean }) => {
+         const shouldUseMulligans = options?.mulligansAllowed ?? true;
+         setMulligansAllowed(shouldUseMulligans);
+         
+         const lib = libraryRef.current;
+         if (lib.length >= 7) {
+             const initialHand = lib.slice(0, 7);
+             const remaining = lib.slice(7);
+             setHand(initialHand);
+             setLibrary(remaining);
+         }
+         
+         setTurnStartTime(Date.now());
+         addLog("Game Started", "SYSTEM", "Host");
+
+         if (shouldUseMulligans) {
+             setGamePhase('MULLIGAN');
+         } else {
+             setGamePhase('PLAYING');
+         }
+    };
+
     const startGame = () => {
-        emitAction('START_GAME', { mulligansAllowed: true });
+        if (!isHost) return;
+        emitAction('START_GAME', { mulligansAllowed });
+        handleStartGameLogic({ mulligansAllowed });
+    };
+
+    const handleMulliganChoice = (keep: boolean) => {
+        if (keep) {
+            let toBottomCount = mulliganCount;
+            if (freeMulligan && mulliganCount > 0) {
+                 toBottomCount = mulliganCount - 1;
+            }
+
+            if (toBottomCount > 0) {
+                setMulliganSelectionMode(true);
+                setCardsToBottom([]);
+            } else {
+                setGamePhase('PLAYING');
+                addLog(`kept hand with ${mulliganCount} mulligans`);
+            }
+        } else {
+            // London Mulligan: Shuffle hand back, draw 7
+            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
+            const newHand = cardsToShuffle.slice(0, 7);
+            const newLib = cardsToShuffle.slice(7);
+            setHand(newHand);
+            setLibrary(newLib);
+            setMulliganCount(prev => prev + 1);
+            addLog("took a mulligan");
+        }
+    };
+
+    const toggleBottomCard = (card: CardData) => {
+        const requiredCount = freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount;
+        
+        if (cardsToBottom.find(c => c.id === card.id)) {
+            setCardsToBottom(prev => prev.filter(c => c.id !== card.id));
+        } else {
+            if (cardsToBottom.length < requiredCount) {
+                setCardsToBottom(prev => [...prev, card]);
+            }
+        }
+    };
+
+    const confirmKeepHand = () => {
+        const requiredCount = freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount;
+        if (cardsToBottom.length !== requiredCount) return;
+        
+        const newHand = hand.filter(h => !cardsToBottom.find(b => b.id === h.id));
+        setHand(newHand);
+        
+        setLibrary(prev => [...prev, ...cardsToBottom]);
+        
+        setGamePhase('PLAYING');
+        addLog(`kept hand and put ${requiredCount} cards on bottom`);
+        setMulliganSelectionMode(false);
     };
     
     const nextTurn = () => {
@@ -1223,13 +1301,159 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </div>
                         </div>
 
-                        <button 
-                            onClick={startGame}
-                            className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3"
-                        >
-                            <Play size={24} fill="currentColor" /> Start Game
-                        </button>
+                        <div className="mb-8">
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4">Game Rules</h3>
+                            <div className="flex gap-4">
+                                <label className="flex-1 flex items-center gap-3 bg-gray-700/50 p-3 rounded-lg cursor-pointer border border-gray-600 hover:bg-gray-700 transition">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${mulligansAllowed ? 'bg-blue-600 border-blue-500' : 'border-gray-500'}`}>
+                                        {mulligansAllowed && <CheckCircle size={14} className="text-white"/>}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={mulligansAllowed} onChange={() => setMulligansAllowed(!mulligansAllowed)} disabled={!isHost} />
+                                    <div>
+                                        <div className="font-bold text-white text-sm">Enable Mulligans</div>
+                                    </div>
+                                </label>
+
+                                <label className={`flex-1 flex items-center gap-3 bg-gray-700/50 p-3 rounded-lg cursor-pointer border border-gray-600 hover:bg-gray-700 transition ${!mulligansAllowed ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${freeMulligan ? 'bg-green-600 border-green-500' : 'border-gray-500'}`}>
+                                        {freeMulligan && <CheckCircle size={14} className="text-white"/>}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={freeMulligan} onChange={() => setFreeMulligan(!freeMulligan)} disabled={!isHost || !mulligansAllowed} />
+                                    <div>
+                                        <div className="font-bold text-white text-sm">Free 1st Mulligan</div>
+                                    </div>
+                                </label>
+                            </div>
+                            {!isHost && <p className="text-xs text-gray-500 mt-2 text-center italic">Only the host can change these settings.</p>}
+                        </div>
+
+                        {isHost ? (
+                            <button 
+                                onClick={startGame}
+                                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3"
+                            >
+                                <Play size={24} fill="currentColor" /> Start Game
+                            </button>
+                        ) : (
+                            <div className="w-full bg-gray-700/50 text-gray-400 font-bold py-4 rounded-xl text-lg flex items-center justify-center gap-2 border border-gray-600 border-dashed">
+                                <Loader2 className="animate-spin" /> Waiting for Host to Start...
+                            </div>
+                        )}
                     </div>
+                </div>
+            )}
+
+            {/* --- MULLIGAN OVERLAY --- */}
+            {gamePhase === 'MULLIGAN' && (
+                <div className="fixed inset-0 z-[9000] bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-in fade-in overflow-y-auto">
+                     <h2 className="text-3xl font-bold text-white mb-2">
+                         {mulliganSelectionMode ? 'Select Cards to Bottom' : 'Opening Hand'}
+                     </h2>
+                     <p className="text-gray-400 mb-8 text-center max-w-lg">
+                        {mulliganSelectionMode 
+                          ? `Select ${freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount} cards to put on the bottom of your library.` 
+                          : `You have drawn 7 cards. ${mulliganCount > 0 ? `(Mulligan #${mulliganCount}${freeMulligan && mulliganCount === 1 ? ' - Free' : ''})` : ''}`
+                        }
+                     </p>
+                     
+                     {!mulliganSelectionMode ? (
+                        <>
+                             {/* Larger Card Grid for visibility */}
+                             <div className="flex justify-center gap-6 mb-12 flex-wrap max-w-[90vw]">
+                                {hand.map((card, idx) => (
+                                     <div 
+                                        key={idx} 
+                                        className="w-48 aspect-[2.5/3.5] rounded-xl overflow-hidden shadow-2xl transform hover:-translate-y-4 transition-transform cursor-pointer group relative"
+                                        onClick={() => setInspectCard(card)}
+                                     >
+                                         <img src={card.imageUrl} className="w-full h-full object-cover"/>
+                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center">
+                                              <span className="bg-black/80 px-2 py-1 rounded text-xs text-white">Click to Inspect</span>
+                                          </div>
+                                     </div>
+                                ))}
+                             </div>
+
+                             <div className="flex gap-6">
+                                 <button 
+                                    onClick={() => handleMulliganChoice(false)}
+                                    className="flex items-center gap-2 px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-full shadow-lg"
+                                 >
+                                     <RefreshCw size={20}/> Mulligan
+                                 </button>
+                                 <button 
+                                    onClick={() => handleMulliganChoice(true)}
+                                    className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-full shadow-lg"
+                                 >
+                                     <CheckCircle size={20}/> Keep Hand
+                                 </button>
+                             </div>
+                        </>
+                     ) : (
+                         <div className="flex flex-col items-center w-full max-w-6xl h-full">
+                             {/* Selection Area */}
+                             <div className="flex gap-8 w-full mb-8 min-h-[400px]">
+                                 
+                                 {/* Current Hand */}
+                                 <div className="flex-1 bg-gray-800/50 rounded-xl p-6 border border-gray-700 overflow-y-auto">
+                                     <h3 className="text-gray-300 font-bold mb-4 uppercase text-xs tracking-wider">Hand</h3>
+                                     <div className="flex flex-wrap gap-4">
+                                         {hand.map((card) => {
+                                             const isSelected = cardsToBottom.find(c => c.id === card.id);
+                                             if (isSelected) return null; // Don't show if moved
+                                             return (
+                                                 <div 
+                                                    key={card.id} 
+                                                    onClick={() => toggleBottomCard(card)}
+                                                    className="w-32 aspect-[2.5/3.5] rounded cursor-pointer hover:scale-105 transition-transform relative group"
+                                                 >
+                                                     <img src={card.imageUrl} className="w-full h-full object-cover rounded shadow-lg"/>
+                                                     <div className="absolute inset-0 bg-blue-500/20 opacity-0 group-hover:opacity-100 transition-opacity rounded flex items-center justify-center">
+                                                         <ArrowRight size={24} className="text-white drop-shadow-md"/>
+                                                     </div>
+                                                 </div>
+                                             )
+                                         })}
+                                     </div>
+                                 </div>
+
+                                 {/* To Bottom Area */}
+                                 <div className="w-80 bg-gray-800/50 rounded-xl p-6 border border-gray-700 flex flex-col">
+                                      <h3 className="text-gray-300 font-bold mb-4 uppercase text-xs tracking-wider flex justify-between">
+                                          <span>Bottom of Library</span>
+                                          <span className={cardsToBottom.length === (freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount) ? 'text-green-400' : 'text-yellow-400'}>
+                                              {cardsToBottom.length} / {freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount}
+                                          </span>
+                                      </h3>
+                                      <div className="flex-1 flex flex-col gap-2 overflow-y-auto">
+                                          {cardsToBottom.map((card, idx) => (
+                                              <div 
+                                                key={card.id}
+                                                onClick={() => toggleBottomCard(card)}
+                                                className="flex items-center gap-2 bg-gray-700 p-2 rounded cursor-pointer hover:bg-red-900/50 group"
+                                              >
+                                                  <span className="text-gray-500 font-mono w-4">{idx+1}.</span>
+                                                  <img src={card.imageUrl} className="w-8 h-11 rounded object-cover"/>
+                                                  <span className="text-sm font-medium truncate">{card.name}</span>
+                                                  <X size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-red-400"/>
+                                              </div>
+                                          ))}
+                                          {cardsToBottom.length === 0 && (
+                                              <div className="text-gray-600 text-sm italic text-center mt-10">Select cards from your hand to place here.</div>
+                                          )}
+                                      </div>
+                                 </div>
+                             </div>
+
+                             <button 
+                                onClick={confirmKeepHand}
+                                disabled={cardsToBottom.length !== (freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount)}
+                                className="px-10 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold rounded-full shadow-lg transition-all"
+                             >
+                                 Confirm & Start Game
+                             </button>
+                         </div>
+                     )}
                 </div>
             )}
 
