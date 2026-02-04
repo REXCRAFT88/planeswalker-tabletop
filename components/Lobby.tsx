@@ -166,6 +166,21 @@ export const Lobby: React.FC<LobbyProps> = ({
       onTokensChange(currentTokens.filter(t => t.id !== id));
   };
 
+    const [expandedTokenGroup, setExpandedTokenGroup] = useState<string | null>(null);
+
+    // Group tokens by name
+    const groupedTokens = currentTokens.reduce((acc, token) => {
+        if (!acc[token.name]) {
+            acc[token.name] = [];
+        }
+        acc[token.name].push(token);
+        return acc;
+    }, {} as Record<string, CardData[]>);
+
+    const toggleGroup = (name: string) => {
+        setExpandedTokenGroup(prev => prev === name ? null : name);
+    };
+
   return (
     <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-6 animate-in fade-in duration-700 relative">
       <div className="text-center mb-10">
@@ -234,17 +249,38 @@ export const Lobby: React.FC<LobbyProps> = ({
                 {currentTokens.length === 0 ? (
                     <div className="text-xs text-gray-500 italic w-full text-center py-2 bg-gray-900 rounded border border-gray-700 border-dashed">No tokens selected</div>
                 ) : (
-                    currentTokens.map(token => (
-                        <div key={token.id} className="relative w-10 h-14 flex-shrink-0 group">
-                            <img src={token.imageUrl} className="w-full h-full object-cover rounded shadow border border-gray-600" />
-                            <button 
-                                onClick={() => removeToken(token.id)}
-                                className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                                <X size={8} />
-                            </button>
-                        </div>
-                    ))
+                    Object.entries(groupedTokens).map(([name, tokens]) => {
+                        const isExpanded = expandedTokenGroup === name;
+                        const mainToken = tokens[0];
+                        
+                        if (isExpanded) {
+                            return tokens.map(token => (
+                                <div key={token.id} className="relative w-10 h-14 flex-shrink-0 group animate-in fade-in zoom-in-90 duration-200">
+                                    <img src={token.imageUrl} className="w-full h-full object-cover rounded shadow border border-gray-600" onClick={() => toggleGroup(name)} />
+                                    <button 
+                                        onClick={() => removeToken(token.id)}
+                                        className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                    >
+                                        <X size={8} />
+                                    </button>
+                                </div>
+                            ));
+                        }
+
+                        return (
+                            <div key={name} className="relative w-10 h-14 flex-shrink-0 cursor-pointer group" onClick={() => toggleGroup(name)}>
+                                <img src={mainToken.imageUrl} className="w-full h-full object-cover rounded shadow border border-gray-600" />
+                                {tokens.length > 1 && (
+                                    <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white text-[9px] font-bold px-1.5 rounded-full border border-gray-900 shadow-md z-10">
+                                        x{tokens.length}
+                                    </div>
+                                )}
+                                {/* Stack effect visuals */}
+                                {tokens.length > 1 && <div className="absolute top-0.5 left-0.5 w-full h-full bg-gray-700 rounded border border-gray-600 -z-10" />}
+                                {tokens.length > 2 && <div className="absolute top-1 left-1 w-full h-full bg-gray-800 rounded border border-gray-600 -z-20" />}
+                            </div>
+                        );
+                    })
                 )}
             </div>
          </div>

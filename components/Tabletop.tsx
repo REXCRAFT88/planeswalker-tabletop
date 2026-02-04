@@ -363,6 +363,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const addLog = (message: string, type: 'ACTION' | 'SYSTEM' = 'ACTION', overrideName?: string) => {
+        console.log(`Adding log: ${message} (${type})`); // Debug
         const entry: LogEntry = {
             id: crypto.randomUUID(),
             timestamp: Date.now(),
@@ -1055,15 +1056,26 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const card = searchModal.tray.find(c => c.id === id);
         if (card) setSearchModal(prev => ({ ...prev, tray: prev.tray.filter(c => c.id !== id), items: [...prev.items, { card, isRevealed: true }] }));
     };
-    const onTrayReorder = (idx: number, dir: 'LEFT' | 'RIGHT') => {
-        const newTray = [...searchModal.tray];
-        const swapIdx = dir === 'LEFT' ? idx - 1 : idx + 1;
-        if (swapIdx >= 0 && swapIdx < newTray.length) {
-            [newTray[idx], newTray[swapIdx]] = [newTray[swapIdx], newTray[idx]];
-            setSearchModal(prev => ({ ...prev, tray: newTray }));
-        }
+    const onTrayReorder = (index: number, direction: 'LEFT' | 'RIGHT') => {
+        setSearchModal(prev => {
+            const newTray = [...prev.tray];
+            const swapIndex = direction === 'LEFT' ? index - 1 : index + 1;
+            
+            if (swapIndex >= 0 && swapIndex < newTray.length) {
+                [newTray[index], newTray[swapIndex]] = [newTray[swapIndex], newTray[index]];
+                return { ...prev, tray: newTray };
+            }
+            return prev;
+        });
     };
+
     const handleTrayAction = (action: any) => {
+        // Use functional state update or ensure we have fresh state.
+        // Since this is a complex multi-state update, we trust 'searchModal' from render scope.
+        // If 'searchModal' is stale, the tray is stale.
+        // We can't easily make this fully functional without a reducer.
+        // But reordering SHOULD have updated 'searchModal.tray'.
+        
         const trayCards = searchModal.tray;
         const trayIds = new Set(trayCards.map(c => c.id));
         if (trayCards.length === 0) return;
@@ -1087,12 +1099,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (searchModal.source === 'LIBRARY') openSearch('LIBRARY'); // Re-open to refresh
         else setSearchModal(prev => ({ ...prev, tray: [] })); // Simple close tray
     };
-    const toggleRevealItem = (idx: number) => {
+    const toggleRevealItem = (index: number) => {
         setSearchModal(prev => {
             const newItems = [...prev.items];
-            if (newItems[idx]) newItems[idx] = { ...newItems[idx], isRevealed: !newItems[idx].isRevealed };
+            if (newItems[index]) {
+                const wasRevealed = newItems[index].isRevealed;
+                // Log if revealing
+                if (!wasRevealed) {
+                     // We need to call addLog outside of the pure state updater if possible, 
+                     // or just accept side effect here (not ideal but works in this context)
+                     // However, addLog calls setState (setLogs), which is bad inside another setState.
+                     // So we must detect it outside.
+                }
+                newItems[index] = { ...newItems[index], isRevealed: !wasRevealed };
+            }
             return { ...prev, items: newItems };
         });
+
+        // Trigger log if it WAS NOT revealed
+        const item = searchModal.items[index];
+        if (item && !item.isRevealed) {
+             addLog(`revealed ${item.card.name} at position ${index + 1} of ${searchModal.source.toLowerCase()}`);
+        }
     };
     const handleSearchAction = (id: string, action: 'HAND') => {
          const item = searchModal.items.find(i => i.card.id === id);
