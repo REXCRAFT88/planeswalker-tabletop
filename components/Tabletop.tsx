@@ -335,6 +335,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const containerRef = useRef<HTMLDivElement>(null);
     const opponentContainerRef = useRef<HTMLDivElement>(null);
     
+    // View Control Refs
+    const isDraggingView = useRef(false);
+    const lastMousePos = useRef({ x: 0, y: 0 });
+    const isDraggingOpponentView = useRef(false);
+    const lastOpponentMousePos = useRef({ x: 0, y: 0 });
+    
     // State Refs for Socket Handlers
     const libraryRef = useRef(library);
     const activePlayerIndexRef = useRef(activePlayerIndex);
@@ -986,6 +992,69 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     // --- Rendering Helpers ---
+
+    const handleContainerPointerDown = (e: React.PointerEvent) => {
+        if (e.button === 1 || (e.button === 0 && isSpacePressed.current)) {
+             isDraggingView.current = true;
+             lastMousePos.current = { x: e.clientX, y: e.clientY };
+             (e.target as HTMLElement).setPointerCapture(e.pointerId);
+             e.preventDefault();
+        }
+    };
+
+    const handleContainerPointerMove = (e: React.PointerEvent) => {
+        if (isDraggingView.current) {
+            const dx = e.clientX - lastMousePos.current.x;
+            const dy = e.clientY - lastMousePos.current.y;
+            setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+            lastMousePos.current = { x: e.clientX, y: e.clientY };
+        }
+    };
+
+    const handleContainerPointerUp = (e: React.PointerEvent) => {
+        if (isDraggingView.current) {
+            isDraggingView.current = false;
+            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        }
+    };
+
+    const handleWheel = (e: React.WheelEvent) => {
+        const scaleAmount = -e.deltaY * 0.001;
+        const newScale = Math.min(Math.max(0.1, view.scale + scaleAmount), 5); 
+        setView(prev => ({ ...prev, scale: newScale }));
+    };
+
+    const handleOpponentPointerDown = (e: React.PointerEvent) => {
+         if (e.button === 1 || (e.button === 0 && isSpacePressed.current)) {
+            isDraggingOpponentView.current = true;
+            lastOpponentMousePos.current = { x: e.clientX, y: e.clientY };
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    };
+
+    const handleOpponentPointerMove = (e: React.PointerEvent) => {
+        if (isDraggingOpponentView.current) {
+            const dx = e.clientX - lastOpponentMousePos.current.x;
+            const dy = e.clientY - lastOpponentMousePos.current.y;
+            setOpponentView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+            lastOpponentMousePos.current = { x: e.clientX, y: e.clientY };
+        }
+    };
+
+    const handleOpponentPointerUp = (e: React.PointerEvent) => {
+        if (isDraggingOpponentView.current) {
+            isDraggingOpponentView.current = false;
+            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        }
+    };
+
+     const handleOpponentWheel = (e: React.WheelEvent) => {
+        const scaleAmount = -e.deltaY * 0.001;
+        const newScale = Math.min(Math.max(0.1, opponentView.scale + scaleAmount), 5);
+        setOpponentView(prev => ({ ...prev, scale: newScale }));
+    };
+
     const renderWorld = (viewState: ViewState, containerRefToUse: React.RefObject<HTMLDivElement>, handlers: any, rotation: number = 0, isOpponent: boolean = false) => (
         <div 
             ref={containerRefToUse}
