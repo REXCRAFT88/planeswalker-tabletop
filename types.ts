@@ -1,4 +1,3 @@
-
 export enum CardState {
   UNTAPPED = 'UNTAPPED',
   TAPPED = 'TAPPED',
@@ -52,6 +51,20 @@ export interface Player {
   graveyard: CardData[];
   exile: CardData[];
   commandZone: CardData[];
+}
+
+export interface PlayerStats {
+  damageDealt: Record<string, number>; // opponentId -> amount
+  damageReceived: number;
+  healing: number;
+  tappedCounts: Record<string, number>; // cardName -> count
+  cardDamageCounts: Record<string, number>; // cardName -> amount
+  blockCounts: Record<string, number>; // cardName -> count
+  totalTurnTime: number; // ms
+  cardsPlayed: number;
+  cardsSentToGraveyard: number;
+  cardsExiled: number;
+  cardsDrawn: number;
 }
 
 export interface GameState {

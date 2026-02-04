@@ -418,7 +418,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </div>
                   
                   <div className="p-4 bg-gray-800 flex flex-col gap-4 flex-1 overflow-hidden">
-                      <div className="flex gap-4 h-full">
+                      <div className="flex flex-col lg:flex-row gap-4 h-full">
                           {/* Left: Search */}
                           <div className="flex-1 flex flex-col gap-4">
                                 <div className="flex gap-2">
@@ -464,7 +464,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                           </div>
 
                           {/* Right: Import/Paste */}
-                          <div className="w-1/3 flex flex-col gap-4 border-l border-gray-700 pl-4">
+                          <div className="w-full lg:w-1/3 flex flex-col gap-4 border-l-0 lg:border-l border-t lg:border-t-0 pt-4 lg:pt-0 pl-0 lg:pl-4 border-gray-700">
                                 <h4 className="font-bold text-gray-300 flex items-center gap-2">
                                     <Edit3 size={16}/> Bulk Import
                                 </h4>

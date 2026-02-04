@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CardData, BoardObject, LogEntry } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { JudgeChat } from './JudgeChat';
+import { GameStatsModal } from './GameStatsModal';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { 
     LogOut, MessageSquare, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, 
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -92,27 +93,30 @@ const HandCard: React.FC<{
 }> = ({ card, scale, onInspect, onPlay, onSendToZone }) => {
   const width = 140 * scale; 
   const height = 196 * scale; 
+  const [showOverlay, setShowOverlay] = useState(false);
 
   return (
     <div 
         className="relative flex-shrink-0 transition-transform duration-200 ease-out cursor-pointer group hover:-translate-y-4 hover:z-50"
         style={{ width, height }}
+        onClick={() => setShowOverlay(!showOverlay)}
+        onMouseLeave={() => setShowOverlay(false)}
     >
         <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl border border-black/50 bg-gray-800">
             <img src={card.imageUrl} className="w-full h-full object-cover" alt={card.name} />
             
-            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
-                <button onClick={() => onPlay(card)} className="px-4 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm shadow-lg transform hover:scale-105 flex items-center gap-1">
+            <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 ${showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                <button onClick={(e) => { e.stopPropagation(); onPlay(card); }} className="px-4 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm shadow-lg transform hover:scale-105 flex items-center gap-1">
                     <Play size={12} /> Play
                 </button>
                 <div className="flex gap-2">
-                    <button onClick={() => onInspect(card)} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Inspect">
+                    <button onClick={(e) => { e.stopPropagation(); onInspect(card); }} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Inspect">
                         <ZoomIn size={16} />
                     </button>
-                    <button onClick={() => onSendToZone(card, 'EXILE')} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Exile">
+                    <button onClick={(e) => { e.stopPropagation(); onSendToZone(card, 'EXILE'); }} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Exile">
                         <X size={16} />
                     </button>
-                    <button onClick={() => onSendToZone(card, 'GRAVEYARD')} className="p-2 bg-red-900/80 hover:bg-red-800 text-white rounded-full" title="Discard">
+                    <button onClick={(e) => { e.stopPropagation(); onSendToZone(card, 'GRAVEYARD'); }} className="p-2 bg-red-900/80 hover:bg-red-800 text-white rounded-full" title="Discard">
                          <Archive size={16} />
                     </button>
                 </div>
@@ -158,6 +162,7 @@ const Playmat: React.FC<{
   sleeveColor: string;
   topGraveyardCard?: CardData;
   isShuffling: boolean;
+  isControlled: boolean;
   commanders: CardData[];
   onDraw: () => void;
   onShuffle: () => void;
@@ -165,10 +170,11 @@ const Playmat: React.FC<{
   onPlayCommander: (card: CardData) => void;
   onPlayTopLibrary: () => void;
   onPlayTopGraveyard: () => void;
+  onInspectCommander: (card: CardData) => void;
 }> = ({
   x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
-  topGraveyardCard, isShuffling, commanders,
-  onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard
+  topGraveyardCard, isShuffling, isControlled, commanders,
+  onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander
 }) => {
   return (
     <div
@@ -200,16 +206,20 @@ const Playmat: React.FC<{
              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 z-30"
                 onClick={(e) => e.stopPropagation()}
              >
-                 <button onClick={onDraw} className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded-full text-xs font-bold shadow-lg w-20 flex items-center justify-center gap-1">
-                    <Hand size={12}/> Draw
-                 </button>
-                 <button onClick={onPlayTopLibrary} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-xs font-bold shadow-lg w-20 flex items-center justify-center gap-1">
-                    <Play size={12}/> Play
-                 </button>
+                 {isControlled && (
+                     <>
+                     <button onClick={onDraw} className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded-full text-xs font-bold shadow-lg w-20 flex items-center justify-center gap-1">
+                        <Hand size={12}/> Draw
+                     </button>
+                     <button onClick={onPlayTopLibrary} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-xs font-bold shadow-lg w-20 flex items-center justify-center gap-1">
+                        <Play size={12}/> Play
+                     </button>
+                     </>
+                 )}
                 <div className="flex gap-2">
-                    <button onClick={onShuffle} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Shuffle">
+                    {isControlled && <button onClick={onShuffle} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Shuffle">
                         <Shuffle size={14} />
-                    </button>
+                    </button>}
                     <button onClick={() => onOpenSearch('LIBRARY')} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Search">
                         <Search size={14} />
                     </button>
@@ -238,7 +248,7 @@ const Playmat: React.FC<{
              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 z-20"
                 onClick={(e) => e.stopPropagation()}
              >
-                 {topGraveyardCard && (
+                 {topGraveyardCard && isControlled && (
                     <button onClick={onPlayTopGraveyard} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-xs font-bold shadow-lg w-20">
                         Play Top
                     </button>
@@ -276,8 +286,8 @@ const Playmat: React.FC<{
                 key={cmd.id}
                 className="relative bg-gray-800 border border-amber-500/30 cursor-pointer hover:scale-105 transition-transform"
                 style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
-                onClick={() => onPlayCommander(cmd)}
-                title="Click to Cast Commander"
+                onClick={() => isControlled ? onPlayCommander(cmd) : onInspectCommander(cmd)}
+                title={isControlled ? "Click to Cast Commander" : "Click to Inspect"}
               >
                   <img src={cmd.imageUrl} className="w-full h-full object-cover rounded opacity-90" alt={cmd.name} />
                   <div className="absolute -top-2 -right-2 bg-amber-600 text-black p-1 rounded-full shadow-lg">
@@ -296,6 +306,13 @@ const Playmat: React.FC<{
       </div>
     </div>
   );
+};
+
+const emptyStats: PlayerStats = {
+    damageDealt: {}, damageReceived: 0, healing: 0,
+    tappedCounts: {}, cardDamageCounts: {}, blockCounts: {},
+    totalTurnTime: 0, cardsPlayed: 0, cardsSentToGraveyard: 0,
+    cardsExiled: 0, cardsDrawn: 0
 };
 
 export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, onExit }) => {
@@ -329,6 +346,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [commanderDamage, setCommanderDamage] = useState<Record<string, Record<string, number>>>({}); 
     const [opponentsLife, setOpponentsLife] = useState<Record<string, number>>({});
     
+    const [gameStats, setGameStats] = useState<Record<string, PlayerStats>>({});
+
     // Opponent Counts State
     const [opponentsCounts, setOpponentsCounts] = useState<Record<string, { library: number, graveyard: number, exile: number, hand: number, command: number }>>({});
     const [opponentsCommanders, setOpponentsCommanders] = useState<Record<string, CardData[]>>({});
@@ -360,6 +379,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [libraryAction, setLibraryAction] = useState<LibraryActionState>({ isOpen: false, cardId: '' });
     const [showCmdrDamage, setShowCmdrDamage] = useState(false);
     const [isHost, setIsHost] = useState(false);
+    const [showEndGameModal, setShowEndGameModal] = useState(false);
+    const [showStatsModal, setShowStatsModal] = useState(false);
 
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
@@ -373,6 +394,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const lastMousePos = useRef({ x: 0, y: 0 });
     const isDraggingOpponentView = useRef(false);
     const lastOpponentMousePos = useRef({ x: 0, y: 0 });
+    
+    // Pinch Zoom Refs
+    const activePointers = useRef<Map<number, { x: number, y: number }>>(new Map());
+    const initialPinchDist = useRef<number | null>(null);
+    const initialScale = useRef<number>(1);
+    const lastPinchCenter = useRef<{ x: number, y: number } | null>(null);
     
     // State Refs for Socket Handlers
     const libraryRef = useRef(library);
@@ -397,6 +424,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
         prevIsHost.current = isHost;
     }, [isHost]);
+
+    // --- Game Phase Persistence ---
+    useEffect(() => {
+        const savedPhase = localStorage.getItem(`game_phase_${roomId}`);
+        if (savedPhase && (savedPhase === 'MULLIGAN' || savedPhase === 'PLAYING')) {
+             if (gamePhase === 'SETUP') {
+                 setGamePhase(savedPhase as any);
+             }
+        }
+    }, []);
+
+    useEffect(() => {
+        if (gamePhase !== 'SETUP') {
+            localStorage.setItem(`game_phase_${roomId}`, gamePhase);
+        }
+    }, [gamePhase, roomId]);
 
     // --- Session Persistence & Reconnect ---
     useEffect(() => {
@@ -426,6 +469,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [roomId, playerName, sleeveColor]);
 
     const handleExit = () => {
+        socket.emit('leave_room', { room: roomId });
+        localStorage.removeItem(`game_phase_${roomId}`);
         localStorage.removeItem('active_game_session');
         onExit();
     };
@@ -454,6 +499,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              });
         }
     }, [library.length, graveyard.length, exile.length, hand.length, commandZone.length, commandZone, gamePhase, roomId]);
+
+    // Stats Helper
+    const updateMyStats = (updates: Partial<PlayerStats>) => {
+        setGameStats(prev => {
+            const myId = socket.id;
+            const current = prev[myId] || emptyStats;
+            const newStats = { ...current, ...updates };
+            
+            if (updates.damageDealt) newStats.damageDealt = { ...current.damageDealt, ...updates.damageDealt };
+            if (updates.tappedCounts) newStats.tappedCounts = { ...current.tappedCounts, ...updates.tappedCounts };
+            if (updates.cardDamageCounts) newStats.cardDamageCounts = { ...current.cardDamageCounts, ...updates.cardDamageCounts };
+            if (updates.blockCounts) newStats.blockCounts = { ...current.blockCounts, ...updates.blockCounts };
+
+            socket.emit('game_action', { room: roomId, action: 'UPDATE_STATS', data: { playerId: myId, stats: newStats } });
+            return { ...prev, [myId]: newStats };
+        });
+    };
 
     // --- Helper Logic ---
     const emitAction = (action: string, data: any) => {
@@ -517,8 +579,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
              if (gamePhaseRef.current === 'SETUP' && !startingGameRef.current &&
                  ['ADD_OBJECT', 'UPDATE_LIFE', 'PASS_TURN', 'UPDATE_COUNTS', 'UPDATE_COMMANDER_DAMAGE'].includes(action)) {
-                 setGamePhase('PLAYING');
-                 addLog("Reconnected to game in progress", 'SYSTEM');
+                 // Check if we have a saved phase first to avoid skipping Mulligan
+                 const savedPhase = localStorage.getItem(`game_phase_${roomId}`);
+                 if (!savedPhase) {
+                     setGamePhase('PLAYING');
+                     addLog("Reconnected to game in progress", 'SYSTEM');
+                 }
              }
 
              if (action === 'START_GAME') {
@@ -586,6 +652,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      });
                  }
              }
+             else if (action === 'UPDATE_STATS') {
+                 if (data.playerId && data.stats) {
+                     setGameStats(prev => ({ ...prev, [data.playerId]: data.stats }));
+                 }
+             }
              else if (action === 'ADD_OBJECT') {
                 setBoardObjects(prev => {
                     if (prev.some(o => o.id === data.id)) return prev; 
@@ -602,6 +673,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setBoardObjects(prev => prev.filter(o => o.id !== data.id));
             } else if (action === 'LOG') {
                 addLog(data.message, 'ACTION', sender ? sender.name : 'Unknown');
+            }
+            else if (action === 'RESTART_GAME') {
+                setGamePhase('SETUP');
+                setBoardObjects([]);
+                setHand(initialTokens);
+                setGraveyard([]);
+                setExile([]);
+                setLife(40);
+                setTurn(1);
+                setRound(1);
+                setGameStats({});
+                addLog("The host has restarted the game", "SYSTEM");
             }
         };
 
@@ -631,7 +714,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setExile([]);
 
         const matCenterY = LOCAL_MAT_POS.y + MAT_H / 2;
-        const startScale = 0.8;
+        const isMobile = window.innerWidth < 768;
+        const startScale = isMobile ? 0.5 : 0.8;
         setView({
             x: window.innerWidth / 2, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
@@ -696,11 +780,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (lib.length >= 7) {
              const initialHand = lib.slice(0, 7);
              const remaining = lib.slice(7);
-             if (shouldUseMulligans) {
-                 setHand(initialHand);
-             } else {
-                 setHand([...initialHand, ...initialTokens]);
-             }
+             setHand([...initialHand, ...initialTokens]);
              setLibrary(remaining);
          }
          
@@ -722,6 +802,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setCurrentTurnPlayerId(startingPlayer.id);
     };
 
+    const handleRestartGame = () => {
+        emitAction('RESTART_GAME', {});
+        setShowEndGameModal(false);
+    };
+
     const handleMulliganChoice = (keep: boolean) => {
         if (keep) {
             let toBottomCount = mulliganCount;
@@ -737,10 +822,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 addLog(`kept hand with ${mulliganCount} mulligans`);
             }
         } else {
-            const cardsToShuffle = [...hand, ...library].sort(() => Math.random() - 0.5);
-            const newHand = cardsToShuffle.slice(0, 7);
+            const currentDeckCardsInHand = hand.filter(c => !c.isToken);
+            const currentTokensInHand = hand.filter(c => c.isToken);
+
+            const cardsToShuffle = [...currentDeckCardsInHand, ...library].sort(() => Math.random() - 0.5);
+            const newHandCards = cardsToShuffle.slice(0, 7);
             const newLib = cardsToShuffle.slice(7);
-            setHand(newHand);
+            setHand([...newHandCards, ...currentTokensInHand]);
             setLibrary(newLib);
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
@@ -787,12 +875,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const nextPlayer = playersList[(myIndex + 1) % playersList.length];
         const nextTurnNum = turn + 1;
         const duration = formatTime(Date.now() - turnStartTime);
+        const durationMs = Date.now() - turnStartTime;
         
         emitAction('PASS_TURN', { 
             nextPlayerSocketId: nextPlayer.id, 
             turnNumber: nextTurnNum,
             prevDuration: duration
         });
+
+        if (currentTurnPlayerId === socket.id) {
+            setGameStats(prev => {
+                const current = prev[socket.id] || emptyStats;
+                return { ...prev, [socket.id]: { ...current, totalTurnTime: current.totalTurnTime + durationMs } };
+            });
+            updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
+        }
     };
 
     const formatTime = (ms: number) => {
@@ -1352,16 +1449,54 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // --- Rendering Helpers ---
 
     const handleContainerPointerDown = (e: React.PointerEvent) => {
-        if (e.button === 1 || (e.button === 0 && isSpacePressed.current)) {
-             isDraggingView.current = true;
-             lastMousePos.current = { x: e.clientX, y: e.clientY };
-             (e.target as HTMLElement).setPointerCapture(e.pointerId);
-             e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.current.size === 2) {
+            const points = Array.from(activePointers.current.values()) as { x: number; y: number }[];
+            initialPinchDist.current = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+            initialScale.current = view.scale;
+            lastPinchCenter.current = {
+                x: (points[0].x + points[1].x) / 2,
+                y: (points[0].y + points[1].y) / 2
+            };
+            isDraggingView.current = false;
+        } else if (activePointers.current.size === 1) {
+            if (e.button === 1 || (e.button === 0 && isSpacePressed.current)) {
+                 isDraggingView.current = true;
+                 lastMousePos.current = { x: e.clientX, y: e.clientY };
+                 e.preventDefault();
+            }
         }
     };
 
     const handleContainerPointerMove = (e: React.PointerEvent) => {
-        if (isDraggingView.current) {
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.current.size === 2 && initialPinchDist.current && lastPinchCenter.current) {
+            const points = Array.from(activePointers.current.values()) as { x: number; y: number }[];
+            const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+            const scaleChange = dist / initialPinchDist.current;
+            const newScale = Math.min(Math.max(0.1, initialScale.current * scaleChange), 5);
+            
+            const currentCenter = {
+                x: (points[0].x + points[1].x) / 2,
+                y: (points[0].y + points[1].y) / 2
+            };
+            const dx = currentCenter.x - lastPinchCenter.current.x;
+            const dy = currentCenter.y - lastPinchCenter.current.y;
+            lastPinchCenter.current = currentCenter;
+
+            setView(prev => ({ 
+                ...prev, 
+                scale: newScale,
+                x: prev.x + dx,
+                y: prev.y + dy
+            }));
+            return;
+        }
+
+        if (isDraggingView.current && activePointers.current.size === 1) {
             const dx = e.clientX - lastMousePos.current.x;
             const dy = e.clientY - lastMousePos.current.y;
             setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
@@ -1370,9 +1505,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleContainerPointerUp = (e: React.PointerEvent) => {
-        if (isDraggingView.current) {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        activePointers.current.delete(e.pointerId);
+        
+        if (activePointers.current.size < 2) {
+            initialPinchDist.current = null;
+            lastPinchCenter.current = null;
+        }
+        
+        if (activePointers.current.size === 0) {
             isDraggingView.current = false;
-            (e.target as HTMLElement).releasePointerCapture(e.pointerId);
         }
     };
 
@@ -1471,6 +1613,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 sleeveColor={p.color}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
+                                isControlled={isMe}
                                 commanders={isMe ? commandZone : (opponentsCommanders[p.id] || [])}
                                 onDraw={isMe ? () => drawCard(1) : () => requestViewZone('LIBRARY', p.id)}
                                 onShuffle={isMe ? shuffleLibrary : () => {}}
@@ -1478,6 +1621,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 onPlayCommander={isMe ? playCommander : () => {}}
                                 onPlayTopLibrary={isMe ? playTopLibrary : () => {}}
                                 onPlayTopGraveyard={isMe ? playTopGraveyard : () => {}}
+                                onInspectCommander={setInspectCard}
                             />
                             {!isMe && (
                                 <div 
@@ -1680,7 +1824,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                  <div className="flex-1 bg-gray-800/50 rounded-xl p-6 border border-gray-700 overflow-y-auto">
                                      <h3 className="text-gray-300 font-bold mb-4 uppercase text-xs tracking-wider">Hand</h3>
                                      <div className="flex flex-wrap gap-4">
-                                         {hand.map((card) => {
+                                         {hand.filter(c => !c.isToken).map((card) => {
                                              const isSelected = cardsToBottom.find(c => c.id === card.id);
                                              if (isSelected) return null; // Don't show if moved
                                              return (
@@ -1743,12 +1887,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             <div className="flex-none h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-6 z-50 backdrop-blur-md relative">
                  <div className="flex items-center gap-6">
                     {/* Players List */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 overflow-x-auto max-w-[30vw] md:max-w-none custom-scrollbar pb-1">
                         {playersList.map(p => {
                             const isMe = p.id === socket.id;
                             const pLife = isMe ? life : (opponentsLife[p.id] ?? 40);
-                            const cmdDmg = (commanderDamage[`cmd-${p.id}`] || {})[socket.id] || 0;
                             const isTurn = currentTurnPlayerId === p.id;
+
+                            const takenDamage = playersList
+                                .filter(attacker => attacker.id !== p.id)
+                                .map(attacker => {
+                                    const dmg = (commanderDamage[`cmd-${attacker.id}`] || {})[p.id] || 0;
+                                    return { ...attacker, dmg };
+                                })
+                                .filter(d => d.dmg > 0);
 
                             return (
                                 <div key={p.id} className={`flex items-center gap-2 bg-gray-800/50 rounded-full pr-3 pl-1 py-1 border ${isTurn ? 'border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : 'border-gray-700'}`}>
@@ -1762,11 +1913,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
                                         <div className="flex items-center gap-2 text-[10px]">
                                             <span className="text-white font-mono">{pLife} HP</span>
-                                            {cmdDmg > 0 && (
-                                                <span className={`font-bold ${cmdDmg >= 21 ? 'text-red-500' : 'text-red-300'}`} title="Commander Damage taken">
-                                                    -{cmdDmg}
-                                                </span>
-                                            )}
+                                            {takenDamage.map(td => (
+                                                 <div key={td.id} className="flex items-center gap-0.5 bg-black/40 px-1 rounded" title={`Damage from ${td.name}'s Commander`}>
+                                                     <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: td.color}}></div>
+                                                     <span className={`font-bold ${td.dmg >= 21 ? 'text-red-500' : 'text-gray-300'}`}>{td.dmg}</span>
+                                                 </div>
+                                            ))}
                                         </div>
                                     </div>
                                 </div>
@@ -1804,24 +1956,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         title="Commander Damage"
                     >
                         <Swords size={20} />
-                        <span className="text-xs font-bold uppercase hidden md:inline">Cmdr Dmg</span>
+                        <span className="text-xs font-bold uppercase hidden lg:inline">Cmdr Dmg</span>
                     </button>
                     
                     <div className="w-px h-6 bg-gray-700 mx-2" />
                     
                     <button onClick={rollDice} className="flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500">
                         <Dices size={20} />
-                        <span className="text-xs font-bold uppercase">Roll D6</span>
+                        <span className="text-xs font-bold uppercase hidden md:inline">Roll D6</span>
                     </button>
                     
                      <button onClick={spawnCounter} className="flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-cyan-400">
                         <Disc size={20} />
-                        <span className="text-xs font-bold uppercase">Add Counter</span>
+                        <span className="text-xs font-bold uppercase hidden md:inline">Add Counter</span>
                     </button>
                  </div>
 
                  <div className="flex items-center gap-3">
-                    <div className="flex flex-col items-end mr-2">
+                    <div className="flex flex-col items-end mr-2 hidden md:flex">
                         <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Room Code</span>
                         <span className="text-sm font-mono font-bold text-gray-300 select-all">{roomId}</span>
                     </div>
@@ -1849,16 +2001,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <History size={20} />
                     </button>
+                    {isHost && (
+                        <button onClick={() => setShowEndGameModal(true)} className="p-2 rounded-lg hover:bg-gray-800 text-red-400 hover:text-red-300" title="End Game">
+                            <RotateCcw size={20} />
+                        </button>
+                    )}
                     <button 
                         onClick={() => setIsJudgeOpen(!isJudgeOpen)} 
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${isJudgeOpen ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'}`}
                     >
                         <MessageSquare size={16} />
-                        Judge
+                        <span className="hidden md:inline">Judge</span>
                     </button>
                     <button onClick={handleExit} className="flex items-center gap-2 px-4 py-2 bg-red-900/50 hover:bg-red-900/80 border border-red-800 text-red-200 rounded-lg transition-colors">
                         <LogOut size={16} />
-                        Leave
+                        <span className="hidden md:inline">Leave</span>
                     </button>
                  </div>
             </div>
@@ -1887,7 +2044,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <div className="absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none">
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
                             <div className="relative w-full px-8 pb-4 flex items-end justify-center pointer-events-auto">
-                                <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden custom-scrollbar pb-2" style={{ maxWidth: '85vw' }}>
+                                <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-4 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50" style={{ maxWidth: '85vw' }}>
                                     {cardsInHand.map((card, idx) => (
                                         <HandCard 
                                             key={card.id} 
@@ -2029,6 +2186,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             {/* Modals */}
             <JudgeChat isOpen={isJudgeOpen} onClose={() => setIsJudgeOpen(false)} />
             
+            {showEndGameModal && (
+                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
+                        <h3 className="text-2xl font-bold text-white mb-4">End Game?</h3>
+                        <p className="text-gray-300 mb-8">Do you want to restart the lobby with current players or return to the main menu?</p>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={handleRestartGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><RotateCcw size={18}/> Restart Lobby</button>
+                            <button onClick={handleExit} className="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><LogOut size={18}/> Return to Menu</button>
+                            <button onClick={() => setShowEndGameModal(false)} className="w-full py-2 text-gray-400 hover:text-white mt-2">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showCmdrDamage && (
                  <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                      <div className="bg-gray-900 border border-red-900/50 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -2214,10 +2385,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         {item.isRevealed ? (
                                             <>
                                                 <div className="text-xs text-gray-300 font-semibold mb-1 text-center line-clamp-1">{item.card.name}</div>
-                                                {searchModal.source === 'TOKENS' ? (
-                                                    <button onClick={() => handleSearchAction(item.card.id, 'HAND')} className="w-full text-xs flex items-center gap-2 bg-blue-700 hover:bg-blue-600 px-2 py-1.5 rounded"><Hand size={12} /> Add to Hand</button>
-                                                ) : (
-                                                    <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
+                                                {!searchModal.isReadOnly && (
+                                                    searchModal.source === 'TOKENS' ? (
+                                                        <button onClick={() => handleSearchAction(item.card.id, 'HAND')} className="w-full text-xs flex items-center gap-2 bg-blue-700 hover:bg-blue-600 px-2 py-1.5 rounded"><Hand size={12} /> Add to Hand</button>
+                                                    ) : (
+                                                        <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
+                                                    )
                                                 )}
                                             </>
                                         ) : (

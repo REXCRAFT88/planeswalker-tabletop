@@ -32,6 +32,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ startX: number, startY: number, initialObjX: number, initialObjY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Handle immediate drag from hand/zones
   React.useEffect(() => {
@@ -56,6 +58,12 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     e.preventDefault();
     e.stopPropagation();
     onBringToFront(object.id);
+    
+    // Start Long Press Timer
+    longPressTimer.current = setTimeout(() => {
+        setShowOverlay(true);
+    }, 500);
+
     setIsDragging(true);
     dragStartRef.current = {
       startX: e.clientX,
@@ -79,6 +87,14 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const scaledDx = screenDx / viewScale;
     const scaledDy = screenDy / viewScale;
 
+    // Cancel long press if moved significantly
+    if (Math.abs(screenDx) > 5 || Math.abs(screenDy) > 5) {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }
+
     // Apply Inverse Rotation
     // If view is rotated R, we need to rotate delta by -R to get world delta
     const rad = -viewRotation * (Math.PI / 180);
@@ -92,6 +108,11 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+    }
+
     if (!dragStartRef.current) return;
     
     const moveX = Math.abs(object.x - dragStartRef.current.initialObjX);
@@ -256,6 +277,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         onPointerUp={handlePointerUp}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
+        onClick={() => setShowOverlay(false)} // Tap to close overlay if open
       >
         {/* Stack Layers (Behind) */}
         {isStack && (
@@ -293,7 +315,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
              )}
              
              {/* Hover Actions */}
-             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
+             <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                 
                 {/* Stack Controls */}
                 {isStack && isControlledByMe ? (
