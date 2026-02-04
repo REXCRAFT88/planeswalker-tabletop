@@ -22,7 +22,8 @@ const PORT = process.env.PORT || 3001;
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../dist')));
   
-  app.get('/:pathMatch(.*)', (req, res) => {
+  // Use regex literal to match any path
+  app.get(/(.*)/, (req, res) => {
     res.sendFile(path.join(__dirname, '../dist/index.html'));
   });
 }
