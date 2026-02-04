@@ -1601,6 +1601,57 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     return (
         <div className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col">
             
+            {/* --- Lobby / Waiting Room Overlay --- */}
+            {gamePhase === 'SETUP' && (
+                <div className="absolute inset-0 z-[100] bg-gray-900/95 backdrop-blur-md flex items-center justify-center animate-in fade-in">
+                    <div className="max-w-2xl w-full bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
+                        <div className="text-center mb-8">
+                            <h2 className="text-3xl font-extrabold text-white mb-2">Waiting for Players</h2>
+                            <p className="text-gray-400">Share the room code below to invite friends.</p>
+                        </div>
+                        
+                        <div className="flex justify-center mb-8">
+                            <div className="bg-black/50 rounded-xl px-8 py-4 border border-gray-600 flex flex-col items-center gap-2">
+                                <span className="text-xs uppercase font-bold text-gray-500 tracking-widest">Room Code</span>
+                                <div className="text-5xl font-mono font-bold text-blue-400 tracking-widest select-all cursor-pointer" onClick={() => navigator.clipboard.writeText(roomId)}>
+                                    {roomId}
+                                </div>
+                                <span className="text-[10px] text-gray-500">(Click to Copy)</span>
+                            </div>
+                        </div>
+
+                        <div className="mb-8">
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4">Connected Players ({playersList.length})</h3>
+                            <div className="space-y-2">
+                                {playersList.map((player) => (
+                                    <div key={player.id} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600">
+                                        <div className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg flex items-center justify-center font-bold text-white text-lg" style={{backgroundColor: player.color}}>
+                                            {player.name.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="font-bold text-white text-lg">{player.name}</div>
+                                            <div className="text-xs text-gray-400">{player.id === 'local-player' ? '(You)' : 'Opponent'}</div>
+                                        </div>
+                                        {player.id === 'local-player' && (
+                                            <div className="text-green-400 text-xs font-bold uppercase flex items-center gap-1">
+                                                <CheckCircle size={14}/> Ready
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={startGame}
+                            className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3"
+                        >
+                            <Play size={24} fill="currentColor" /> Start Game
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* --- UI: Top Bar --- */}
             <div className="flex-none h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-6 z-50 backdrop-blur-md relative">
                  <div className="flex items-center gap-6">

@@ -123,7 +123,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
       </div>
 
       {!stagedDeck ? (
-        <div className="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700 flex-1 flex flex-col">
+        <div className="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
             <label className="block text-sm font-medium text-gray-300 mb-2">
             Paste Deck List (Moxfield/Arena format)
             </label>
@@ -136,13 +136,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
             />
             
             {error && (
-                <div className="mt-4 p-3 bg-red-900/50 border border-red-700 rounded-lg flex items-center gap-2 text-red-200">
+                <div className="mt-4 p-3 bg-red-900/50 border border-red-700 rounded-lg flex items-center gap-2 text-red-200 shrink-0">
                     <AlertCircle size={18} />
                     <span>{error}</span>
                 </div>
             )}
 
-            <div className="mt-6 flex items-center justify-end gap-4">
+            <div className="mt-6 flex items-center justify-end gap-4 shrink-0">
             {loading ? (
                 <div className="flex items-center gap-3 text-blue-400">
                 <Loader2 className="animate-spin" />
@@ -160,8 +160,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
             </div>
         </div>
       ) : (
-          <div className="flex-1 flex flex-col bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-              <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4">
+          <div className="flex-1 flex flex-col bg-gray-800 rounded-xl border border-gray-700 overflow-hidden min-h-0">
+              <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4 shrink-0">
                   <div className="flex justify-between items-center">
                     <span className="text-gray-300">Click a card to designate it as Commander. (Click again to unselect)</span>
                     <div className="flex gap-2">
@@ -190,7 +190,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, onDeckRea
                     />
                   </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                       {filteredDeck.map(card => (
                           <div 
