@@ -46,8 +46,15 @@ export const Lobby: React.FC<LobbyProps> = ({
     const socket = connectSocket();
     socket.emit('join_room', { room: code, name: playerName, color: playerSleeve });
     
+    socket.on('join_error', ({ message }) => {
+        alert(message);
+        setIsJoining(false);
+        socket.disconnect();
+    });
+
     // Give a small delay for connection or wait for ack (ack not implemented yet, so just timeout)
     setTimeout(() => {
+        if (!socket.connected) return; // If error happened, don't proceed
         setIsJoining(false);
         onJoin(code);
     }, 500);

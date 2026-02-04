@@ -42,6 +42,12 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join_room', ({ room, name, color }) => {
+    const existingPlayer = rooms[room]?.find(p => p.color === color);
+    if (existingPlayer) {
+        socket.emit('join_error', { message: 'Color already taken. Please choose another.' });
+        return;
+    }
+
     socket.join(room);
     
     const newPlayer: Player = { id: socket.id, name, room, color };

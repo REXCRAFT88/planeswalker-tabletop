@@ -303,6 +303,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [life, setLife] = useState(40);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [commanderDamage, setCommanderDamage] = useState<Record<string, Record<string, number>>>({}); 
+    const [opponentsLife, setOpponentsLife] = useState<Record<string, number>>({});
+    const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
     // UI State
     const [isJudgeOpen, setIsJudgeOpen] = useState(false);
@@ -350,6 +352,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { libraryRef.current = library; }, [library]);
     useEffect(() => { activePlayerIndexRef.current = activePlayerIndex; }, [activePlayerIndex]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
+
+    // Emit life changes
+    useEffect(() => {
+        if (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN') {
+            socket.emit('game_action', { room: roomId, action: 'UPDATE_LIFE', data: { life } });
+        }
+    }, [life, gamePhase, roomId]);
 
     // --- Helper Logic ---
     const emitAction = (action: string, data: any) => {
@@ -428,12 +437,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  handleStartGameLogic(data);
              }
              else if (action === 'PASS_TURN') {
-                 if (data.nextPlayerIndex !== undefined) {
+                 if (data.nextPlayerSocketId) {
+                     const nextIdx = currentPlayers.findIndex(p => p.socketId === data.nextPlayerSocketId);
+                     if (nextIdx !== -1) {
+                         setActivePlayerIndex(nextIdx);
+                         setTurn(data.turnNumber);
+                         setTurnStartTime(Date.now());
+                         addLog(`Turn passed to ${currentPlayers[nextIdx].name}`);
+                     }
+                 } else if (data.nextPlayerIndex !== undefined) {
+                     // Fallback for old events
                      setActivePlayerIndex(data.nextPlayerIndex);
                      setTurn(data.turnNumber);
                      setTurnStartTime(Date.now());
-                     const nextName = currentPlayers[data.nextPlayerIndex]?.name || 'Unknown';
-                     addLog(`Turn passed to ${nextName}`);
+                 }
+             }
+             else if (action === 'UPDATE_LIFE') {
+                 if (sender && sender.id !== 'local-player') {
+                     setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
                  }
              }
              else if (action === 'ADD_OBJECT') {
@@ -449,45 +470,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     if (senderId === 'opponent-top') {
                         x = -x; y = -y; rotation = (rotation + 180) % 360;
                     } else if (senderId === 'opponent-left') {
-                        // If sender is Left (-X), their UP is our RIGHT (+X). 
-                        // It's a 90 deg rotation relative to center?
-                        // If I am at Bottom. Left is -90 deg.
-                        // If they send (0,0), it's center.
-                        // If they send (0, 100) (Up for them), it should go Right for me? No.
-                        // Standard: Rotate (x,y) by the seat difference angle.
-                        // Left is +90 or -90?
-                        // Let's assume standard math rotation.
-                        // Rotate 90 deg CW: (x, y) -> (-y, x).
-                        // Rotate 90 deg CCW: (x, y) -> (y, -x).
-                        
-                        // If sender is 'opponent-left' (Left side).
-                        // We need to rotate their coords so they appear on the left?
-                        // No, they are SENDING coords in THEIR canonical view (Bottom).
-                        // We need to move them to the LEFT.
-                        // So rotate -90 deg?
-                        // (0, 100) [Their Up] -> (100, 0) [My Right].
-                        // Wait, if they push UP (towards center), it should go towards center.
-                        // Their UP is (0, -100) in DOM coords (Y is down).
-                        // If they send (0, -100).
-                        // I want to see it coming from Left (-100, 0).
-                        // (0, -100) -> (-100, 0).
-                        // This is swap and sign change.
-                        // If x=0, y=-100 -> x'=-100, y'=0. => x'=y, y'=x? No.
-                        
-                        // Let's stick to simple:
-                        // Top: x' = -x, y' = -y.
-                        // Left: x' = y, y' = -x.
-                        // Right: x' = -y, y' = x.
-                        
-                        const tempX = x;
-                        x = y;
-                        y = -tempX;
-                        rotation = (rotation + 90) % 360;
-                    } else if (senderId === 'opponent-right') {
+                        // Corrected: Left Sender (-90 deg visually) -> We want on Left.
+                        // Maps (0, GAP) [Their Bottom] -> (-GAP, 0) [Our Left].
+                        // x = -y, y = x.
                         const tempX = x;
                         x = -y;
                         y = tempX;
                         rotation = (rotation - 90) % 360;
+                    } else if (senderId === 'opponent-right') {
+                        // Corrected: Right Sender (+90 deg visually) -> We want on Right.
+                        // Maps (0, GAP) [Their Bottom] -> (GAP, 0) [Our Right].
+                        // x = y, y = -x.
+                        const tempX = x;
+                        x = y;
+                        y = -tempX;
+                        rotation = (rotation + 90) % 360;
                     }
 
                     const mappedObj = { ...data, x, y, rotation, controllerId: senderId };
@@ -504,36 +501,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                              let y = updates.y !== undefined ? updates.y : o.y;
                              let rotation = updates.rotation !== undefined ? updates.rotation : o.rotation;
                              
-                             // We need to transform the INCOMING raw coordinates again?
-                             // Sender sends RAW (their view).
-                             // We re-apply transform.
-                             
                              if (senderId === 'opponent-top') {
                                  if(updates.x !== undefined) updates.x = -updates.x;
                                  if(updates.y !== undefined) updates.y = -updates.y;
                                  if(updates.rotation !== undefined) updates.rotation = (updates.rotation + 180) % 360;
                              } else if (senderId === 'opponent-left') {
                                  if(updates.x !== undefined || updates.y !== undefined) {
-                                     // Need both to rotate
-                                     const rawX = updates.x !== undefined ? updates.x : 0; // Delta? No absolute.
+                                     const rawX = updates.x !== undefined ? updates.x : 0; 
                                      const rawY = updates.y !== undefined ? updates.y : 0;
-                                     // This is tricky for partial updates.
-                                     // Assume full position update or sync drift.
-                                     // Let's just apply the transform logic to the updates if present.
-                                     // But UPDATE_OBJECT sends absolute new pos.
                                      const tx = rawX; const ty = rawY;
-                                     updates.x = ty;
-                                     updates.y = -tx;
+                                     updates.x = -ty;
+                                     updates.y = tx;
                                  }
-                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation + 90) % 360;
+                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation - 90) % 360;
                              } else if (senderId === 'opponent-right') {
                                  if(updates.x !== undefined || updates.y !== undefined) {
                                      const rawX = updates.x !== undefined ? updates.x : 0;
                                      const rawY = updates.y !== undefined ? updates.y : 0;
-                                     updates.x = -rawY;
-                                     updates.y = rawX;
+                                     updates.x = rawY;
+                                     updates.y = -rawX;
                                  }
-                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation - 90) % 360;
+                                 if(updates.rotation !== undefined) updates.rotation = (updates.rotation + 90) % 360;
                              }
                          }
 
@@ -703,8 +691,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     
     const nextTurn = () => {
         const nextIndex = (activePlayerIndex + 1) % playersList.length;
+        const nextPlayer = playersList[nextIndex];
         const nextTurnNum = nextIndex === 0 ? turn + 1 : turn;
-        emitAction('PASS_TURN', { nextPlayerIndex: nextIndex, turnNumber: nextTurnNum });
+        
+        emitAction('PASS_TURN', { 
+            nextPlayerIndex: nextIndex, // Keep for backward compat if needed, but ID is better
+            nextPlayerSocketId: nextPlayer.socketId, 
+            turnNumber: nextTurnNum 
+        });
     };
 
     const formatTime = (ms: number) => {
@@ -1259,9 +1253,53 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     onPlayTopLibrary={playTopLibrary}
                     onPlayTopGraveyard={playTopGraveyard}
                 />
-                <PlaymatGhost x={TOP_MAT_POS.x} y={TOP_MAT_POS.y} width={MAT_W} height={MAT_H} rotation={180} playerName="Opponent 1" />
-                <PlaymatGhost x={RIGHT_MAT_POS.x} y={RIGHT_MAT_POS.y} width={MAT_W} height={MAT_H} rotation={-90} playerName="Opponent 2" />
-                <PlaymatGhost x={LEFT_MAT_POS.x} y={LEFT_MAT_POS.y} width={MAT_W} height={MAT_H} rotation={90} playerName="Opponent 3" />
+                <PlaymatGhost 
+                    x={TOP_MAT_POS.x} y={TOP_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                    rotation={180} 
+                    playerName={playersList.find(p => p.id === 'opponent-top')?.name || 'Opponent 1'} 
+                />
+                <div 
+                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
+                    style={{ 
+                        left: TOP_MAT_POS.x + MAT_W/2, 
+                        top: TOP_MAT_POS.y + MAT_H + 20, 
+                        transform: 'translate(-50%, 0) rotate(180deg)' 
+                    }}
+                >
+                    {opponentsLife['opponent-top'] ?? 40} HP
+                </div>
+
+                <PlaymatGhost 
+                    x={RIGHT_MAT_POS.x} y={RIGHT_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                    rotation={-90} 
+                    playerName={playersList.find(p => p.id === 'opponent-right')?.name || 'Opponent 2'} 
+                />
+                <div 
+                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
+                    style={{ 
+                        left: RIGHT_MAT_POS.x - 20, 
+                        top: RIGHT_MAT_POS.y + MAT_H/2, 
+                        transform: 'translate(0, -50%) rotate(-90deg)' 
+                    }}
+                >
+                    {opponentsLife['opponent-right'] ?? 40} HP
+                </div>
+
+                <PlaymatGhost 
+                    x={LEFT_MAT_POS.x} y={LEFT_MAT_POS.y} width={MAT_W} height={MAT_H} 
+                    rotation={90} 
+                    playerName={playersList.find(p => p.id === 'opponent-left')?.name || 'Opponent 3'} 
+                />
+                <div 
+                    className="absolute text-white font-bold text-lg bg-black/50 px-2 rounded"
+                    style={{ 
+                        left: LEFT_MAT_POS.x + MAT_W + 20, 
+                        top: LEFT_MAT_POS.y + MAT_H/2, 
+                        transform: 'translate(0, -50%) rotate(90deg)' 
+                    }}
+                >
+                    {opponentsLife['opponent-left'] ?? 40} HP
+                </div>
 
                 {boardObjects.map(obj => (
                     <div key={obj.id} className="pointer-events-auto"> 
@@ -1284,6 +1322,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             </div>
         </div>
     );
+
+    const cardsInHand = hand.filter(c => !c.isToken);
+    const tokensInHand = hand.filter(c => c.isToken);
 
     return (
         <div className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col">
@@ -1622,7 +1663,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
                             <div className="relative w-full px-8 pb-4 flex items-end justify-center pointer-events-auto">
                                 <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden custom-scrollbar pb-2" style={{ maxWidth: '85vw' }}>
-                                    {hand.map((card, idx) => (
+                                    {cardsInHand.map((card, idx) => (
                                         <HandCard 
                                             key={card.id} 
                                             card={card} 
@@ -1632,6 +1673,41 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             onSendToZone={sendToZone}
                                         />
                                     ))}
+                                    
+                                    {/* Tokens Pile */}
+                                    {tokensInHand.length > 0 && (
+                                        <div className="flex flex-col items-center">
+                                            {!areTokensExpanded ? (
+                                                <div 
+                                                    className="w-24 h-32 bg-gray-800 border-2 border-yellow-500 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg"
+                                                    onClick={() => setAreTokensExpanded(true)}
+                                                >
+                                                    <Layers className="text-yellow-500 mb-2" size={24} />
+                                                    <span className="text-white font-bold text-xs">Tokens ({tokensInHand.length})</span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex gap-2 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                                                    {tokensInHand.map((card) => (
+                                                        <HandCard 
+                                                            key={card.id} 
+                                                            card={card} 
+                                                            scale={handScale}
+                                                            onInspect={setInspectCard} 
+                                                            onPlay={playCardFromHand} 
+                                                            onSendToZone={sendToZone}
+                                                        />
+                                                    ))}
+                                                    <button 
+                                                        onClick={() => setAreTokensExpanded(false)}
+                                                        className="self-center bg-gray-800 p-2 rounded-full border border-gray-600 hover:bg-gray-700 text-gray-400"
+                                                        title="Collapse Tokens"
+                                                    >
+                                                        <X size={16}/>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 {hand.length === 0 && tokens.length === 0 && <div className="h-48 flex items-center text-gray-500 italic relative z-10">Hand is empty</div>}
                             </div>
