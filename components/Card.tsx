@@ -25,12 +25,15 @@ interface CardProps {
   scale?: number;
   viewScale?: number;
   viewRotation?: number;
+  viewX?: number;
+  viewY?: number;
+  onPan?: (dx: number, dy: number) => void;
   initialDragEvent?: React.PointerEvent | null; 
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, initialDragEvent }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ startX: number, startY: number, initialObjX: number, initialObjY: number } | null>(null);
+  const dragStartRef = useRef<{ offsetX: number, offsetY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -38,13 +41,20 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   // Handle immediate drag from hand/zones
   React.useEffect(() => {
       if (initialDragEvent && cardRef.current) {
+         const dx = initialDragEvent.clientX - viewX;
+         const dy = initialDragEvent.clientY - viewY;
+         const scaledX = dx / viewScale;
+         const scaledY = dy / viewScale;
+         const rad = -viewRotation * (Math.PI / 180);
+         const worldX = scaledX * Math.cos(rad) - scaledY * Math.sin(rad);
+         const worldY = scaledX * Math.sin(rad) + scaledY * Math.cos(rad);
+
          onBringToFront(object.id);
          setIsDragging(true);
+         
          dragStartRef.current = {
-             startX: initialDragEvent.clientX,
-             startY: initialDragEvent.clientY,
-             initialObjX: object.x,
-             initialObjY: object.y
+             offsetX: worldX - object.x,
+             offsetY: worldY - object.y
          };
          (cardRef.current as Element).setPointerCapture(initialDragEvent.pointerId);
       }
@@ -65,11 +75,18 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     }, 500);
 
     setIsDragging(true);
+    
+    const dx = e.clientX - viewX;
+    const dy = e.clientY - viewY;
+    const scaledX = dx / viewScale;
+    const scaledY = dy / viewScale;
+    const rad = -viewRotation * (Math.PI / 180);
+    const worldX = scaledX * Math.cos(rad) - scaledY * Math.sin(rad);
+    const worldY = scaledX * Math.sin(rad) + scaledY * Math.cos(rad);
+
     dragStartRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      initialObjX: object.x,
-      initialObjY: object.y
+      offsetX: worldX - object.x,
+      offsetY: worldY - object.y
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -79,32 +96,34 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     e.preventDefault();
     e.stopPropagation();
 
-    // Calculate screen delta
-    const screenDx = e.clientX - dragStartRef.current.startX;
-    const screenDy = e.clientY - dragStartRef.current.startY;
-
-    // Apply Inverse Scale
-    const scaledDx = screenDx / viewScale;
-    const scaledDy = screenDy / viewScale;
-
-    // Cancel long press if moved significantly
-    if (Math.abs(screenDx) > 5 || Math.abs(screenDy) > 5) {
-        if (longPressTimer.current) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
+    // Edge Pan Logic
+    if (onPan) {
+        const EDGE_THRESHOLD = 50;
+        const PAN_SPEED = 15;
+        let panX = 0;
+        let panY = 0;
+        
+        if (e.clientX < EDGE_THRESHOLD) panX = PAN_SPEED;
+        else if (e.clientX > window.innerWidth - EDGE_THRESHOLD) panX = -PAN_SPEED;
+        
+        if (e.clientY < EDGE_THRESHOLD) panY = PAN_SPEED;
+        else if (e.clientY > window.innerHeight - EDGE_THRESHOLD) panY = -PAN_SPEED;
+        
+        if (panX !== 0 || panY !== 0) onPan(panX, panY);
     }
 
-    // Apply Inverse Rotation
-    // If view is rotated R, we need to rotate delta by -R to get world delta
-    const rad = -viewRotation * (Math.PI / 180);
-    const worldDx = scaledDx * Math.cos(rad) - scaledDy * Math.sin(rad);
-    const worldDy = scaledDx * Math.sin(rad) + scaledDy * Math.cos(rad);
+    // Cancel long press if moved significantly
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
 
-    onUpdate(object.id, { 
-        x: dragStartRef.current.initialObjX + worldDx, 
-        y: dragStartRef.current.initialObjY + worldDy 
-    });
+    const dx = e.clientX - viewX;
+    const dy = e.clientY - viewY;
+    const scaledX = dx / viewScale;
+    const scaledY = dy / viewScale;
+    const rad = -viewRotation * (Math.PI / 180);
+    const worldX = scaledX * Math.cos(rad) - scaledY * Math.sin(rad);
+    const worldY = scaledX * Math.sin(rad) + scaledY * Math.cos(rad);
+
+    onUpdate(object.id, { x: worldX - dragStartRef.current.offsetX, y: worldY - dragStartRef.current.offsetY });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -115,10 +134,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     if (!dragStartRef.current) return;
     
-    const moveX = Math.abs(object.x - dragStartRef.current.initialObjX);
-    const moveY = Math.abs(object.y - dragStartRef.current.initialObjY);
-    const totalMove = Math.sqrt(moveX * moveX + moveY * moveY);
-
     setIsDragging(false);
     dragStartRef.current = null;
     if(e.target) (e.target as Element).releasePointerCapture(e.pointerId);
@@ -177,7 +192,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       e.preventDefault(); // Stop double click
       e.stopPropagation();
       const current = object.counters["+1/+1"] || 0;
-      const newVal = Math.max(0, current + delta);
+      const newVal = current + delta;
       onUpdate(object.id, { counters: { ...object.counters, "+1/+1": newVal } });
   };
 
@@ -308,8 +323,10 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
              )}
 
              {/* Counters Visual */}
-             {(object.counters["+1/+1"] || 0) > 0 && (
-                 <div className="absolute top-2 right-2 bg-white text-black font-bold rounded-full w-8 h-8 flex items-center justify-center border-2 border-blue-500 shadow-lg z-10 pointer-events-none">
+             {(object.counters["+1/+1"] || 0) !== 0 && (
+                 <div className={`absolute top-2 right-2 font-bold rounded-full w-8 h-8 flex items-center justify-center border-2 shadow-lg z-10 pointer-events-none ${
+                     (object.counters["+1/+1"] || 0) > 0 ? "bg-white text-black border-blue-500" : "bg-red-600 text-white border-red-800"
+                 }`}>
                      {object.counters["+1/+1"]}
                  </div>
              )}

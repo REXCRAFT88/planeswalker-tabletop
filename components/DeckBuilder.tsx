@@ -135,9 +135,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     : [];
 
   return (
-    <div className="flex flex-col h-full p-8 max-w-6xl mx-auto">
+    <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+        <h1 className="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
           {stagedDeck ? 'Select Commander' : 'Import Deck'}
         </h1>
         <button onClick={onBack} className="text-gray-400 hover:text-white transition">

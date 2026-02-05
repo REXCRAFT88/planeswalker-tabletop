@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
-import { JudgeChat } from './JudgeChat';
 import { GameStatsModal } from './GameStatsModal';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { 
-    LogOut, MessageSquare, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, 
+    LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, 
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords,
     Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3
 } from 'lucide-react';
@@ -45,7 +44,7 @@ interface LibraryActionState {
 // --- Layout Constants ---
 const MAT_W = 840; // Wider to fit more cards
 const MAT_H = 400;
-const RADIUS = 1100;
+const RADIUS = 625;
 
 // World Coordinates (Absolute)
 const LOCAL_MAT_POS = { x: -MAT_W / 2, y: RADIUS - MAT_H / 2 }; // Seat 0 (Bottom)
@@ -360,7 +359,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
     
     // UI State
-    const [isJudgeOpen, setIsJudgeOpen] = useState(false);
     const [isLogOpen, setIsLogOpen] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [view, setView] = useState<ViewState>({ x: window.innerWidth / 2, y: window.innerHeight / 2, scale: 0.5 });
@@ -384,6 +382,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [isHost, setIsHost] = useState(false);
     const [showEndGameModal, setShowEndGameModal] = useState(false);
     const [showStatsModal, setShowStatsModal] = useState(false);
+    const [revealedCards, setRevealedCards] = useState<CardData[]>([]);
 
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
@@ -391,6 +390,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const containerRef = useRef<HTMLDivElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
     const opponentContainerRef = useRef<HTMLDivElement>(null);
+    const handContainerRef = useRef<HTMLDivElement>(null);
     
     // View Control Refs
     const isDraggingView = useRef(false);
@@ -698,6 +698,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setGameStats({});
                 addLog("The host has restarted the game", "SYSTEM");
             }
+            else if (action === 'REVEAL_CARDS') {
+                 if (sender && sender.id !== socket.id) {
+                     setRevealedCards(data.cards);
+                 }
+            }
         };
 
         socket.on('room_players_update', handleRoomUpdate);
@@ -766,7 +771,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const rx = targetX * Math.cos(rad) - targetY * Math.sin(rad);
             const ry = targetX * Math.sin(rad) + targetY * Math.cos(rad);
             
-            const s = 1.1; 
+            const s = 0.6; 
             const vx = (paneW / 2) - s * rx;
             const vy = (paneH / 2) - s * ry;
             
@@ -1346,7 +1351,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'u': untapAll(); break;
             case 's': shuffleLibrary(); break;
             case 'l': setIsLogOpen(prev => !prev); break;
-            case 'j': setIsJudgeOpen(prev => !prev); break;
             case '?': setShowShortcuts(prev => !prev); break;
         }
     };
@@ -1445,6 +1449,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         else if (searchModal.source === 'EXILE') newExile = rest;
 
         if (action === 'HAND') { newHand = [...newHand, ...trayCards]; addLog(`added ${trayCards.length} cards from tray to hand`); }
+        else if (action === 'HAND_REVEAL') { 
+            newHand = [...newHand, ...trayCards]; 
+            addLog(`revealed and added to hand: ${trayCards.map(c => c.name).join(', ')}`); 
+            emitAction('REVEAL_CARDS', { cards: trayCards });
+        }
         else if (action === 'TOP') { newLib = [...trayCards, ...newLib]; addLog(`put ${trayCards.length} cards from tray on top of library`); }
         else if (action === 'BOTTOM') { newLib = [...newLib, ...trayCards]; addLog(`put ${trayCards.length} cards from tray on bottom of library`); }
         else if (action === 'GRAVEYARD') { newGrave = [...trayCards, ...newGrave]; addLog(`put ${trayCards.length} cards from tray into graveyard`); }
@@ -1500,7 +1509,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             };
             isDraggingView.current = false;
         } else if (activePointers.current.size === 1) {
-            if (e.button === 1 || (e.button === 0 && isSpacePressed.current)) {
+            if (e.button === 0 || e.button === 1) {
                  isDraggingView.current = true;
                  lastMousePos.current = { x: e.clientX, y: e.clientY };
                  e.preventDefault();
@@ -1542,6 +1551,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
+    const handleEdgePan = (dx: number, dy: number) => {
+        setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+    };
+
     const handleContainerPointerUp = (e: React.PointerEvent) => {
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
         activePointers.current.delete(e.pointerId);
@@ -1557,9 +1570,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleWheel = (e: React.WheelEvent) => {
-        const scaleAmount = -e.deltaY * 0.001;
-        const newScale = Math.min(Math.max(0.1, view.scale + scaleAmount), 5); 
-        setView(prev => ({ ...prev, scale: newScale }));
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const delta = -e.deltaY * 0.001;
+
+        setView(prev => {
+            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
+            const scaleRatio = newScale / prev.scale;
+            const newX = mx - (mx - prev.x) * scaleRatio;
+            const newY = my - (my - prev.y) * scaleRatio;
+            return { ...prev, x: newX, y: newY, scale: newScale };
+        });
     };
 
     const handleOpponentPointerDown = (e: React.PointerEvent) => {
@@ -1588,9 +1610,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
      const handleOpponentWheel = (e: React.WheelEvent) => {
-        const scaleAmount = -e.deltaY * 0.001;
-        const newScale = Math.min(Math.max(0.1, opponentView.scale + scaleAmount), 5);
-        setOpponentView(prev => ({ ...prev, scale: newScale }));
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const delta = -e.deltaY * 0.001;
+
+        setOpponentView(prev => {
+            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
+            const scaleRatio = newScale / prev.scale;
+            const newX = mx - (mx - prev.x) * scaleRatio;
+            const newY = my - (my - prev.y) * scaleRatio;
+            return { ...prev, x: newX, y: newY, scale: newScale };
+        });
+    };
+
+    const handleHandWheel = (e: React.WheelEvent) => {
+        if (handContainerRef.current) {
+            handContainerRef.current.scrollLeft += e.deltaY;
+        }
     };
 
     const renderWorld = (viewState: ViewState, containerRefToUse: React.RefObject<HTMLDivElement>, handlers: any, rotation: number = 0, isOpponent: boolean = false) => (
@@ -1694,6 +1731,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             onLog={addLog}
                             viewScale={viewState.scale}
                             viewRotation={rotation}
+                            viewX={viewState.x}
+                            viewY={viewState.y}
+                            onPan={isOpponent ? undefined : handleEdgePan}
                         />
                     </div>
                 ))}
@@ -1922,10 +1962,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- UI: Top Bar --- */}
-            <div className="flex-none h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-6 z-50 backdrop-blur-md relative">
-                 <div className="flex items-center gap-6">
+            <div className="flex-none h-14 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
+                 <div className="flex items-center gap-2 md:gap-6">
                     {/* Players List */}
-                    <div className="flex items-center gap-4 overflow-x-auto max-w-[30vw] md:max-w-none custom-scrollbar pb-1">
+                    <div className="flex items-center gap-4 overflow-x-auto max-w-[40vw] md:max-w-none custom-scrollbar pb-1">
                         {playersList.map(p => {
                             const isMe = p.id === socket.id;
                             const pLife = isMe ? life : (opponentsLife[p.id] ?? 40);
@@ -1947,18 +1987,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     >
                                         {p.name.charAt(0).toUpperCase()}
                                     </div>
-                                    <div className="flex flex-col leading-none">
+                                    <div className="flex flex-col leading-none justify-center">
                                         <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
-                                        <div className="flex items-center gap-2 text-[10px]">
-                                            <span className="text-white font-mono">{pLife} HP</span>
+                                        <span className="text-white font-mono text-[10px]">{pLife} HP</span>
+                                    </div>
+                                    {takenDamage.length > 0 && (
+                                        <div className="flex flex-col gap-0.5 ml-1">
                                             {takenDamage.map(td => (
-                                                 <div key={td.id} className="flex items-center gap-0.5 bg-black/40 px-1 rounded" title={`Damage from ${td.name}'s Commander`}>
+                                                 <div key={td.id} className="flex items-center gap-1 bg-black/40 px-1 rounded h-3" title={`Damage from ${td.name}'s Commander`}>
                                                      <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: td.color}}></div>
-                                                     <span className={`font-bold ${td.dmg >= 21 ? 'text-red-500' : 'text-gray-300'}`}>{td.dmg}</span>
+                                                     <span className={`font-bold text-[9px] leading-none ${td.dmg >= 21 ? 'text-red-500' : 'text-gray-300'}`}>{td.dmg}</span>
                                                  </div>
                                             ))}
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -2039,18 +2081,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <History size={20} />
                     </button>
+                    <button 
+                        onClick={() => setShowStatsModal(true)}
+                        className={`p-2 rounded-lg transition-colors ${showStatsModal ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
+                        title="Game Stats"
+                    >
+                        <BarChart3 size={20} />
+                    </button>
                     {isHost && (
                         <button onClick={() => setShowEndGameModal(true)} className="p-2 rounded-lg hover:bg-gray-800 text-red-400 hover:text-red-300" title="End Game">
                             <RotateCcw size={20} />
                         </button>
                     )}
-                    <button 
-                        onClick={() => setIsJudgeOpen(!isJudgeOpen)} 
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${isJudgeOpen ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'}`}
-                    >
-                        <MessageSquare size={16} />
-                        <span className="hidden md:inline">Judge</span>
-                    </button>
                     <button onClick={handleExit} className="flex items-center gap-2 px-4 py-2 bg-red-900/50 hover:bg-red-900/80 border border-red-800 text-red-200 rounded-lg transition-colors">
                         <LogOut size={16} />
                         <span className="hidden md:inline">Leave</span>
@@ -2059,10 +2101,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             </div>
 
             {/* --- Main Content Area --- */}
-            <div className="flex-1 flex overflow-hidden relative">
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
                 
                 {/* Left / Main Pane */}
-                <div className={`${isOpponentViewOpen ? 'w-1/2 border-r border-gray-700' : 'w-full'} relative h-full transition-all duration-300`}>
+                <div className={`${isOpponentViewOpen ? 'h-1/2 w-full md:w-1/2 md:h-full border-b md:border-b-0 md:border-r border-gray-700' : 'w-full h-full'} relative transition-all duration-300`}>
                      {renderWorld(view, containerRef, {
                          onDown: handleContainerPointerDown,
                          onMove: handleContainerPointerMove,
@@ -2081,8 +2123,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <>
                         <div className="absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none">
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
-                            <div className="relative w-full px-8 pb-8 flex items-end justify-center pointer-events-auto">
-                                <div className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-6 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50 hover:scrollbar-thumb-gray-400" style={{ maxWidth: '85vw' }}>
+                            <div className="relative w-full px-2 md:px-8 pb-4 md:pb-8 flex items-end justify-center pointer-events-auto">
+                                <div 
+                                    ref={handContainerRef}
+                                    onWheel={handleHandWheel}
+                                    className="flex gap-2 items-end min-w-min px-4 overflow-x-auto overflow-y-hidden pb-2 md:pb-6 mx-auto scrollbar-thin scrollbar-thumb-gray-500 scrollbar-track-gray-800/50 hover:scrollbar-thumb-gray-400 touch-pan-x" 
+                                    style={{ maxWidth: '100vw' }}
+                                >
                                     {cardsInHand.map((card, idx) => (
                                         <HandCard 
                                             key={card.id} 
@@ -2142,7 +2189,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </div>
                         </div>
                         
-                        <div className="absolute bottom-6 right-6 z-[60] flex flex-col items-center bg-gray-800/80 backdrop-blur rounded-lg p-2 border border-gray-600">
+                        <div className="absolute bottom-24 right-2 md:bottom-6 md:right-6 z-[60] flex flex-col items-center bg-gray-800/80 backdrop-blur rounded-lg p-2 border border-gray-600">
                             <Settings size={16} className="text-gray-400 mb-2" />
                             <input 
                                 type="range" 
@@ -2161,7 +2208,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 
                 {/* Right / Opponent Pane */}
                 {isOpponentViewOpen && (
-                    <div className="w-1/2 h-full relative bg-gray-900 border-l border-gray-700 flex flex-col">
+                    <div className="w-full h-1/2 md:w-1/2 md:h-full relative bg-gray-900 md:border-l border-gray-700 flex flex-col">
                         <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4 z-20 shadow-md">
                             <div className="flex items-center gap-3">
                                 <button 
@@ -2222,8 +2269,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* Modals */}
-            <JudgeChat isOpen={isJudgeOpen} onClose={() => setIsJudgeOpen(false)} />
-            
             {showEndGameModal && (
                 <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
@@ -2231,9 +2276,36 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <p className="text-gray-300 mb-8">Do you want to restart the lobby with current players or return to the main menu?</p>
                         <div className="flex flex-col gap-3">
                             <button onClick={handleRestartGame} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><RotateCcw size={18}/> Restart Lobby</button>
+                            <button onClick={() => setShowStatsModal(true)} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2"><BarChart3 size={18}/> View Stats</button>
                             <button onClick={handleExit} className="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><LogOut size={18}/> Return to Menu</button>
                             <button onClick={() => setShowEndGameModal(false)} className="w-full py-2 text-gray-400 hover:text-white mt-2">Cancel</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            <GameStatsModal 
+                isOpen={showStatsModal} 
+                onClose={() => setShowStatsModal(false)} 
+                stats={gameStats} 
+                players={playersList} 
+            />
+
+            {revealedCards.length > 0 && (
+                <div className="fixed inset-0 z-[11000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-5xl w-full flex flex-col items-center max-h-[90vh]">
+                        <h3 className="text-2xl font-bold text-white mb-6">Revealed Cards</h3>
+                        <div className="flex flex-wrap gap-6 justify-center overflow-y-auto p-2 w-full custom-scrollbar">
+                            {revealedCards.map((card, idx) => (
+                                <div key={idx} className="w-48 aspect-[2.5/3.5] relative flex-shrink-0">
+                                    <img src={card.imageUrl} className="w-full h-full object-cover rounded-xl shadow-lg border border-gray-700" alt={card.name} />
+                                    <div className="text-center mt-2 text-sm font-bold text-gray-300">{card.name}</div>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={() => setRevealedCards([])} className="mt-6 px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg transition-transform active:scale-95">
+                            Close
+                        </button>
                     </div>
                 </div>
             )}
@@ -2287,7 +2359,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Untap All</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">U</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Shuffle Library</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">S</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Judge Chat</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">J</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Help / Shortcuts</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">?</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space (Hold) + Drag</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Zoom Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Mouse Wheel</kbd></div>
@@ -2448,6 +2519,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </h3>
                                 <div className="flex gap-2">
                                     <button onClick={() => handleTrayAction('HAND')} disabled={searchModal.tray.length===0} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Hand size={12}/> Hand</button>
+                                    <button onClick={() => handleTrayAction('HAND_REVEAL')} disabled={searchModal.tray.length===0} className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Eye size={12}/> Hand & Reveal</button>
                                     <button onClick={() => handleTrayAction('GRAVEYARD')} disabled={searchModal.tray.length===0} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Archive size={12}/> Grave</button>
                                     <button onClick={() => handleTrayAction('EXILE')} disabled={searchModal.tray.length===0} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><X size={12}/> Exile</button>
                                     <div className="w-px h-6 bg-gray-700 mx-2" />

@@ -237,7 +237,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   return (
     <div className="w-full h-full overflow-y-auto relative">
-      <div className="min-h-full flex flex-col items-center justify-center p-4 animate-in fade-in duration-700">
+      <div className="min-h-full flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-700">
         <div className="w-full max-w-md">
       <div className="text-center mb-8">
         <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3">
