@@ -30,9 +30,10 @@ interface CardProps {
   onPan?: (dx: number, dy: number) => void;
   initialDragEvent?: React.PointerEvent | null; 
   onLongPress?: (id: string) => void;
+  isMobile?: boolean;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ offsetX: number, offsetY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -148,6 +149,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
   const handleDoubleClick = (e: React.MouseEvent) => {
       // Prevent double click if clicking UI
+      if (isMobile) return;
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
       e.stopPropagation();
       onInspect(object.cardData);
@@ -287,6 +289,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     className="w-4 h-4 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-red-500 border border-gray-600 transition-colors"
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); onUpdate(object.id, { quantity: object.quantity - 1 }); }}
+                    onDoubleClick={(e) => e.stopPropagation()}
                  >
                      <Minus size={8} />
                  </button>
@@ -294,6 +297,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     className="w-4 h-4 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-green-500 border border-gray-600 transition-colors"
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); onUpdate(object.id, { quantity: object.quantity + 1 }); }}
+                    onDoubleClick={(e) => e.stopPropagation()}
                  >
                      <Plus size={8} />
                  </button>
@@ -326,7 +330,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         onPointerUp={handlePointerUp}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-        onClick={() => setShowOverlay(false)} // Tap to close overlay if open
+        onClick={() => !isMobile && setShowOverlay(false)} // Tap to close overlay if open (desktop only)
       >
         {/* Stack Layers (Behind) */}
         {isStack && (
@@ -366,7 +370,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
              )}
              
              {/* Hover Actions */}
-             <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+             <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
                 
                 {/* Stack Controls */}
                 {isStack && isControlledByMe ? (

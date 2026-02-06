@@ -5,10 +5,11 @@ import { GameStatsModal } from './GameStatsModal';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
+import { PLAYER_COLORS } from '../constants';
 import { 
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -21,6 +22,27 @@ interface TabletopProps {
     isLocal?: boolean;
     localOpponents?: { name: string, deck: CardData[], tokens: CardData[], color: string }[];
     onExit: () => void;
+}
+
+interface LocalPlayerState {
+    id: string;
+    hand: CardData[];
+    library: CardData[];
+    graveyard: CardData[];
+    exile: CardData[];
+    commandZone: CardData[];
+    life: number;
+    mulliganCount: number;
+    hasKeptHand: boolean;
+}
+
+interface DieRoll {
+    id: string;
+    value: number;
+    sides: number;
+    playerId: string;
+    x: number;
+    y: number;
 }
 
 interface ViewState {
@@ -114,6 +136,28 @@ const HandCard: React.FC<{
         </div>
     </div>
   );
+};
+
+const Die: React.FC<{ value: number, sides: number, x: number, y: number, color: string }> = ({ value, sides, x, y, color }) => {
+    return (
+        <div 
+            className="absolute flex items-center justify-center z-[1000] animate-in zoom-in spin-in duration-500 ease-out"
+            style={{ 
+                left: x, top: y, 
+                width: 64, height: 64,
+                transform: 'translate(-50%, -50%)'
+            }}
+        >
+            <div 
+                className="w-full h-full flex items-center justify-center bg-gray-900 border-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] relative overflow-hidden"
+                style={{ borderColor: color, boxShadow: `0 0 20px ${color}60` }}
+            >
+                <div className="absolute inset-0 bg-white/10" />
+                <span className="text-3xl font-bold text-white drop-shadow-md">{value}</span>
+                <span className="absolute bottom-1 text-[8px] text-gray-400 font-bold">D{sides}</span>
+            </div>
+        </div>
+    );
 };
 
 const PlaymatGhost: React.FC<{
@@ -302,53 +346,80 @@ const DamageReportModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
     players: {id: string, name: string, color: string}[];
-    lifeDelta: number;
-    onConfirm: (report: Record<string, number>) => void;
-}> = ({ isOpen, onClose, players, lifeDelta, onConfirm }) => {
-    const [report, setReport] = useState<Record<string, number>>({});
+    damage: number;
+    healing: number;
+    onConfirm: (damageReport: Record<string, number>, healingReport: Record<string, number>) => void;
+}> = ({ isOpen, onClose, players, damage, healing, onConfirm }) => {
+    const [damageReport, setDamageReport] = useState<Record<string, number>>({});
+    const [healingReport, setHealingReport] = useState<Record<string, number>>({});
 
     if (!isOpen) return null;
 
-    const handleChange = (playerId: string, val: string) => {
+    const handleDamageChange = (playerId: string, val: string) => {
         const num = parseInt(val) || 0;
-        setReport(prev => ({ ...prev, [playerId]: num }));
+        setDamageReport(prev => ({ ...prev, [playerId]: num }));
+    };
+
+    const handleHealingChange = (playerId: string, val: string) => {
+        const num = parseInt(val) || 0;
+        setHealingReport(prev => ({ ...prev, [playerId]: num }));
     };
 
     const handleSubmit = () => {
-        onConfirm(report);
-        setReport({});
+        onConfirm(damageReport, healingReport);
+        setDamageReport({});
+        setHealingReport({});
         onClose();
     };
 
-    const isDamage = lifeDelta < 0;
-    const absDelta = Math.abs(lifeDelta);
-
     return (
         <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full">
-                <h3 className="text-xl font-bold text-white mb-2">
-                    {isDamage ? 'Damage Report' : 'Healing Report'}
-                </h3>
-                <p className="text-gray-300 mb-4">
-                    You {isDamage ? 'lost' : 'gained'} <span className={`font-bold ${isDamage ? 'text-red-400' : 'text-green-400'}`}>{absDelta} life</span> this turn.
-                    Who is responsible?
-                </p>
+            <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-bold text-white mb-4">Life Change Report</h3>
                 
-                <div className="space-y-3 mb-6">
-                    {players.map(p => (
-                        <div key={p.id} className="flex items-center justify-between bg-gray-700/50 p-2 rounded border border-gray-600">
-                            <span className="text-white font-medium">{p.name}</span>
-                            <input 
-                                type="number" 
-                                placeholder="0"
-                                className="w-20 bg-gray-900 border border-gray-500 rounded px-2 py-1 text-white text-right focus:ring-2 focus:ring-blue-500 outline-none"
-                                onChange={(e) => handleChange(p.id, e.target.value)}
-                            />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {damage > 0 && (
+                        <div>
+                            <h4 className="text-red-400 font-bold mb-2 border-b border-red-900/50 pb-1">Damage Taken ({damage})</h4>
+                            <p className="text-xs text-gray-400 mb-3">Who dealt this damage?</p>
+                            <div className="space-y-2">
+                                {players.map(p => (
+                                    <div key={`dmg-${p.id}`} className="flex items-center justify-between bg-gray-700/30 p-2 rounded border border-gray-600">
+                                        <span className="text-gray-300 text-sm">{p.name}</span>
+                                        <input 
+                                            type="number" 
+                                            placeholder="0"
+                                            className="w-16 bg-gray-900 border border-gray-500 rounded px-2 py-1 text-white text-right text-sm focus:border-red-500 outline-none"
+                                            onChange={(e) => handleDamageChange(p.id, e.target.value)}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                    ))}
+                    )}
+
+                    {healing > 0 && (
+                        <div>
+                            <h4 className="text-green-400 font-bold mb-2 border-b border-green-900/50 pb-1">Healing Received ({healing})</h4>
+                            <p className="text-xs text-gray-400 mb-3">Who provided this healing?</p>
+                            <div className="space-y-2">
+                                {players.map(p => (
+                                    <div key={`heal-${p.id}`} className="flex items-center justify-between bg-gray-700/30 p-2 rounded border border-gray-600">
+                                        <span className="text-gray-300 text-sm">{p.name}</span>
+                                        <input 
+                                            type="number" 
+                                            placeholder="0"
+                                            className="w-16 bg-gray-900 border border-gray-500 rounded px-2 py-1 text-white text-right text-sm focus:border-green-500 outline-none"
+                                            onChange={(e) => handleHealingChange(p.id, e.target.value)}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <div className="flex justify-end gap-3">
+                <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
                     <button onClick={onClose} className="px-4 py-2 text-gray-400 hover:text-white">Skip</button>
                     <button onClick={handleSubmit} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold">Confirm</button>
                 </div>
@@ -499,6 +570,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showDamageReportModal, setShowDamageReportModal] = useState(false);
     const [disconnectModal, setDisconnectModal] = useState<{ isOpen: boolean, player: {id: string, name: string} | null }>({ isOpen: false, player: null });
+    const disconnectModalRef = useRef(disconnectModal);
+    const damageTakenThisTurn = useRef(0);
+    const healingReceivedThisTurn = useRef(0);
+    const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
+    const [ghostPlayers, setGhostPlayers] = useState<{id: string, name: string, color: string}[]>([]);
+    const [joinHandlingModal, setJoinHandlingModal] = useState<{ isOpen: boolean, newPlayer: {id: string, name: string} | null }>({ isOpen: false, newPlayer: null });
+    const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
+    
+    // Local Game State Storage
+    const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -507,7 +588,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const currentTurnPlayerIdRef = useRef(currentTurnPlayerId);
     const commanderDamageRef = useRef(commanderDamage);
     const lifeRef = useRef(life);
-    const lifeAtTurnStart = useRef(life);
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
     const isSpacePressed = useRef(false);
@@ -537,11 +617,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const gamePhaseRef = useRef(gamePhase);
     const prevIsHost = useRef(isHost);
     const startingGameRef = useRef(false);
+    const ghostPlayersRef = useRef(ghostPlayers);
     const turnOrderRef = useRef(turnOrder);
     const trackDamageRef = useRef(trackDamage);
+    const prevPlayersListForLayout = useRef(playersList);
 
     const [isMobile, setIsMobile] = useState(false);
     const [mobileActionCardId, setMobileActionCardId] = useState<string | null>(null);
+    const [isHandVisible, setIsHandVisible] = useState(true);
+    const touchStartRef = useRef<number | null>(null);
     
     const isTwoPlayer = playersList.length === 2 || (isLocal && localOpponents.length === 1);
     const currentRadius = isTwoPlayer ? 210 : 625;
@@ -565,7 +649,94 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { commanderDamageRef.current = commanderDamage; }, [commanderDamage]);
     useEffect(() => { turnOrderRef.current = turnOrder; }, [turnOrder]);
     useEffect(() => { lifeRef.current = life; }, [life]);
+    useEffect(() => { ghostPlayersRef.current = ghostPlayers; }, [ghostPlayers]);
     useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
+
+    // --- Layout Update Effect ---
+    useEffect(() => {
+        const oldPlayers = prevPlayersListForLayout.current;
+        const newPlayers = playersList;
+        
+        const oldIsTwoPlayer = oldPlayers.length === 2; 
+        const newIsTwoPlayer = newPlayers.length === 2;
+        
+        const oldRadius = oldIsTwoPlayer ? 210 : 625;
+        const newRadius = newIsTwoPlayer ? 210 : 625;
+
+        const getSeatPos = (i: number, r: number) => {
+            if (i === 0) return { x: -MAT_W / 2, y: r - MAT_H / 2 };
+            if (i === 1) return { x: -r - MAT_W / 2, y: -MAT_H / 2 };
+            if (i === 2) return { x: -MAT_W / 2, y: -r - MAT_H / 2 };
+            if (i === 3) return { x: r - MAT_W / 2, y: -MAT_H / 2 };
+            return { x: 0, y: 0 };
+        };
+
+        const updates: {id: string, updates: Partial<BoardObject>}[] = [];
+        const oldPlayerMap = new Map<string, {seatIdx: number, pos: {x:number, y:number}, rot: number}>();
+        
+        oldPlayers.forEach((p, idx) => {
+            const seatIdx = getSeatMapping(idx, oldPlayers.length);
+            oldPlayerMap.set(p.id, {
+                seatIdx,
+                pos: getSeatPos(seatIdx, oldRadius),
+                rot: SEAT_ROTATIONS[seatIdx]
+            });
+        });
+
+        const currentBoardObjects = boardObjectsRef.current;
+
+        newPlayers.forEach((p, idx) => {
+            const oldData = oldPlayerMap.get(p.id);
+            if (!oldData) return;
+
+            const newSeatIdx = getSeatMapping(idx, newPlayers.length);
+            const newPos = getSeatPos(newSeatIdx, newRadius);
+            const newRot = SEAT_ROTATIONS[newSeatIdx];
+
+            const posChanged = oldData.pos.x !== newPos.x || oldData.pos.y !== newPos.y;
+            const rotChanged = oldData.rot !== newRot;
+
+            if (posChanged || rotChanged) {
+                const playerObjects = currentBoardObjects.filter(obj => obj.controllerId === p.id);
+                
+                const oldCenter = { x: oldData.pos.x + MAT_W/2, y: oldData.pos.y + MAT_H/2 };
+                const newCenter = { x: newPos.x + MAT_W/2, y: newPos.y + MAT_H/2 };
+                
+                const rotDiff = newRot - oldData.rot;
+                const rad = -rotDiff * (Math.PI / 180);
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+
+                playerObjects.forEach(obj => {
+                    const w = obj.type === 'CARD' ? CARD_WIDTH : 25;
+                    const h = obj.type === 'CARD' ? CARD_HEIGHT : 25;
+                    const cx = obj.x + w/2;
+                    const cy = obj.y + h/2;
+                    const rx = cx - oldCenter.x;
+                    const ry = cy - oldCenter.y;
+                    const rxNew = rx * cos - ry * sin;
+                    const ryNew = rx * sin + ry * cos;
+                    const newCx = newCenter.x + rxNew;
+                    const newCy = newCenter.y + ryNew;
+                    
+                    updates.push({
+                        id: obj.id,
+                        updates: { x: newCx - w/2, y: newCy - h/2, rotation: obj.rotation + rotDiff }
+                    });
+                });
+            }
+        });
+
+        if (updates.length > 0) {
+            setBoardObjects(prev => prev.map(obj => { const u = updates.find(up => up.id === obj.id); return u ? { ...obj, ...u.updates } : obj; }));
+            if (isHost && !isLocal) updates.forEach(u => socket.emit('game_action', { room: roomId, action: 'UPDATE_OBJECT', data: u }));
+        }
+        prevPlayersListForLayout.current = newPlayers;
+    }, [playersList]);
+
+    useEffect(() => {
+        disconnectModalRef.current = disconnectModal;
+    }, [disconnectModal]);
 
     useEffect(() => {
         rootRef.current?.focus();
@@ -578,12 +749,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         if (isLocal) {
             const opponents = localOpponents.map((opp, idx) => ({
-                id: `player-${idx + 1}`,
+                id: opp.id || `player-${idx + 1}`,
                 name: opp.name,
                 color: opp.color
             }));
-            setPlayersList(prev => [prev[0], ...opponents]);
+            const allPlayers = [playersList[0], ...opponents];
+            setPlayersList(allPlayers);
             setIsHost(true); // Local player is always host
+            
+            // Initialize Local States
+            const states: Record<string, LocalPlayerState> = {};
+            
+            // Player 1 (Me)
+            states[playersList[0].id] = createInitialState(playersList[0].id, initialDeck, initialTokens);
+            
+            // Opponents
+            localOpponents.forEach((opp, idx) => {
+                const pid = opp.id || `player-${idx + 1}`;
+                states[pid] = createInitialState(pid, opp.deck, opp.tokens);
+            });
+            
+            localPlayerStates.current = states;
         }
     }, [isLocal]);
 
@@ -596,7 +782,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     useEffect(() => {
         if ((initialGameStarted || isLocal) && gamePhase === 'SETUP') {
-             handleStartGameLogic({ mulligansAllowed: true, trackDamage: false });
+             // Wait for explicit start in local to allow re-ordering if needed, but if auto-start:
+             if (initialGameStarted) handleStartGameLogic({ mulligansAllowed: true, trackDamage: false });
         }
     }, [initialGameStarted]);
 
@@ -620,7 +807,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         if (isLocal) return;
         // Save session on mount
-        localStorage.setItem('active_game_session', roomId);
+        sessionStorage.setItem('active_game_session', roomId);
         
         const getUserId = () => {
             let id = localStorage.getItem('planeswalker_user_id');
@@ -647,7 +834,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const handleExit = () => {
         socket.emit('leave_room', { room: roomId });
         localStorage.removeItem(`game_phase_${roomId}`);
-        localStorage.removeItem('active_game_session');
+        sessionStorage.removeItem('active_game_session');
         onExit();
     };
 
@@ -707,7 +894,110 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
     };
 
+    // Helper to create initial state
+    const createInitialState = (id: string, deck: CardData[], tokens: CardData[]): LocalPlayerState => {
+        const commanders = deck.filter(c => c.isCommander);
+        const library = deck.filter(c => !c.isCommander).sort(() => Math.random() - 0.5);
+        return {
+            id,
+            hand: tokens, // Initially just tokens, draw 7 later
+            library,
+            graveyard: [],
+            exile: [],
+            commandZone: commanders,
+            life: 40,
+            mulliganCount: 0,
+            hasKeptHand: false
+        };
+    };
+
     // --- Helper Logic ---
+    const handleTakeoverGhost = (ghostId: string) => {
+        if (!joinHandlingModal.newPlayer) return;
+        const newPlayerId = joinHandlingModal.newPlayer.id;
+        
+        // Transfer objects
+        emitAction('TRANSFER_OBJECTS', { fromId: ghostId, toId: newPlayerId });
+        
+        // Remove ghost
+        setGhostPlayers(prev => prev.filter(g => g.id !== ghostId));
+        setJoinHandlingModal({ isOpen: false, newPlayer: null });
+        addLog(`${joinHandlingModal.newPlayer.name} took over ${ghostPlayers.find(g => g.id === ghostId)?.name}'s seat`, 'SYSTEM');
+    };
+
+    const handleOverwriteGhost = (ghostId: string) => {
+        // Remove ghost objects
+        const toRemove = boardObjects.filter(o => o.controllerId === ghostId);
+        toRemove.forEach(o => emitAction('REMOVE_OBJECT', { id: o.id }));
+        
+        // Remove ghost
+        setGhostPlayers(prev => prev.filter(g => g.id !== ghostId));
+        setJoinHandlingModal({ isOpen: false, newPlayer: null });
+        addLog(`Cleared ${ghostPlayers.find(g => g.id === ghostId)?.name}'s seat for ${joinHandlingModal.newPlayer?.name}`, 'SYSTEM');
+    };
+
+    const handleAssignNewSeat = () => {
+        setJoinHandlingModal({ isOpen: false, newPlayer: null });
+        addLog(`${joinHandlingModal.newPlayer?.name} assigned to a new seat`, 'SYSTEM');
+    };
+
+    const JoinHandlingModal: React.FC<{
+        isOpen: boolean;
+        newPlayer: {id: string, name: string} | null;
+        ghosts: {id: string, name: string, color: string}[];
+        onTakeover: (ghostId: string) => void;
+        onOverwrite: (ghostId: string) => void;
+        onNewSeat: () => void;
+    }> = ({ isOpen, newPlayer, ghosts, onTakeover, onOverwrite, onNewSeat }) => {
+        if (!isOpen || !newPlayer) return null;
+    
+        return (
+            <div className="fixed inset-0 z-[13000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-lg w-full">
+                    <h3 className="text-xl font-bold text-white mb-4">New Player Joined</h3>
+                    <p className="text-gray-300 mb-6">
+                        <span className="font-bold text-blue-400">{newPlayer.name}</span> has joined. 
+                        There are abandoned seats from previous players. How would you like to seat them?
+                    </p>
+                    
+                    <div className="space-y-3 mb-6">
+                        {ghosts.map(ghost => (
+                            <div key={ghost.id} className="bg-gray-700/50 p-3 rounded border border-gray-600 flex flex-col gap-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded-full" style={{backgroundColor: ghost.color}}/>
+                                    <span className="text-gray-300 font-bold">{ghost.name}'s Seat</span>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => onTakeover(ghost.id)}
+                                        className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded"
+                                    >
+                                        Take Over
+                                    </button>
+                                    <button 
+                                        onClick={() => onOverwrite(ghost.id)}
+                                        className="flex-1 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 text-sm font-bold rounded"
+                                    >
+                                        Overwrite (New Mat)
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+    
+                    <div className="pt-4 border-t border-gray-700">
+                        <button 
+                            onClick={onNewSeat}
+                            className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg"
+                        >
+                            Assign to Empty Seat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const emitAction = (action: string, data: any) => {
         if (isLocal) {
             // In local mode, we bypass the socket and handle logic directly if needed, 
@@ -743,13 +1033,26 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
+    const handleLifeChange = (amount: number) => {
+        setLife(prev => prev + amount);
+        if (amount < 0) {
+            damageTakenThisTurn.current += Math.abs(amount);
+            addLog(`lost ${Math.abs(amount)} life`);
+        } else {
+            healingReceivedThisTurn.current += amount;
+            addLog(`gained ${amount} life`);
+        }
+    };
+
     const checkDamageTracking = () => {
         if (trackDamageRef.current) {
-            if (lifeRef.current !== lifeAtTurnStart.current) {
+            const dmg = damageTakenThisTurn.current;
+            const heal = healingReceivedThisTurn.current;
+            if (dmg > 0 || heal > 0) {
+                setDamageReportData({ damage: dmg, healing: heal });
                 setShowDamageReportModal(true);
             }
         }
-        lifeAtTurnStart.current = lifeRef.current;
     };
 
     const sortPlayers = (players: any[], order: string[]) => {
@@ -767,24 +1070,41 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (isLocal) return;
         const handleRoomUpdate = (roomPlayers: any[]) => {
             console.log("Room Update Received:", roomPlayers);
-            const sortedPlayers = sortPlayers(roomPlayers, turnOrderRef.current);
-            const myIndex = sortedPlayers.findIndex(p => p.id === socket.id);
+            let sortedPlayers = sortPlayers(roomPlayers, turnOrderRef.current);
             
             // Detect left players
             const prevPlayers = playersListRef.current;
-            const leftPlayers = prevPlayers.filter(p => !roomPlayers.find(rp => rp.id === p.id));
+            const leftPlayers = prevPlayers.filter(p => 
+                !roomPlayers.find(rp => rp.id === p.id) && 
+                p.id !== 'local-player' && 
+                p.id !== 'player-0'
+            );
             
             // Determine if I am the host (using the NEW list)
-            const amIHost = myIndex === 0;
+            let myIndex = sortedPlayers.findIndex(p => p.id === socket.id);
+            let amIHost = myIndex === 0;
 
-            if (leftPlayers.length > 0 && amIHost) {
-                 // If multiple left, just handle the first one for now to avoid modal stacking issues
-                 const leaver = leftPlayers[0];
-                 // Only show if they actually have objects on the board
-                 // We need to check boardObjectsRef or similar, but since this is inside useEffect with [], 
-                 // we can't access current boardObjects state easily without a ref.
-                 // However, we can just ask regardless.
-                 setDisconnectModal({ isOpen: true, player: leaver });
+            const currentModal = disconnectModalRef.current;
+            let leaverToHandle = currentModal.isOpen ? currentModal.player : null;
+
+            if (leftPlayers.length > 0 && amIHost && gamePhaseRef.current !== 'SETUP') {
+                 if (!leaverToHandle) {
+                     leaverToHandle = leftPlayers[0];
+                     setDisconnectModal({ isOpen: true, player: leaverToHandle });
+                 }
+            }
+
+            // If we are handling a disconnect, keep the leaver in the list so their mat stays
+            if (leaverToHandle) {
+                if (!sortedPlayers.find(p => p.id === leaverToHandle!.id)) {
+                    const leaverObj = prevPlayers.find(p => p.id === leaverToHandle!.id) || leftPlayers.find(p => p.id === leaverToHandle!.id);
+                    if (leaverObj) {
+                        sortedPlayers.push(leaverObj);
+                        sortedPlayers = sortPlayers(sortedPlayers, turnOrderRef.current);
+                        myIndex = sortedPlayers.findIndex(p => p.id === socket.id);
+                        amIHost = myIndex === 0;
+                    }
+                }
             }
             
             // Detect new players and Sync Game State if Host
@@ -807,6 +1127,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  }});
             }
 
+            // Check for join handling if Host and there are ghosts
+            if (newPlayers.length > 0 && amIHost && ghostPlayersRef.current.length > 0) {
+                // Handle the first new player found
+                setJoinHandlingModal({ isOpen: true, newPlayer: newPlayers[0] });
+            }
+
             if (myIndex >= 4) {
                 alert("The room is full (Max 4 players).");
                 handleExit();
@@ -824,14 +1150,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setIncomingJoinRequest(data);
         };
 
-        const handleLoadState = (state: any) => {
-            if (state) {
-                if (state.hand) setHand(state.hand);
-                if (state.library) setLibrary(state.library);
-                if (state.graveyard) setGraveyard(state.graveyard);
-                if (state.exile) setExile(state.exile);
-                if (state.commandZone) setCommandZone(state.commandZone);
-                if (state.life !== undefined) setLife(state.life);
+        const handleLoadState = (state: unknown) => {
+            const loadedState = state as Partial<LocalPlayerState>;
+            if (loadedState) {
+                if (loadedState.hand) setHand(loadedState.hand);
+                if (loadedState.library) setLibrary(loadedState.library);
+                if (loadedState.graveyard) setGraveyard(loadedState.graveyard);
+                if (loadedState.exile) setExile(loadedState.exile);
+                if (loadedState.commandZone) setCommandZone(loadedState.commandZone);
+                if (loadedState.life !== undefined) setLife(loadedState.life);
                 addLog("Game data loaded from server", "SYSTEM");
             }
         };
@@ -965,6 +1292,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setBoardObjects(prev => prev.filter(o => o.id !== data.id));
             } else if (action === 'LOG') {
                 addLog(data.message, 'ACTION', sender ? sender.name : 'Unknown');
+            } else if (action === 'TRANSFER_OBJECTS') {
+                setBoardObjects(prev => prev.map(o => {
+                    if (o.controllerId === data.fromId) {
+                        return { ...o, controllerId: data.toId };
+                    }
+                    return o;
+                }));
             }
             else if (action === 'RESTART_GAME') {
                 setGamePhase('SETUP');
@@ -997,6 +1331,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  }
                  addLog("Synced game state from Host", "SYSTEM");
             }
+            else if (action === 'ROLL_DICE') {
+                setActiveDice(prev => [...prev, data]);
+                const roller = currentPlayers.find(p => p.id === data.playerId);
+                addLog(`rolled a ${data.value} on a D${data.sides}`, 'ACTION', roller?.name);
+                setTimeout(() => {
+                    setActiveDice(prev => prev.filter(d => d.id !== data.id));
+                }, 3000);
+            }
         };
 
         socket.on('room_players_update', handleRoomUpdate);
@@ -1020,26 +1362,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // --- Initialization ---
     useEffect(() => {
-        const commanders = initialDeck.filter(c => c.isCommander);
-        const deck = initialDeck.filter(c => !c.isCommander);
-        const shuffled = [...deck].sort(() => Math.random() - 0.5);
-        
-        setLibrary(shuffled);
-        setCommandZone(commanders);
-        setHand(initialTokens);
-        setGraveyard([]);
-        setExile([]);
-        
-        if (isLocal) {
-            // Initialize opponents decks
-            localOpponents.forEach((opp, idx) => {
-                // We don't actually simulate opponent hands/libraries fully in this simplified local view 
-                // unless we want to switch seats completely.
-                // For now, we just set up the main player.
-                // If we wanted full simulation, we'd need state for each player.
-                // The prompt says "control over all cards", so we just spawn them on the board?
-                // Or we just assume the "Next Turn" switches the "Active" hand/library.
-            });
+        if (!isLocal) {
+            const commanders = initialDeck.filter(c => c.isCommander);
+            const deck = initialDeck.filter(c => !c.isCommander);
+            const shuffled = [...deck].sort(() => Math.random() - 0.5);
+            
+            setLibrary(shuffled);
+            setCommandZone(commanders);
+            setHand(initialTokens);
+            setGraveyard([]);
+            setExile([]);
         }
 
         const matCenterY = seatPositions[0].y + MAT_H / 2;
@@ -1106,16 +1438,32 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          setMulligansAllowed(shouldUseMulligans);
          if (options?.trackDamage !== undefined) setTrackDamage(options.trackDamage);
          
-         const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
-         if (lib.length >= 7) {
-             const initialHand = lib.slice(0, 7);
-             const remaining = lib.slice(7);
-             setHand([...initialHand, ...initialTokens]);
-             setLibrary(remaining);
+         if (isLocal) {
+             // Draw 7 for everyone
+             Object.values(localPlayerStates.current).forEach((state: LocalPlayerState) => {
+                 if (state.library.length >= 7) {
+                     const initialHand = state.library.slice(0, 7);
+                     state.library = state.library.slice(7);
+                     // Keep tokens if any
+                     const tokens = state.hand.filter(c => c.isToken);
+                     state.hand = [...initialHand, ...tokens];
+                 }
+             });
+             // Load P1 state
+             loadLocalPlayerState(playersList[0].id);
+         } else {
+             const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
+             if (lib.length >= 7) {
+                 const initialHand = lib.slice(0, 7);
+                 const remaining = lib.slice(7);
+                 setHand([...initialHand, ...initialTokens]);
+                 setLibrary(remaining);
+             }
          }
          
          setTurnStartTime(Date.now());
-         lifeAtTurnStart.current = lifeRef.current;
+         damageTakenThisTurn.current = 0;
+         healingReceivedThisTurn.current = 0;
          
          if (isLocal) {
              // In local mode, set turn order based on players list
@@ -1155,7 +1503,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setTurnOrder([]);
         setGameStats({});
         addLog("The host has restarted the game", "SYSTEM");
-        lifeAtTurnStart.current = 40;
+        damageTakenThisTurn.current = 0;
+        healingReceivedThisTurn.current = 0;
     };
 
     const handleKickPlayer = (targetId: string) => {
@@ -1168,15 +1517,59 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newPlayers = [...playersList];
         const [moved] = newPlayers.splice(fromIdx, 1);
         newPlayers.splice(toIdx, 0, moved);
+        
+        // Update local state immediately to prevent revert on sync
+        setPlayersList(newPlayers);
+        setTurnOrder(newPlayers.map(p => p.id));
+
         emitAction('UPDATE_PLAYER_ORDER', { players: newPlayers });
         // Also update server source of truth if possible, but 'UPDATE_PLAYER_ORDER' syncs clients
         socket.emit('update_player_order', { room: roomId, players: newPlayers });
+    };
+
+    const handleShufflePlayers = () => {
+        if (!isHost) return;
+        const shuffled = [...playersList].sort(() => Math.random() - 0.5);
+        setPlayersList(shuffled);
+        setTurnOrder(shuffled.map(p => p.id));
+        emitAction('UPDATE_PLAYER_ORDER', { players: shuffled });
+        socket.emit('update_player_order', { room: roomId, players: shuffled });
     };
 
     const handleAssignState = (targetId: string, seatIdx: number) => {
         if (confirm(`Overwrite ${playersList.find(p=>p.id===targetId)?.name}'s game data with saved data from Seat ${seatIdx+1}?`)) {
             socket.emit('admin_assign_state', { room: roomId, targetId, seatIndex: seatIdx });
         }
+    };
+
+    const saveLocalPlayerState = (playerId: string) => {
+        if (!localPlayerStates.current[playerId]) return;
+        localPlayerStates.current[playerId] = {
+            ...localPlayerStates.current[playerId],
+            hand,
+            library,
+            graveyard,
+            exile,
+            commandZone,
+            life,
+            mulliganCount
+        };
+    };
+
+    const loadLocalPlayerState = (playerId: string) => {
+        const state = localPlayerStates.current[playerId];
+        if (!state) return;
+        setHand(state.hand);
+        setLibrary(state.library);
+        setGraveyard(state.graveyard);
+        setExile(state.exile);
+        setCommandZone(state.commandZone);
+        setLife(state.life);
+        setMulliganCount(state.mulliganCount);
+    };
+
+    const getControllerId = () => {
+        return isLocal ? playersList[mySeatIndex].id : (socket.id || 'local-player');
     };
 
     const handleMulliganChoice = (keep: boolean) => {
@@ -1190,8 +1583,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setMulliganSelectionMode(true);
                 setCardsToBottom([]);
             } else {
-                setGamePhase('PLAYING');
-                addLog(`kept hand with ${mulliganCount} mulligans`);
+                if (isLocal) {
+                    const currentPlayer = playersList[mySeatIndex];
+                    localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
+                    addLog(`${currentPlayer.name} kept hand`);
+                    
+                    // Check if all kept
+                    const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                    if (allKept) {
+                        setGamePhase('PLAYING');
+                        // Switch back to P1 view if needed, or stay. Usually P1 starts.
+                    } else {
+                        nextTurn(); // Switch to next player for mulligan
+                    }
+                } else {
+                    setGamePhase('PLAYING');
+                    addLog(`kept hand with ${mulliganCount} mulligans`);
+                }
             }
         } else {
             const currentDeckCardsInHand = hand.filter(c => !c.isToken);
@@ -1224,8 +1632,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newHand = hand.filter(h => !cardsToBottom.find(b => b.id === h.id));
         setHand(newHand);
         setLibrary(prev => [...prev, ...cardsToBottom]);
-        setGamePhase('PLAYING');
-        addLog(`kept hand and put ${requiredCount} cards on bottom`);
+        
+        if (isLocal) {
+             const currentPlayer = playersList[mySeatIndex];
+             localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
+             addLog(`${currentPlayer.name} kept hand`);
+             const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+             if (allKept) setGamePhase('PLAYING');
+             else nextTurn();
+        } else {
+            setGamePhase('PLAYING');
+            addLog(`kept hand and put ${requiredCount} cards on bottom`);
+        }
+        
         setMulliganSelectionMode(false);
     };
     
@@ -1234,6 +1653,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const pid = disconnectModal.player.id;
         const toRemove = boardObjects.filter(o => o.controllerId === pid);
         toRemove.forEach(o => emitAction('REMOVE_OBJECT', { id: o.id }));
+        setPlayersList(prev => prev.filter(p => p.id !== pid));
         setDisconnectModal({ isOpen: false, player: null });
         addLog(`removed ${disconnectModal.player.name}'s items`, 'SYSTEM');
     };
@@ -1241,6 +1661,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const handleKeepDisconnected = () => {
         if (!disconnectModal.player) return;
         addLog(`kept ${disconnectModal.player.name}'s items on table`, 'SYSTEM');
+        
+        const player = playersList.find(p => p.id === disconnectModal.player!.id) || { ...disconnectModal.player, color: '#888' };
+        setGhostPlayers(prev => [...prev, player as any]);
+
+        setPlayersList(prev => prev.filter(p => p.id !== disconnectModal.player!.id));
         setDisconnectModal({ isOpen: false, player: null });
     };
 
@@ -1264,16 +1689,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const nextTurn = () => {
         if (isLocal) {
+            // Save current player state
+            saveLocalPlayerState(currentTurnPlayerId);
+            
             const currentIndex = playersList.findIndex(p => p.id === currentTurnPlayerId);
             const nextIndex = (currentIndex + 1) % playersList.length;
             const nextPlayer = playersList[nextIndex];
             
             setCurrentTurnPlayerId(nextPlayer.id);
-            setTurn(turn + 1);
+            if (gamePhase === 'PLAYING') setTurn(turn + 1);
             setTurnStartTime(Date.now());
             
             // Switch View to Next Player
             setMySeatIndex(nextIndex);
+            loadLocalPlayerState(nextPlayer.id);
             return;
         }
 
@@ -1298,6 +1727,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
         }
         checkDamageTracking();
+        damageTakenThisTurn.current = 0;
+        healingReceivedThisTurn.current = 0;
     };
 
     const formatTime = (ms: number) => {
@@ -1469,7 +1900,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             x: spawnX ?? (defaultX + (Math.random() * 40 - 20)),
             y: spawnY ?? (defaultY + (Math.random() * 40 - 20)),
             z: maxZ + 1, rotation: isLocal ? SEAT_ROTATIONS[seatIdx] : SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
-            counters: {}, commanderDamage: {}, controllerId: socket.id || 'local-player',
+            counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
         setMaxZ(prev => prev + 1);
@@ -1491,7 +1922,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              x: defaultX + (Math.random() * 40 - 20),
              y: defaultY + (Math.random() * 40 - 20),
              z: maxZ + 1, rotation: 0, isFaceDown: false, isTransformed: false,
-             counters: {}, commanderDamage: {}, controllerId: socket.id || 'local-player',
+             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
              quantity: 1, tappedQuantity: 0
         };
         setMaxZ(prev => prev + 1);
@@ -1538,7 +1969,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
             x: defaultX, y: defaultY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
-            counters: {}, commanderDamage: {}, controllerId: socket.id || 'local-player',
+            counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
         setMaxZ(prev => prev + 1);
@@ -1548,46 +1979,33 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`cast commander ${card.name}`);
     };
 
-    const handleDamageReport = (report: Record<string, number>) => {
+    const handleDamageReport = (damageReport: Record<string, number>, healingReport: Record<string, number>) => {
         const myId = socket.id;
-        let totalDamageReceived = 0;
-        let totalHealingReceived = 0;
-        let totalSelfHealing = 0;
         
-        Object.entries(report).forEach(([sourceId, amount]) => {
+        // Process Damage
+        let totalDamageReceived = 0;
+        Object.entries(damageReport).forEach(([sourceId, amount]) => {
             if (amount > 0) {
-                // Damage
                 totalDamageReceived += amount;
-                // Tell source to track damage dealt
                 emitAction('TRACK_DAMAGE_DEALT', { sourceId, targetId: myId, amount });
                 addLog(`reported taking ${amount} damage from ${playersList.find(p=>p.id===sourceId)?.name}`, 'ACTION');
-            } else if (amount < 0) {
-                // Healing (negative damage in this context means healing?) 
-                // The modal passes positive numbers for input. 
-                // But wait, DamageReportModal calculates `lifeDelta`. 
-                // If lifeDelta < 0 (Damage), inputs are positive attribution of that damage.
-                // If lifeDelta > 0 (Healing), inputs are positive attribution of that healing.
-                // So `amount` here is always positive magnitude.
-                
-                const isHealingSession = (lifeRef.current - lifeAtTurnStart.current) > 0;
-                
-                if (isHealingSession) {
-                    totalHealingReceived += amount;
-                    if (sourceId === myId) totalSelfHealing += amount;
-                    emitAction('TRACK_HEALING_GIVEN', { sourceId, amount });
-                    addLog(`reported receiving ${amount} healing from ${playersList.find(p=>p.id===sourceId)?.name}`, 'ACTION');
-                } else {
-                    // Damage session
-                    totalDamageReceived += amount;
-                    emitAction('TRACK_DAMAGE_DEALT', { sourceId, targetId: myId, amount });
-                    addLog(`reported taking ${amount} damage from ${playersList.find(p=>p.id===sourceId)?.name}`, 'ACTION');
-                }
             }
         });
-        
         if (totalDamageReceived > 0) {
             updateMyStats({ damageReceived: (gameStats[myId]?.damageReceived || 0) + totalDamageReceived });
         }
+
+        // Process Healing
+        let totalHealingReceived = 0;
+        let totalSelfHealing = 0;
+        Object.entries(healingReport).forEach(([sourceId, amount]) => {
+            if (amount > 0) {
+                totalHealingReceived += amount;
+                if (sourceId === myId) totalSelfHealing += amount;
+                emitAction('TRACK_HEALING_GIVEN', { sourceId, amount });
+                addLog(`reported receiving ${amount} healing from ${playersList.find(p=>p.id===sourceId)?.name}`, 'ACTION');
+            }
+        });
         if (totalHealingReceived > 0) {
             updateMyStats({ 
                 healingReceived: (gameStats[myId]?.healingReceived || 0) + totalHealingReceived,
@@ -1607,7 +2025,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
             x: spawnX, y: spawnY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
-            counters: {}, commanderDamage: {}, controllerId: socket.id || 'local-player',
+            counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
         setMaxZ(prev => prev + 1);
@@ -1628,7 +2046,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
             x: spawnX, y: spawnY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
-            counters: {}, commanderDamage: {}, controllerId: socket.id || 'local-player',
+            counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
         setMaxZ(prev => prev + 1);
@@ -1664,10 +2082,29 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const rollDice = () => {
-        const result = Math.floor(Math.random() * 6) + 1;
-        addLog(`rolled a ${result} on a D6`);
-        alert(`Rolled a ${result}!`);
+    const rollDice = (sides: number = 20) => {
+        const rollerId = isLocal ? currentTurnPlayerId : socket.id;
+        const rollerIdx = playersList.findIndex(p => p.id === rollerId);
+        if (rollerIdx === -1) return;
+        
+        const seatIdx = getSeatMapping(rollerIdx, playersList.length);
+        const pos = seatPositions[seatIdx];
+        const x = pos.x + MAT_W / 2;
+        const y = pos.y + MAT_H / 2;
+        
+        const result = Math.floor(Math.random() * sides) + 1;
+        const rollData: DieRoll = {
+            id: crypto.randomUUID(),
+            value: result,
+            sides,
+            playerId: rollerId,
+            x, y
+        };
+
+        setActiveDice(prev => [...prev, rollData]);
+        addLog(`rolled a ${result} on a D${sides}`, 'ACTION', playersList[rollerIdx].name);
+        emitAction('ROLL_DICE', rollData);
+        setTimeout(() => setActiveDice(prev => prev.filter(d => d.id !== rollData.id)), 3000);
     };
 
     const sendToZone = (card: CardData, zone: 'GRAVEYARD' | 'EXILE') => {
@@ -1854,10 +2291,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     // --- Search / Tray / Library Action Helpers ---
-    const openSearch = (source: any) => {
+    const openSearch = (source: any, targetPlayerId?: string) => {
         let items: any[] = [];
-        if (source === 'LIBRARY') items = library.map(c => ({ card: c, isRevealed: false }));
-        else if (source === 'GRAVEYARD') items = graveyard.map(c => ({ card: c, isRevealed: true }));
+        let targetLibrary = library;
+        let targetGraveyard = graveyard;
+        
+        if (isLocal && targetPlayerId && targetPlayerId !== currentTurnPlayerId) {
+            // Access other player's state from ref
+            targetLibrary = localPlayerStates.current[targetPlayerId]?.library || [];
+            targetGraveyard = localPlayerStates.current[targetPlayerId]?.graveyard || [];
+        }
+
+        if (source === 'LIBRARY') items = targetLibrary.map(c => ({ card: c, isRevealed: false }));
+        else if (source === 'GRAVEYARD') items = targetGraveyard.map(c => ({ card: c, isRevealed: true }));
         else if (source === 'EXILE') items = exile.map(c => ({ card: c, isRevealed: true }));
         setSearchModal({ isOpen: true, source, items, tray: [] });
     };
@@ -2107,6 +2553,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
+    const handleHandTouchStart = (e: React.TouchEvent) => {
+        touchStartRef.current = e.touches[0].clientY;
+    };
+
+    const handleHandTouchEnd = (e: React.TouchEvent) => {
+        if (touchStartRef.current === null) return;
+        const touchEnd = e.changedTouches[0].clientY;
+        const diff = touchEnd - touchStartRef.current;
+
+        if (diff > 50) setIsHandVisible(false); // Swipe Down
+        if (diff < -50) setIsHandVisible(true); // Swipe Up
+        touchStartRef.current = null;
+    };
+
     const renderWorld = (viewState: ViewState, containerRefToUse: React.RefObject<HTMLDivElement>, handlers: any, rotation: number = 0, isOpponent: boolean = false) => (
         <div 
             ref={containerRefToUse}
@@ -2151,8 +2611,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const pos = seatPositions[seatIdx];
                     const rot = SEAT_ROTATIONS[seatIdx];
                     const isMe = isLocal ? (idx === mySeatIndex) : p.id === socket.id;
-                    const counts = isMe 
-                        ? { library: library.length, graveyard: graveyard.length, exile: exile.length, hand: hand.filter(c => !c.isToken).length, command: commandZone.length }
+                    
+                    // In local mode, get counts from localPlayerStates for non-active players
+                    let localCounts = null;
+                    if (isLocal && !isMe) {
+                        const s = localPlayerStates.current[p.id];
+                        if (s) localCounts = { library: s.library.length, graveyard: s.graveyard.length, exile: s.exile.length, hand: s.hand.filter(c => !c.isToken).length, command: s.commandZone.length };
+                    }
+
+                    const counts = (isMe || localCounts)
+                        ? (localCounts || { library: library.length, graveyard: graveyard.length, exile: exile.length, hand: hand.filter(c => !c.isToken).length, command: commandZone.length })
                         : opponentsCounts[p.id] || { library: 0, graveyard: 0, exile: 0, hand: 0, command: 0 };
                     
                     return (
@@ -2166,11 +2634,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 isControlled={isMe}
-                                commanders={isMe ? commandZone : (opponentsCommanders[p.id] || [])}
-                                onDraw={isMe ? () => drawCard(1) : () => requestViewZone('LIBRARY', p.id)}
+                                commanders={isMe ? commandZone : (isLocal ? (localPlayerStates.current[p.id]?.commandZone || []) : (opponentsCommanders[p.id] || []))}
+                                onDraw={isMe ? () => drawCard(1) : (isLocal ? () => {} : () => requestViewZone('LIBRARY', p.id))}
                                 onShuffle={isMe ? shuffleLibrary : () => {}}
-                                onOpenSearch={isMe ? openSearch : (source) => requestViewZone(source, p.id)}
-                                onPlayCommander={isMe ? playCommander : () => {}}
+                                onOpenSearch={isMe ? openSearch : (source) => isLocal ? openSearch(source, p.id) : requestViewZone(source, p.id)}
+                                onPlayCommander={isMe ? playCommander : (isLocal ? () => {} : () => {})}
                                 onPlayTopLibrary={isMe ? playTopLibrary : () => {}}
                                 onPlayTopGraveyard={isMe ? playTopGraveyard : () => {}}
                                 onInspectCommander={setInspectCard}
@@ -2194,15 +2662,29 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     );
                 })}
 
+                {activeDice.map(die => {
+                    const owner = playersList.find(p => p.id === die.playerId);
+                    return (
+                        <Die 
+                            key={die.id} 
+                            value={die.value} sides={die.sides} x={die.x} y={die.y} 
+                            color={owner?.color || '#fff'} 
+                        />
+                    );
+                })}
+
                 {boardObjects.map(obj => {
                     const isOwnerInGame = playersList.some(p => p.id === obj.controllerId);
                     const isControlled = isLocal || obj.controllerId === socket.id || obj.controllerId === 'local-player' || !isOwnerInGame;
+                    
+                    const controller = playersList.find(p => p.id === obj.controllerId);
+                    const objSleeveColor = controller ? controller.color : sleeveColor;
 
                     return (
                     <div key={obj.id} className="pointer-events-auto">
                         <Card 
                             object={obj} 
-                            sleeveColor={sleeveColor}
+                            sleeveColor={objSleeveColor}
                             isControlledByMe={isControlled}
                             players={playersList} 
                             onUpdate={updateBoardObject} 
@@ -2219,6 +2701,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             viewY={viewState.y}
                             onPan={isOpponent ? undefined : handleEdgePan}
                             onLongPress={isMobile ? setMobileActionCardId : undefined}
+                            isMobile={isMobile}
                         />
                     </div>
                     );
@@ -2261,11 +2744,29 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
 
                         <div className="mb-8">
-                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4">Connected Players ({playersList.length})</h3>
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4 flex justify-between items-center">
+                                <span>Connected Players ({playersList.length})</span>
+                                {isHost && (
+                                    <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                        <Shuffle size={12}/> Shuffle Order
+                                    </button>
+                                )}
+                            </h3>
                             <div className="space-y-2">
                                 {playersList.map((player) => (
                                     <div key={player.id} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600">
-                                        <div className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg flex items-center justify-center font-bold text-white text-lg" style={{backgroundColor: player.color}}>
+                                        <div 
+                                            className={`w-10 h-10 rounded-full border-2 border-white/20 shadow-lg flex items-center justify-center font-bold text-white text-lg ${player.id === socket.id ? 'cursor-pointer hover:scale-110 transition-transform' : ''}`} 
+                                            style={{backgroundColor: player.color}}
+                                            onClick={() => {
+                                                if (player.id === socket.id) {
+                                                    const currentIdx = PLAYER_COLORS.indexOf(player.color);
+                                                    const nextColor = PLAYER_COLORS[(currentIdx + 1) % PLAYER_COLORS.length];
+                                                    socket.emit('update_player_color', { room: roomId, color: nextColor });
+                                                }
+                                            }}
+                                            title={player.id === socket.id ? "Click to change color" : ""}
+                                        >
                                             {player.name.charAt(0).toUpperCase()}
                                         </div>
                                         <div className="flex-1">
@@ -2349,7 +2850,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      <h2 className="text-3xl font-bold text-white mb-2">
                          {mulliganSelectionMode ? 'Select Cards to Bottom' : 'Opening Hand'}
                      </h2>
-                     <p className="text-gray-400 mb-8 text-center max-w-lg">
+                     <p className="text-gray-400 mb-8 text-center max-w-lg flex flex-col gap-1">
+                        {isLocal && <span className="text-blue-400 font-bold uppercase tracking-widest">{playersList[mySeatIndex].name}</span>}
                         {mulliganSelectionMode 
                           ? `Select ${freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount} cards to put on the bottom of your library.` 
                           : `You have drawn 7 cards. ${mulliganCount > 0 ? `(Mulligan #${mulliganCount}${freeMulligan && mulliganCount === 1 ? ' - Free' : ''})` : ''}`
@@ -2450,7 +2952,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 disabled={cardsToBottom.length !== (freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount)}
                                 className="px-10 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold rounded-full shadow-lg transition-all"
                              >
-                                 Confirm & Start Game
+                                 Confirm & {isLocal ? 'Next' : 'Start Game'}
                              </button>
                          </div>
                      )}
@@ -2458,7 +2960,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- UI: Top Bar --- */}
-            <div className="flex-none h-14 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
+            <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
                  {/* Left Side: Player Info (Always Visible) */}
                  <div className="flex items-center gap-2 md:gap-6 overflow-hidden flex-1">
                     {/* Players List */}
@@ -2505,17 +3007,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     
                     {/* Life Controls (Local) */}
                     <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1 border border-gray-600 shadow-inner">
-                        <button onClick={() => {setLife(l => l - 1); addLog("lost 1 life");}} className="text-red-400 hover:text-red-300 font-bold text-lg px-2 active:scale-90 transition">-</button>
-                        <button onClick={() => {setLife(l => l + 1); addLog("gained 1 life");}} className="text-green-400 hover:text-green-300 font-bold text-lg px-2 active:scale-90 transition">+</button>
+                        <button onClick={() => handleLifeChange(-1)} className="text-red-400 hover:text-red-300 font-bold text-lg px-2 active:scale-90 transition">-</button>
+                        <button onClick={() => handleLifeChange(1)} className="text-green-400 hover:text-green-300 font-bold text-lg px-2 active:scale-90 transition">+</button>
                     </div>
                     
-                    <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-2">
-                         <div className="flex items-center gap-2 px-2 border-r border-gray-600">
-                             <Clock size={16} className="text-gray-400"/>
-                             <span className="text-sm font-bold text-white">Turn {turn}</span>
+                    <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-1 md:mx-2">
+                         <div className="flex items-center gap-1 md:gap-2 px-2 border-r border-gray-600">
+                             <Clock size={16} className="text-gray-400 hidden md:block"/>
+                             <span className="text-xs md:text-sm font-bold text-white">{isMobile ? `#${turn}` : `Turn ${turn}`}</span>
                          </div>
-                         <div className="px-2 text-sm text-blue-400 font-bold max-w-[100px] truncate">
-                             {playersList.find(p => p.id === currentTurnPlayerId)?.name || '...'}
+                         <div className="px-2 text-xs md:text-sm text-blue-400 font-bold max-w-[80px] md:max-w-[100px] truncate">
+                             {isMobile ? (playersList.find(p => p.id === currentTurnPlayerId)?.name || '...') : (playersList.find(p => p.id === currentTurnPlayerId)?.name || '...')}
                          </div>
                          <button 
                             onClick={nextTurn} 
@@ -2533,19 +3035,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         title="Commander Damage"
                     >
                         <Swords size={20} />
-                        <span className="text-xs font-bold uppercase hidden lg:inline">Cmdr Dmg</span>
                     </button>
                     
                     <div className="hidden md:block w-px h-6 bg-gray-700 mx-2" />
                     
-                    <button onClick={rollDice} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500">
+                    <button onClick={() => rollDice(20)} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500" title="Roll D20">
                         <Dices size={20} />
-                        <span className="text-xs font-bold uppercase hidden md:inline">Roll D6</span>
                     </button>
                     
-                     <button onClick={spawnCounter} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-cyan-400">
+                     <button onClick={spawnCounter} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-cyan-400" title="Add Counter">
                         <Disc size={20} />
-                        <span className="text-xs font-bold uppercase hidden md:inline">Add Counter</span>
                     </button>
                  </div>
 
@@ -2596,9 +3095,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <Shield size={20} />
                         </button>
                     )}
-                    <button onClick={handleExit} className="flex items-center gap-2 px-4 py-2 bg-red-900/50 hover:bg-red-900/80 border border-red-800 text-red-200 rounded-lg transition-colors">
+                    <button onClick={handleExit} className="flex items-center gap-2 px-4 py-2 bg-red-900/50 hover:bg-red-900/80 border border-red-800 text-red-200 rounded-lg transition-colors" title="Leave Game">
                         <LogOut size={16} />
-                        <span className="hidden md:inline">Leave</span>
                     </button>
                  </div>
 
@@ -2623,9 +3121,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700 col-span-2">
                             <span className="text-gray-400 font-bold">Life</span>
                             <div className="flex items-center gap-4">
-                                <button onClick={() => {setLife(l => l - 1); addLog("lost 1 life");}} className="w-10 h-10 bg-red-900/50 text-red-400 rounded-full flex items-center justify-center font-bold text-xl border border-red-800">-</button>
+                                <button onClick={() => handleLifeChange(-1)} className="w-10 h-10 bg-red-900/50 text-red-400 rounded-full flex items-center justify-center font-bold text-xl border border-red-800">-</button>
                                 <span className="text-2xl font-bold text-white w-8 text-center">{life}</span>
-                                <button onClick={() => {setLife(l => l + 1); addLog("gained 1 life");}} className="w-10 h-10 bg-green-900/50 text-green-400 rounded-full flex items-center justify-center font-bold text-xl border border-green-800">+</button>
+                                <button onClick={() => handleLifeChange(1)} className="w-10 h-10 bg-green-900/50 text-green-400 rounded-full flex items-center justify-center font-bold text-xl border border-green-800">+</button>
                             </div>
                         </div>
                         
@@ -2641,9 +3139,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <Swords size={24} className="text-red-400"/>
                             <span className="text-white font-bold">Cmdr Dmg</span>
                         </button>
-                        <button onClick={() => {rollDice(); setMobileMenuOpen(false);}} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2">
+                        <button onClick={() => {rollDice(20); setMobileMenuOpen(false);}} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2">
                             <Dices size={24} className="text-yellow-500"/>
-                            <span className="text-white font-bold">Roll D6</span>
+                            <span className="text-white font-bold">Roll D20</span>
                         </button>
                         <button onClick={() => {spawnCounter(); setMobileMenuOpen(false);}} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2">
                             <Disc size={24} className="text-cyan-400"/>
@@ -2668,7 +3166,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
                 
                 {/* Left / Main Pane */}
-                <div className={`${isOpponentViewOpen ? 'h-1/2 w-full md:w-1/2 md:h-full border-b md:border-b-0 md:border-r border-gray-700' : 'w-full h-full'} relative transition-all duration-300`}>
+                <div className={`${isOpponentViewOpen ? (isMobile ? 'hidden' : 'h-1/2 w-full md:w-1/2 md:h-full border-b md:border-b-0 md:border-r border-gray-700') : 'w-full h-full'} relative transition-all duration-300`}>
                      {renderWorld(view, containerRef, {
                          onDown: handleContainerPointerDown,
                          onMove: handleContainerPointerMove,
@@ -2677,7 +3175,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      }, -SEAT_ROTATIONS[mySeatPosIndex], false)}
 
                     {/* Controls Overlay (Zoom) */}
-                    <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
+                    <div className="absolute top-4 right-4 flex flex-col gap-2 z-10 hidden md:flex">
                          <button onClick={() => setView(v => ({...v, scale: Math.min(v.scale + 0.1, 3)}))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomIn size={18}/></button>
                         <button onClick={() => setView(v => ({...v, scale: Math.max(v.scale - 0.1, 0.1)}))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomOut size={18}/></button>
                     </div>
@@ -2685,7 +3183,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     {/* Hand UI (Only visible in Setup/Playing) */}
                     {gamePhase !== 'SETUP' && (
                         <>
-                        <div className="absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-none">
+                        <div 
+                            className={`absolute bottom-0 left-0 right-0 z-50 flex flex-col items-center pointer-events-auto transition-transform duration-300 ${isHandVisible ? 'translate-y-0' : 'translate-y-[100%]'}`}
+                            onTouchStart={handleHandTouchStart}
+                            onTouchEnd={handleHandTouchEnd}
+                        >
+                            {/* Swipe Handle for Mobile */}
+                            <div className="w-full h-6 flex items-center justify-center md:hidden -mt-6 pointer-events-auto" onClick={() => setIsHandVisible(!isHandVisible)}>
+                                <div className="w-12 h-1.5 bg-gray-600 rounded-full opacity-50" />
+                            </div>
+
                             <div className="w-full h-48 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none absolute bottom-0" />
                             
                             {/* Hand Scroll Container */}
@@ -2762,8 +3269,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             {hand.length === 0 && <div className="absolute bottom-10 text-gray-500 italic z-10">Hand is empty</div>}
                         </div>
                         
-                        <div className="absolute bottom-24 right-2 md:bottom-6 md:right-6 z-[60] flex flex-col items-center bg-gray-800/80 backdrop-blur rounded-lg p-2 border border-gray-600">
-                            <Settings size={16} className="text-gray-400 mb-2" />
+                        <div className={`absolute ${isMobile ? 'bottom-20 right-1 scale-75 origin-bottom-right' : 'bottom-6 right-6'} z-[60] flex flex-col items-center bg-gray-800/80 backdrop-blur rounded-lg p-2 border border-gray-600 transition-opacity ${isHandVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                            {!isMobile && <Settings size={16} className="text-gray-400 mb-2" />}
                             <input 
                                 type="range" 
                                 min="0.5" 
@@ -2771,7 +3278,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 step="0.1" 
                                 value={handScale}
                                 onChange={(e) => setHandScale(parseFloat(e.target.value))}
-                                className="h-24 w-1 bg-gray-600 rounded-lg appearance-none cursor-pointer vertical-range"
+                                className={`h-24 w-1 bg-gray-600 rounded-lg appearance-none cursor-pointer vertical-range ${isMobile ? 'h-16' : ''}`}
                                 style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
                             />
                         </div>
@@ -2781,7 +3288,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 
                 {/* Right / Opponent Pane */}
                 {isOpponentViewOpen && (
-                    <div className="w-full h-1/2 md:w-1/2 md:h-full relative bg-gray-900 md:border-l border-gray-700 flex flex-col">
+                    <div className={`${isMobile ? 'fixed inset-0 z-[60]' : 'w-full h-1/2 md:w-1/2 md:h-full relative'} bg-gray-900 md:border-l border-gray-700 flex flex-col`}>
                         <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4 z-20 shadow-md">
                             <div className="flex items-center gap-3">
                                 <button 
@@ -2804,6 +3311,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <ChevronRight size={20}/>
                                 </button>
                             </div>
+                            {isMobile && (
+                                <button onClick={() => setIsOpponentViewOpen(false)} className="p-1 bg-red-900/50 text-red-200 rounded"><X size={16}/></button>
+                            )}
                             <div className="flex items-center gap-2">
                                 <button onClick={() => setOpponentView(v => ({...v, scale: Math.min(v.scale + 0.1, 3)}))} className="p-1.5 hover:bg-gray-700 rounded text-gray-300"><ZoomIn size={16}/></button>
                                 <button onClick={() => setOpponentView(v => ({...v, scale: Math.max(v.scale - 0.1, 0.1)}))} className="p-1.5 hover:bg-gray-700 rounded text-gray-300"><ZoomOut size={16}/></button>
@@ -2941,11 +3451,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 onResetGame={handleRestartGame}
             />
 
+            <JoinHandlingModal 
+                isOpen={joinHandlingModal.isOpen}
+                newPlayer={joinHandlingModal.newPlayer}
+                ghosts={ghostPlayers}
+                onTakeover={handleTakeoverGhost}
+                onOverwrite={handleOverwriteGhost}
+                onNewSeat={handleAssignNewSeat}
+            />
+
             <DamageReportModal 
                 isOpen={showDamageReportModal}
                 onClose={() => setShowDamageReportModal(false)}
                 players={playersList.filter(p => p.id !== socket.id)}
-                lifeDelta={lifeRef.current - lifeAtTurnStart.current}
+                damage={damageReportData.damage}
+                healing={damageReportData.healing}
                 onConfirm={handleDamageReport}
             />
 
@@ -3088,12 +3608,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
              {searchModal.isOpen && (
-                <div className="fixed inset-0 z-[9000] bg-gray-900/95 backdrop-blur-xl flex flex-col p-8 animate-in fade-in">
+                <div className={`fixed z-[9000] bg-gray-900/95 backdrop-blur-xl flex flex-col animate-in fade-in ${isMobile ? 'bottom-0 left-0 right-0 top-[10vh] rounded-t-2xl p-4' : 'inset-0 p-8'}`}>
                     <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-700 sticky top-0 bg-gray-900/95 z-10">
                         <div className="flex items-center gap-4">
                             <Search className="text-blue-400" size={32} />
                             <div>
-                                <h2 className="text-3xl font-bold text-white capitalize flex items-center gap-3">
+                                <h2 className={`${isMobile ? 'text-xl' : 'text-3xl'} font-bold text-white capitalize flex items-center gap-3`}>
                                     {searchModal.source === 'TOKENS' ? 'Search Tokens' : searchModal.source.toLowerCase()}
                                     {searchModal.source !== 'TOKENS' && <span className="text-gray-500 text-lg">({searchModal.items.length} cards)</span>}
                                 </h2>

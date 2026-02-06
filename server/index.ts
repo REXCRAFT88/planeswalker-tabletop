@@ -41,6 +41,22 @@ const roomMeta: Record<string, { started: boolean }> = {};
 const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
+const getSafeColor = (roomPlayers: Player[], requestedColor: string) => {
+    const usedColors = new Set(roomPlayers.map(p => p.color));
+    if (!usedColors.has(requestedColor)) return requestedColor;
+    
+    const FALLBACK_COLORS = [
+        '#ef4444', '#3b82f6', '#22c55e', '#a855f7', 
+        '#eab308', '#ec4899', '#06b6d4', '#f97316',
+        '#6366f1', '#14b8a6', '#84cc16', '#d946ef'
+    ];
+    
+    for (const c of FALLBACK_COLORS) {
+        if (!usedColors.has(c)) return c;
+    }
+    return '#' + Math.floor(Math.random()*16777215).toString(16);
+};
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -60,15 +76,11 @@ io.on('connection', (socket) => {
         }
     }
 
-    const existingPlayer = rooms[room]?.find(p => p.color === color);
-    if (existingPlayer) {
-        socket.emit('join_error', { message: 'Color already taken. Please choose another.' });
-        return;
-    }
+    const assignedColor = getSafeColor(rooms[room] || [], color);
 
     socket.join(room);
     
-    const newPlayer: Player = { id: socket.id, name, room, color };
+    const newPlayer: Player = { id: socket.id, name, room, color: assignedColor };
     
     if (!rooms[room]) {
         rooms[room] = [];
@@ -100,15 +112,10 @@ io.on('connection', (socket) => {
       if (!applicantSocket || !pending || pending.room !== room) return;
 
       if (approved) {
-          const existingPlayer = rooms[room]?.find(p => p.color === pending.color);
-          if (existingPlayer) {
-              applicantSocket.emit('join_error', { message: 'Color taken. Please change color and try again.' });
-              delete pendingJoins[applicantId];
-              return;
-          }
+          const assignedColor = getSafeColor(rooms[room] || [], pending.color);
 
           applicantSocket.join(room);
-          const newPlayer: Player = { id: applicantId, name: pending.name, room, color: pending.color };
+          const newPlayer: Player = { id: applicantId, name: pending.name, room, color: assignedColor };
           rooms[room].push(newPlayer);
           
           io.to(room).emit('room_players_update', rooms[room]);

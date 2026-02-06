@@ -39,7 +39,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   // Auto-join if session exists
   useEffect(() => {
-      const activeSession = localStorage.getItem('active_game_session');
+      const activeSession = sessionStorage.getItem('active_game_session');
       if (activeSession && playerName && savedDeckCount > 0 && !hasAutoAttempted.current) {
           hasAutoAttempted.current = true;
           setPendingSessionId(activeSession);
@@ -120,7 +120,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   const handleNewSession = () => {
-      localStorage.removeItem('active_game_session');
+      sessionStorage.removeItem('active_game_session');
       setPendingSessionId(null);
       setShowReconnectModal(false);
   };
