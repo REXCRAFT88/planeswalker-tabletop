@@ -121,7 +121,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     };
 
     return (
-        <div className="flex flex-col h-full p-8 max-w-4xl mx-auto animate-in fade-in">
+        <div className="flex flex-col h-full p-4 md:p-8 max-w-4xl mx-auto animate-in fade-in pb-20">
             <div className="flex items-center justify-between mb-8">
                 <h1 className="text-3xl font-bold text-white flex items-center gap-3">
                     <User className="text-green-500" /> Local Game Setup
@@ -131,7 +131,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 flex-1 overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 flex-1 overflow-hidden">
                 {/* Add Opponent Form */}
                 <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col overflow-hidden">
                     <h2 className="text-xl font-bold text-white mb-4">

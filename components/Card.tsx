@@ -40,6 +40,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   const [showOverlay, setShowOverlay] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [hasMoved, setHasMoved] = useState(false);
+  const [isOverHand, setIsOverHand] = useState(false);
 
   // Handle immediate drag from hand/zones
   React.useEffect(() => {
@@ -82,8 +83,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         }
     }, 500);
 
-    setIsDragging(true);
-    
     const dx = e.clientX - viewX;
     const dy = e.clientY - viewY;
     const scaledX = dx / viewScale;
@@ -138,8 +137,15 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     if (!hasMoved) {
         const dist = Math.hypot(newX - object.x, newY - object.y);
         if (dist < 5) return; // Deadzone
+        setIsDragging(true);
         setHasMoved(true);
         if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    }
+
+    // Check if over hand (Mobile only feature for drag-to-hand)
+    if (isMobile && isControlledByMe) {
+        const isOver = e.clientY > window.innerHeight - 150; // Approx hand height
+        if (isOver !== isOverHand) setIsOverHand(isOver);
     }
 
     onUpdate(object.id, { x: newX, y: newY });
@@ -153,11 +159,17 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     if (!dragStartRef.current) return;
     
+    if (isOverHand && isMobile && isControlledByMe) {
+        onReturnToHand(object.id);
+    }
+
     setIsDragging(false);
+    setIsOverHand(false);
+    setHasMoved(false);
     dragStartRef.current = null;
     if(e.target) (e.target as Element).releasePointerCapture(e.pointerId);
     
-    onRelease(object.id, object.x, object.y);
+    if (hasMoved) onRelease(object.id, object.x, object.y);
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -336,7 +348,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   return (
       <div
         ref={cardRef}
-        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''}`}
         style={{
           left: object.x,
           top: object.y,

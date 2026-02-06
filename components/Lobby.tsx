@@ -330,6 +330,8 @@ export const Lobby: React.FC<LobbyProps> = ({
         }
     };
 
+    const activeCommander = activeDeck.find(c => c.isCommander) || activeDeck[0];
+
   return (
     <div className="w-full h-full overflow-y-auto relative pb-32">
       <div className="min-h-full flex flex-col items-center justify-center p-2 md:p-6 animate-in fade-in duration-700">
@@ -340,9 +342,13 @@ export const Lobby: React.FC<LobbyProps> = ({
             </button>
         </div>
       <div className="text-center mb-8">
-        <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3">
-          <Shield size={40} className="text-white" />
-        </div>
+        {activeCommander ? (
+            <div className="w-32 h-44 mx-auto mb-4 rounded-xl shadow-2xl shadow-orange-500/20 rotate-3 border-2 border-orange-500/50 overflow-hidden">
+                <img src={activeCommander.imageUrl} className="w-full h-full object-cover" alt="Commander" />
+            </div>
+        ) : (
+            <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3"><Shield size={40} className="text-white" /></div>
+        )}
         <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-200 to-red-400 mb-2">
           Planeswalker Tabletop
         </h1>
@@ -617,7 +623,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       {/* Deck Library Modal */}
       {isLibraryOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-              <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-full md:h-auto">
                   <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
                       <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500"/> Deck Library</h3>
                       <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); }} className="text-gray-400 hover:text-white"><X size={20}/></button>
@@ -681,7 +687,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                   </button>
                               </div>
                               <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-                                  <div className="flex-1 overflow-y-auto p-4 border-r border-gray-700">
+                                  <div className="flex-1 overflow-y-auto p-4 border-r border-gray-700 min-h-0">
                                       <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Cards (Click to set Commander)</h4>
                                       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                                           {editingDeck.deck.map(card => (
@@ -696,7 +702,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                           ))}
                                       </div>
                                   </div>
-                                  <div className="w-full md:w-1/3 p-4 overflow-y-auto bg-gray-900/50">
+                                  <div className="w-full md:w-1/3 p-4 overflow-y-auto bg-gray-900/50 min-h-[150px]">
                                       <h4 className="text-xs font-bold text-gray-400 uppercase mb-2 flex justify-between items-center">
                                           <span>Tokens ({editingDeck.tokens.length})</span>
                                           <button onClick={() => {

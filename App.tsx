@@ -65,6 +65,14 @@ function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
 
+  // Prevent Render.com from sleeping by pinging the server
+  useEffect(() => {
+      const interval = setInterval(() => {
+          fetch(window.location.href, { method: 'HEAD' }).catch(() => {});
+      }, 10 * 60 * 1000); // Ping every 10 minutes
+      return () => clearInterval(interval);
+  }, []);
+
   const handleDeckReady = (deck: CardData[], tokens: CardData[]) => {
     setActiveDeck(deck);
     setLobbyTokens(tokens);
