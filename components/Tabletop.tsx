@@ -304,7 +304,6 @@ const Playmat: React.FC<{
             onClick={handleLibraryClick}
             onTouchStart={isMobile ? (e) => handleZoneTouchStart('LIBRARY', e) : undefined}
             onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
-            onDoubleClick={() => isMobile && onPlayTopLibrary()}
             style={{ backgroundColor: sleeveColor }}
         >
             <div className="text-white font-bold text-2xl z-10 pointer-events-none">{counts.library}</div>
@@ -1646,6 +1645,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      state.hand = [...initialHand, ...tokens];
                  }
              });
+             
+             // Ensure P1 state exists before loading
+             if (!localPlayerStates.current[playersList[0].id]) {
+                 localPlayerStates.current[playersList[0].id] = createInitialState(playersList[0].id, initialDeck, initialTokens);
+             }
              // Load P1 state
              loadLocalPlayerState(playersList[0].id);
          } else {
@@ -2985,7 +2989,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             isAnySelected={!!mobileActionCardId}
                             onSelect={() => setMobileActionCardId(obj.id)}
                             defaultRotation={defaultRotation}
-                            // onDoubleClick handled in Card component
+                            isHandVisible={isHandVisible}
                         />
                     </div>
                     );

@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus } from 'lucide-react';
@@ -36,9 +35,10 @@ interface CardProps {
   isAnySelected?: boolean;
   onSelect?: () => void;
   defaultRotation?: number;
+  isHandVisible?: boolean;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0 }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -154,7 +154,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     // Check if over hand (Mobile only feature for drag-to-hand)
     if (isMobile && isControlledByMe) {
-        const isOver = e.clientY > window.innerHeight - 150; // Approx hand height
+        const threshold = isHandVisible ? 150 : 40; // Adjust threshold based on hand visibility
+        const isOver = e.clientY > window.innerHeight - threshold;
         if (isOver !== isOverHand) setIsOverHand(isOver);
     }
 
@@ -387,8 +388,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         ref={cardRef}
         className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
         style={{
-          left: isDragging && isMobile ? (object.x * cos - object.y * sin) * s + vx : object.x,
-          top: isDragging && isMobile ? (object.x * sin + object.y * cos) * s + vy : object.y,
+          left: object.x,
+          top: object.y,
           width: CARD_WIDTH * scale,
           height: CARD_HEIGHT * scale,
           zIndex: object.z,
@@ -532,8 +533,5 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       </div>
   );
 
-  if (isDragging && isMobile) {
-      return createPortal(cardContent, document.body);
-  }
   return cardContent;
 };
