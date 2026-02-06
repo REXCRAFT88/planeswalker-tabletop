@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { parseDeckList, fetchBatch } from '../services/scryfall';
+import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
 import { CardData } from '../types';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2 } from 'lucide-react';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight } from 'lucide-react';
 
 interface DeckBuilderProps {
   initialDeck: CardData[];
@@ -16,6 +16,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
   const [progress, setProgress] = useState<{current: number, total: number} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Steps: DECK -> TOKENS
+  const [step, setStep] = useState<'DECK' | 'TOKENS'>('DECK');
+  
+  // Token Search State
+  const [tokenQuery, setTokenQuery] = useState('');
+  const [tokenResults, setTokenResults] = useState<CardData[]>([]);
+  const [isSearchingTokens, setIsSearchingTokens] = useState(false);
   
   // Staging area after fetching but before confirming commander
   // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
@@ -117,6 +125,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
       setStagedDeck(updated);
   };
 
+  const proceedToTokens = () => {
+      if (!stagedDeck) return;
+      setStep('TOKENS');
+  };
+
   const finalizeDeck = () => {
       if (!stagedDeck) return;
       onDeckReady(stagedDeck, stagedTokens);
@@ -127,12 +140,98 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
           setStagedDeck(null);
           setStagedTokens([]);
           setDeckText('');
+          setStep('DECK');
       }
+  };
+
+  const searchTokensFunc = async () => {
+      if (!tokenQuery) return;
+      setIsSearchingTokens(true);
+      const results = await searchCards(tokenQuery + " t:token");
+      setTokenResults(results.map(c => ({...c, isToken: true})));
+      setIsSearchingTokens(false);
+  };
+
+  const addToken = (card: CardData) => {
+      setStagedTokens(prev => [...prev, { ...card, id: crypto.randomUUID() }]);
+  };
+
+  const removeToken = (id: string) => {
+      setStagedTokens(prev => prev.filter(t => t.id !== id));
   };
 
   const filteredDeck = stagedDeck 
     ? stagedDeck.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : [];
+
+  if (step === 'TOKENS') {
+      return (
+          <div className="flex flex-col h-full p-2 md:p-8 max-w-6xl mx-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
+                  Add Tokens
+                </h1>
+                <button onClick={finalizeDeck} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg">
+                    <Check size={20} /> Finish & Save
+                </button>
+              </div>
+
+              <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
+                  {/* Search Side */}
+                  <div className="flex-1 flex flex-col gap-4 bg-gray-800 rounded-xl p-4 border border-gray-700">
+                      <div className="flex gap-2">
+                          <input 
+                            className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="Search tokens (e.g. Treasure, Goblin)..."
+                            value={tokenQuery}
+                            onChange={e => setTokenQuery(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && searchTokensFunc()}
+                          />
+                          <button onClick={searchTokensFunc} className="bg-blue-600 px-4 rounded text-white font-bold">
+                              {isSearchingTokens ? <Loader2 className="animate-spin"/> : <Search/>}
+                          </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto custom-scrollbar">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              {tokenResults.map(card => (
+                                  <div key={card.scryfallId} className="relative group cursor-pointer" onClick={() => addToken(card)}>
+                                      <img src={card.imageUrl} className="w-full rounded shadow-md hover:scale-105 transition-transform"/>
+                                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
+                                          <Plus className="text-white" size={32}/>
+                                      </div>
+                                  </div>
+                              ))}
+                              {tokenResults.length === 0 && !isSearchingTokens && (
+                                  <div className="col-span-full text-center text-gray-500 mt-10">Search for tokens to add them to your deck.</div>
+                              )}
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Selected Side */}
+                  <div className="w-full md:w-1/3 bg-gray-900 rounded-xl p-4 border border-gray-700 flex flex-col">
+                      <h3 className="text-white font-bold mb-4 flex justify-between">
+                          <span>Selected Tokens</span>
+                          <span className="text-blue-400">{stagedTokens.length}</span>
+                      </h3>
+                      <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                          {stagedTokens.map((token, idx) => (
+                              <div key={token.id} className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700">
+                                  <img src={token.imageUrl} className="w-8 h-11 rounded object-cover"/>
+                                  <span className="text-sm text-gray-300 truncate flex-1">{token.name}</span>
+                                  <button onClick={() => removeToken(token.id)} className="text-red-400 hover:text-red-300"><X size={16}/></button>
+                              </div>
+                          ))}
+                          {stagedTokens.length === 0 && <div className="text-gray-600 text-center italic mt-10">No tokens added.</div>}
+                      </div>
+                      <button onClick={() => setStep('DECK')} className="mt-4 w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded font-bold">
+                          Back to Deck
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
   return (
     <div className="flex flex-col h-full p-2 md:p-8 max-w-6xl mx-auto">
@@ -208,10 +307,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                             <Trash2 size={16} /> New Deck
                         </button>
                         <button 
-                            onClick={finalizeDeck}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shadow-green-900/20 text-xs md:text-sm"
+                            onClick={proceedToTokens}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-lg shadow-blue-900/20 text-xs md:text-sm"
                         >
-                            <Check size={20} /> Save & Return
+                            Next: Add Tokens <ArrowRight size={16}/>
                         </button>
                     </div>
                   </div>

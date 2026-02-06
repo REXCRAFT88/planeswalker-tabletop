@@ -31,16 +31,18 @@ interface CardProps {
   initialDragEvent?: React.PointerEvent | null; 
   onLongPress?: (id: string) => void;
   isMobile?: boolean;
+  isSelected?: boolean;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ offsetX: number, offsetY: number } | null>(null);
+  const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [hasMoved, setHasMoved] = useState(false);
   const [isOverHand, setIsOverHand] = useState(false);
+  const lastTapRef = useRef(0);
 
   // Handle immediate drag from hand/zones
   React.useEffect(() => {
@@ -58,7 +60,9 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
          
          dragStartRef.current = {
              offsetX: worldX - object.x,
-             offsetY: worldY - object.y
+             offsetY: worldY - object.y,
+             startX: object.x,
+             startY: object.y
          };
          (cardRef.current as Element).setPointerCapture(initialDragEvent.pointerId);
       }
@@ -93,13 +97,15 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     dragStartRef.current = {
       offsetX: worldX - object.x,
-      offsetY: worldY - object.y
+      offsetY: worldY - object.y,
+      startX: object.x,
+      startY: object.y
     };
     (e.target as Element).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
+    if (!dragStartRef.current) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -119,9 +125,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         if (panX !== 0 || panY !== 0) onPan(panX, panY);
     }
 
-    // Cancel long press if moved significantly
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-
     const dx = e.clientX - viewX;
     const dy = e.clientY - viewY;
     const scaledX = dx / viewScale;
@@ -135,11 +138,14 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     // Threshold check for movement to prevent accidental drags when tapping
     if (!hasMoved) {
-        const dist = Math.hypot(newX - object.x, newY - object.y);
+        const dist = Math.hypot(newX - dragStartRef.current.startX, newY - dragStartRef.current.startY);
         if (dist < 5) return; // Deadzone
+        
+        // Cancel long press if moved significantly
+        if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+        
         setIsDragging(true);
         setHasMoved(true);
-        if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
     }
 
     // Check if over hand (Mobile only feature for drag-to-hand)
@@ -159,6 +165,15 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     if (!dragStartRef.current) return;
     
+    // Manual Double Tap Detection for Mobile
+    if (!isDragging && !hasMoved && isMobile && isControlledByMe) {
+        const now = Date.now();
+        if (now - lastTapRef.current < 300) {
+            toggleTap(null);
+        }
+        lastTapRef.current = now;
+    }
+
     if (isOverHand && isMobile && isControlledByMe) {
         onReturnToHand(object.id);
     }
@@ -348,7 +363,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   return (
       <div
         ref={cardRef}
-        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''}`}
+        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
         style={{
           left: object.x,
           top: object.y,
