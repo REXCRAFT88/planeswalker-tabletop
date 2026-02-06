@@ -3,6 +3,7 @@ import { CardData } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
 import { Plus, Trash2, Play, Loader2, User, ArrowLeft, Crown, Check } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
+import { SavedDeck } from '../App';
 
 interface LocalOpponent {
     id: string;
@@ -15,9 +16,10 @@ interface LocalOpponent {
 interface LocalSetupProps {
     onStartGame: (opponents: LocalOpponent[]) => void;
     onBack: () => void;
+    savedDecks: SavedDeck[];
 }
 
-export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack }) => {
+export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, savedDecks }) => {
     const [opponents, setOpponents] = useState<LocalOpponent[]>([]);
     const [isImporting, setIsImporting] = useState(false);
     
@@ -28,6 +30,16 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack }) =
 
     // Staging state for commander selection
     const [stagedOpponent, setStagedOpponent] = useState<{name: string, deck: CardData[], tokens: CardData[]} | null>(null);
+    const [showLibrary, setShowLibrary] = useState(false);
+
+    const handleSelectFromLibrary = (saved: SavedDeck) => {
+        setStagedOpponent({
+            name: saved.name,
+            deck: saved.deck,
+            tokens: saved.tokens
+        });
+        setShowLibrary(false);
+    };
 
     const handleImportDeck = async () => {
         if (!newName) return;
@@ -158,6 +170,12 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack }) =
                                 {isImporting ? <Loader2 className="animate-spin" /> : <Plus />}
                                 Import Deck
                             </button>
+                            <div className="flex items-center gap-2 my-2">
+                                <div className="h-px bg-gray-700 flex-1"/> <span className="text-xs text-gray-500">OR</span> <div className="h-px bg-gray-700 flex-1"/>
+                            </div>
+                            <button onClick={() => setShowLibrary(true)} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg">
+                                Select from Library
+                            </button>
                             {opponents.length >= 3 && <p className="text-xs text-center text-gray-500">Max 3 opponents reached.</p>}
                         </div>
                     ) : (
@@ -224,6 +242,27 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack }) =
                     </button>
                 </div>
             </div>
+
+            {/* Library Modal */}
+            {showLibrary && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="bg-gray-800 border border-gray-600 w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[80vh]">
+                        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                            <h3 className="font-bold text-white">Select Deck</h3>
+                            <button onClick={() => setShowLibrary(false)} className="text-gray-400 hover:text-white"><ArrowLeft size={20}/></button>
+                        </div>
+                        <div className="p-4 overflow-y-auto grid grid-cols-1 gap-2">
+                            {savedDecks.map(deck => (
+                                <button key={deck.id} onClick={() => handleSelectFromLibrary(deck)} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600 hover:bg-gray-600 hover:border-blue-500 transition text-left">
+                                    <div className="font-bold text-white flex-1">{deck.name}</div>
+                                    <div className="text-xs text-gray-400">{deck.deck.length} cards</div>
+                                </button>
+                            ))}
+                            {savedDecks.length === 0 && <div className="text-center text-gray-500 py-8">No saved decks.</div>}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

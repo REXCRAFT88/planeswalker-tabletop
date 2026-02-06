@@ -37,7 +37,7 @@ interface Player {
 
 // Store room state in memory for now
 const rooms: Record<string, Player[]> = {};
-const roomMeta: Record<string, { started: boolean }> = {};
+const roomMeta: Record<string, { started: boolean, hostId?: string }> = {};
 const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
@@ -84,7 +84,7 @@ io.on('connection', (socket) => {
     
     if (!rooms[room]) {
         rooms[room] = [];
-        roomMeta[room] = { started: false };
+        roomMeta[room] = { started: false, hostId: socket.id };
     }
     
     rooms[room].push(newPlayer);
@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
     console.log(`${name} joined room ${room}`);
     
     // Notify everyone in the room (including sender) about the new player list
-    io.to(room).emit('room_players_update', rooms[room]);
+    io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
     
     // Emit success to the joiner
     socket.emit('join_success', { 
@@ -118,7 +118,7 @@ io.on('connection', (socket) => {
           const newPlayer: Player = { id: applicantId, name: pending.name, room, color: assignedColor };
           rooms[room].push(newPlayer);
           
-          io.to(room).emit('room_players_update', rooms[room]);
+          io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
           
           io.to(applicantId).emit('join_success', { 
               room, 
@@ -135,7 +135,7 @@ io.on('connection', (socket) => {
 
   socket.on('get_players', ({ room }) => {
       if (rooms[room]) {
-          socket.emit('room_players_update', rooms[room]);
+          socket.emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
       }
   });
 
@@ -143,24 +143,26 @@ io.on('connection', (socket) => {
       if (rooms[room]) {
           // In a real app, verify sender is host. For now, trust the client.
           rooms[room] = players;
-          io.to(room).emit('room_players_update', rooms[room]);
+          io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
       }
   });
 
   socket.on('update_player_color', ({ room, color }) => {
       if (rooms[room]) {
+          const isTaken = rooms[room].some(p => p.color === color && p.id !== socket.id);
+          if (isTaken) return;
+
           const player = rooms[room].find(p => p.id === socket.id);
           if (player) {
               player.color = color;
-              io.to(room).emit('room_players_update', rooms[room]);
+              io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
           }
       }
   });
 
   socket.on('kick_player', ({ room, targetId }) => {
-      const host = rooms[room]?.[0];
       // Verify sender is host
-      if (host && host.id === socket.id) {
+      if (roomMeta[room]?.hostId === socket.id) {
           const targetSocket = io.sockets.sockets.get(targetId);
           if (targetSocket) {
               targetSocket.leave(room);
@@ -171,7 +173,7 @@ io.on('connection', (socket) => {
           if (index !== -1) {
               const p = rooms[room][index];
               rooms[room].splice(index, 1);
-              io.to(room).emit('room_players_update', rooms[room]);
+              io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
               io.to(room).emit('player_left', targetId);
           }
       }
@@ -184,7 +186,12 @@ io.on('connection', (socket) => {
               const player = rooms[room][index];
               rooms[room].splice(index, 1);
               socket.leave(room);
-              io.to(room).emit('room_players_update', rooms[room]);
+              
+              if (roomMeta[room] && roomMeta[room].hostId === socket.id) {
+                  roomMeta[room].hostId = rooms[room].length > 0 ? rooms[room][0].id : undefined;
+              }
+
+              io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
               io.to(room).emit('player_left', player.id);
               console.log(`${player.name} left room ${room}`);
               
@@ -232,7 +239,12 @@ io.on('connection', (socket) => {
         if (index !== -1) {
             const player = rooms[room][index];
             rooms[room].splice(index, 1);
-            io.to(room).emit('room_players_update', rooms[room]);
+            
+            if (roomMeta[room] && roomMeta[room].hostId === socket.id) {
+                roomMeta[room].hostId = rooms[room].length > 0 ? rooms[room][0].id : undefined;
+            }
+
+            io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
             io.to(room).emit('player_left', player.id);
             
             if (rooms[room].length === 0) {

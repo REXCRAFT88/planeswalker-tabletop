@@ -16,6 +16,15 @@ enum View {
 
 const STORAGE_KEY = 'planeswalker_tabletop_settings_v1';
 
+export interface SavedDeck {
+  id: string;
+  name: string;
+  deck: CardData[];
+  tokens: CardData[];
+  sleeveColor: string;
+  createdAt?: number;
+}
+
 function App() {
   const [currentView, setCurrentView] = useState<View>(View.LOBBY);
 
@@ -42,6 +51,7 @@ function App() {
   const [roomId, setRoomId] = useState<string>("");
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string }[]>([]);
+  const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
   // Persist state changes to Local Storage
   useEffect(() => {
@@ -49,10 +59,11 @@ function App() {
           playerName,
           playerSleeve,
           activeDeck,
-          lobbyTokens
+          lobbyTokens,
+          savedDecks
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  }, [playerName, playerSleeve, activeDeck, lobbyTokens]);
+  }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
 
   const handleDeckReady = (deck: CardData[], tokens: CardData[]) => {
     setActiveDeck(deck);
@@ -71,6 +82,22 @@ function App() {
       setCurrentView(View.LOCAL_GAME);
   };
 
+  const handleSaveDeck = (deck: SavedDeck) => {
+      setSavedDecks(prev => {
+          const idx = prev.findIndex(d => d.id === deck.id);
+          if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = deck;
+              return copy;
+          }
+          return [...prev, deck];
+      });
+  };
+
+  const handleDeleteDeck = (id: string) => {
+      setSavedDecks(prev => prev.filter(d => d.id !== id));
+  };
+
   return (
     <div className="w-full h-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white font-sans antialiased selection:bg-blue-500 selection:text-white">
       {currentView === View.LOBBY && (
@@ -85,6 +112,11 @@ function App() {
             savedDeckCount={activeDeck.length}
             currentTokens={lobbyTokens}
             onTokensChange={setLobbyTokens}
+            activeDeck={activeDeck}
+            savedDecks={savedDecks}
+            onSaveDeck={handleSaveDeck}
+            onDeleteDeck={handleDeleteDeck}
+            onLoadDeck={handleDeckReady}
         />
       )}
       
@@ -101,6 +133,7 @@ function App() {
           <LocalSetup 
               onStartGame={handleStartLocalGame}
               onBack={() => setCurrentView(View.LOBBY)}
+              savedDecks={savedDecks}
           />
       )}
 
