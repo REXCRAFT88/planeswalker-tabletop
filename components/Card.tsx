@@ -35,9 +35,10 @@ interface CardProps {
   isSelected?: boolean;
   isAnySelected?: boolean;
   onSelect?: () => void;
+  defaultRotation?: number;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -115,7 +116,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     // Edge Pan Logic
     if (onPan) {
         const EDGE_THRESHOLD = 50;
-        const PAN_SPEED = 15;
+        const PAN_SPEED = 8;
         let panX = 0;
         let panY = 0;
         
@@ -227,9 +228,10 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         onUpdate(object.id, { tappedQuantity: newTappedCount });
         onLog(`${allTapped ? 'untapped' : 'tapped'} stack of ${object.quantity} ${object.cardData.name}s`);
     } else {
-        const newRotation = object.rotation === 0 ? 90 : 0;
+        const isTapped = object.rotation !== defaultRotation;
+        const newRotation = isTapped ? defaultRotation : (defaultRotation + 90) % 360;
         onUpdate(object.id, { rotation: newRotation });
-        onLog(`${newRotation === 90 ? 'tapped' : 'untapped'} ${object.cardData.name}`);
+        onLog(`${!isTapped ? 'tapped' : 'untapped'} ${object.cardData.name}`);
     }
   };
 
@@ -373,13 +375,20 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       )
   }
 
+  const rad = (viewRotation || 0) * (Math.PI / 180);
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const s = viewScale || 1;
+  const vx = viewX || 0;
+  const vy = viewY || 0;
+
   const cardContent = (
       <div
         ref={cardRef}
         className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
         style={{
-          left: isDragging && isMobile ? (viewX || 0) + object.x * (viewScale || 1) : object.x,
-          top: isDragging && isMobile ? (viewY || 0) + object.y * (viewScale || 1) : object.y,
+          left: isDragging && isMobile ? (object.x * cos - object.y * sin) * s + vx : object.x,
+          top: isDragging && isMobile ? (object.x * sin + object.y * cos) * s + vy : object.y,
           width: CARD_WIDTH * scale,
           height: CARD_HEIGHT * scale,
           zIndex: object.z,

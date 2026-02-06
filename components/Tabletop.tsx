@@ -762,6 +762,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const turnOrderRef = useRef(turnOrder);
     const trackDamageRef = useRef(trackDamage);
     const prevPlayersListForLayout = useRef(playersList);
+    const hasLoadedState = useRef(false);
 
     const [isMobile, setIsMobile] = useState(false);
     const [mobileActionCardId, setMobileActionCardId] = useState<string | null>(null);
@@ -836,6 +837,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setExile(data.exile || []);
             setCommandZone(data.commandZone || []);
             setLife(data.life || 40);
+            hasLoadedState.current = true;
             
             // Fix Board Object Controllers (Map old ID to new Socket ID)
             const myNewId = socket.id;
@@ -1501,6 +1503,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 if (loadedState.exile) setExile(loadedState.exile);
                 if (loadedState.commandZone) setCommandZone(loadedState.commandZone);
                 if (loadedState.life !== undefined) setLife(loadedState.life);
+                hasLoadedState.current = true;
                 addLog("Game data loaded from server", "SYSTEM");
             }
         };
@@ -1652,6 +1655,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setTurn(1);
                 setRound(1);
                 setGameStats({});
+                
+                const commanders = initialDeck.filter(c => c.isCommander);
+                const deck = initialDeck.filter(c => !c.isCommander);
+                const shuffled = [...deck].sort(() => Math.random() - 0.5);
+                setLibrary(shuffled);
+                setCommandZone(commanders);
+                
                 addLog("The host has restarted the game", "SYSTEM");
             }
             else if (action === 'REVEAL_CARDS') {
@@ -1787,21 +1797,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (options?.trackDamage !== undefined) setTrackDamage(options.trackDamage);
          
          if (isLocal) {
-             // Safeguard: Ensure local states are initialized
-             if (Object.keys(localPlayerStates.current).length === 0) {
-                 const states: Record<string, LocalPlayerState> = {};
-                 playersList.forEach((p, idx) => {
-                     if (idx === 0) {
-                         states[p.id] = createInitialState(p.id, initialDeck, initialTokens);
-                     } else {
+             // Re-initialize states to ensure fresh deck data
+             const states: Record<string, LocalPlayerState> = {};
+             playersList.forEach((p) => {
+                 if (p.id === 'player-0' || p.id === 'local-player') {
+                     states[p.id] = createInitialState(p.id, initialDeck, initialTokens);
+                 } else {
+                     const match = p.id.match(/player-(\d+)/);
+                     if (match) {
+                         const idx = parseInt(match[1]);
                          const opp = localOpponents[idx - 1];
                          if (opp) {
                              states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
                          }
                      }
-                 });
-                 localPlayerStates.current = states;
-             }
+                 }
+                 if (!states[p.id]) states[p.id] = createInitialState(p.id, [], []);
+             });
+             localPlayerStates.current = states;
 
              // Draw 7 for everyone
              Object.values(localPlayerStates.current).forEach((state: LocalPlayerState) => {
@@ -1828,6 +1841,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          setTurnStartTime(Date.now());
          damageTakenThisTurn.current = 0;
          healingReceivedThisTurn.current = 0;
+         hasLoadedState.current = true;
          
          if (isLocal) {
              // In local mode, set turn order based on players list
@@ -1851,6 +1865,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('START_GAME', { mulligansAllowed, trackDamage, firstPlayerId: startingPlayer.id, playerOrder: orderedIds });
         handleStartGameLogic({ mulligansAllowed });
         setCurrentTurnPlayerId(startingPlayer.id);
+        
+        if (isLocal) {
+            const idx = playersList.findIndex(p => p.id === startingPlayer.id);
+            if (idx !== -1) {
+                setMySeatIndex(idx);
+                loadLocalPlayerState(startingPlayer.id);
+            }
+        }
     };
 
     const handleRestartGame = () => {
@@ -1866,6 +1888,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setRound(1);
         setTurnOrder([]);
         setGameStats({});
+        
+        const commanders = initialDeck.filter(c => c.isCommander);
+        const deck = initialDeck.filter(c => !c.isCommander);
+        const shuffled = [...deck].sort(() => Math.random() - 0.5);
+        setLibrary(shuffled);
+        setCommandZone(commanders);
+
         addLog("The host has restarted the game", "SYSTEM");
         damageTakenThisTurn.current = 0;
         healingReceivedThisTurn.current = 0;
@@ -1933,7 +1962,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const getControllerId = () => {
-        return isLocal ? playersList[mySeatIndex].id : (socket.id || 'local-player');
+        return isLocal ? playersList[mySeatIndex].id : (socket.id || playersList[mySeatIndex]?.id || 'local-player');
     };
 
     const handleMulliganChoice = (keep: boolean) => {
@@ -3123,6 +3152,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const isOwnerInGame = playersList.some(p => p.id === obj.controllerId);
                     const isControlled = isLocal || obj.controllerId === socket.id || obj.controllerId === 'local-player' || !isOwnerInGame;
                     
+                    const controllerIdx = (!isLocal && obj.controllerId === 'local-player') 
+                        ? mySeatIndex 
+                        : playersList.findIndex(p => p.id === obj.controllerId);
+                    const seatIdx = controllerIdx !== -1 ? getSeatMapping(controllerIdx, playersList.length) : 0;
+                    const defaultRotation = SEAT_ROTATIONS[seatIdx];
                     const controller = playersList.find(p => p.id === obj.controllerId);
                     const objSleeveColor = controller ? controller.color : sleeveColor;
                     const isSelected = mobileActionCardId === obj.id;
@@ -3153,6 +3187,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             isSelected={isSelected}
                             isAnySelected={!!mobileActionCardId}
                             onSelect={() => setMobileActionCardId(obj.id)}
+                            defaultRotation={defaultRotation}
                             // onDoubleClick handled in Card component
                         />
                     </div>
@@ -4174,12 +4209,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         const searchTargetId = searchModal.playerId || activeId;
                         const searchTargetPlayer = playersList.find(p => p.id === searchTargetId);
                         const displaySleeveColor = searchTargetPlayer ? searchTargetPlayer.color : sleeveColor;
+                        const isLandscapeMobile = isMobile && window.innerWidth > window.innerHeight;
                         
-                        return (
-                        <div className="flex flex-col h-full">
-                    
-                    {/* Header */}
-                    <div className={`flex justify-between items-center border-b border-gray-700 bg-gray-900/95 z-10 shrink-0 ${isMobile ? 'p-2' : 'mb-6 pb-4'}`}>
+                        const Header = (
+                        <div className={`flex justify-between items-center border-b border-gray-700 bg-gray-900/95 z-10 shrink-0 ${isMobile ? 'p-2' : 'mb-6 pb-4'}`}>
                         <div className="flex items-center gap-4">
                             {!isMobile && <Search className="text-blue-400" size={32} />}
                             <div className="flex-1 min-w-0">
@@ -4215,10 +4248,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             )}
                             <button onClick={() => setSearchModal({...searchModal, isOpen: false})} className="p-2 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white"><X size={32} /></button>
                         </div>
-                    </div>
+                        </div>
+                        );
 
-                    <div className={`flex-1 flex ${isMobile && window.innerWidth > window.innerHeight ? 'flex-row' : 'flex-col'} overflow-hidden`}>
-                    <div className={`flex-1 overflow-y-auto custom-scrollbar ${isMobile ? 'p-2' : 'pr-2 pb-60'}`}>
+                        const Grid = (
+                        <div className={`flex-1 overflow-y-auto custom-scrollbar ${isMobile ? 'p-2' : 'pr-2 pb-60'}`}>
                         <div className={`grid ${isMobile ? 'grid-cols-4 gap-2' : 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4'}`}>
                             {searchModal.items.map((item, idx) => (
                                 <div key={item.card.id} className="relative group aspect-[2.5/3.5] bg-gray-800 rounded-lg">
@@ -4274,10 +4308,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </div>
                             ))}
                         </div>
-                    </div>
+                        </div>
+                        );
 
-                    {searchModal.source !== 'TOKENS' && !searchModal.isReadOnly && (
-                        <div className={`${isMobile && window.innerWidth > window.innerHeight ? 'w-1/2 border-l h-full' : 'border-t w-full'} bg-gray-900 border-gray-700 ${isMobile ? (window.innerWidth > window.innerHeight ? 'p-2' : 'p-2 h-72') : 'absolute bottom-0 left-0 right-0 p-4 h-80'} flex flex-col shadow-2xl z-20 shrink-0`}>
+                        const Tray = searchModal.source !== 'TOKENS' && !searchModal.isReadOnly ? (
+                        <div className={`${isLandscapeMobile ? 'w-1/2 border-l h-full' : 'border-t w-full'} bg-gray-900 border-gray-700 ${isMobile ? (isLandscapeMobile ? 'p-2' : 'p-2 h-72') : 'absolute bottom-0 left-0 right-0 p-4 h-80'} flex flex-col shadow-2xl z-20 shrink-0`}>
                             <div className="flex flex-col md:flex-row justify-between items-center mb-2 gap-2">
                                 <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide flex items-center gap-2">
                                     <Layers size={14} /> Selected Cards Tray ({searchModal.tray.length})
@@ -4295,7 +4330,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </div>
                             </div>
                             
-                            <div className={`flex-1 bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-700 flex items-center px-4 overflow-x-auto gap-4 ${isMobile && window.innerWidth > window.innerHeight ? 'flex-wrap content-start overflow-y-auto p-2' : ''}`}>
+                            <div className={`flex-1 bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-700 flex items-center px-4 overflow-x-auto gap-4 ${isLandscapeMobile ? 'flex-wrap content-start overflow-y-auto p-2' : ''}`}>
                                 {searchModal.tray.length === 0 ? (
                                     <div className="text-gray-500 text-sm italic w-full text-center">Add cards from above to perform actions on them. Left is Top, Right is Bottom.</div>
                                 ) : (
@@ -4323,9 +4358,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 )}
                             </div>
                         </div>
-                    )}
-                    </div>
-                        </div>
+                        ) : null;
+
+                        if (isLandscapeMobile) {
+                            return (
+                                <div className="flex flex-row h-full">
+                                    <div className="flex flex-col w-1/2 h-full">
+                                        {Header}
+                                        {Grid}
+                                    </div>
+                                    {Tray}
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div className="flex flex-col h-full">
+                                {Header}
+                                <div className="flex-1 flex flex-col overflow-hidden">
+                                    {Grid}
+                                </div>
+                                {Tray}
+                            </div>
                         );
                     })()}
                 </div>

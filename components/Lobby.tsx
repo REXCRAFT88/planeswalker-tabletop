@@ -344,7 +344,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   
                   <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                       {!editingDeck ? (
-                          <div className="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4 pb-32">
                               <button onClick={handleCreateNewDeck} className="col-span-full flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
                                   <Plus size={20}/> Create New Deck
                               </button>
