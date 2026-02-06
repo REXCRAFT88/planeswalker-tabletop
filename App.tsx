@@ -73,9 +73,22 @@ function App() {
       return () => clearInterval(interval);
   }, []);
 
-  const handleDeckReady = (deck: CardData[], tokens: CardData[]) => {
+  const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string) => {
     setActiveDeck(deck);
     setLobbyTokens(tokens);
+    
+    if (shouldSave) {
+        const newDeck: SavedDeck = {
+            id: crypto.randomUUID(),
+            name: deckName || `Deck ${new Date().toLocaleDateString()}`,
+            deck,
+            tokens,
+            sleeveColor: playerSleeve,
+            createdAt: Date.now()
+        };
+        handleSaveDeck(newDeck);
+    }
+    
     setCurrentView(View.LOBBY);
   };
 

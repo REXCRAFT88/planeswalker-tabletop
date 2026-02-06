@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
@@ -186,7 +187,7 @@ const HandCard: React.FC<{
 };
 
 const Die: React.FC<{ value: number, sides: number, x: number, y: number, color: string, rotation: number }> = ({ value, sides, x, y, color, rotation }) => {
-    return (
+    return createPortal(
         <div 
             className="absolute flex items-center justify-center z-[1000] animate-in zoom-in spin-in duration-500 ease-out"
             style={{ 
@@ -203,7 +204,8 @@ const Die: React.FC<{ value: number, sides: number, x: number, y: number, color:
                 <span className="text-3xl font-bold text-white drop-shadow-md" style={{ transform: `rotate(${-rotation}deg)` }}>{value}</span>
                 <span className="absolute bottom-1 text-[8px] text-gray-400 font-bold">D{sides}</span>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };
 
@@ -263,6 +265,7 @@ const Playmat: React.FC<{
 }) => {
 
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const isLongPress = useRef(false);
 
   const handleZoneTouch = (zone: string, e: React.TouchEvent) => {
       if (!isMobile || !isControlled) return;
@@ -272,7 +275,9 @@ const Playmat: React.FC<{
 
   const handleZoneTouchStart = (zone: string, e: React.TouchEvent) => {
       if (!isMobile || !isControlled) return;
+      isLongPress.current = false;
       longPressTimer.current = setTimeout(() => {
+          isLongPress.current = true;
           onMobileZoneAction(zone);
       }, 500);
   };
@@ -282,6 +287,14 @@ const Playmat: React.FC<{
           clearTimeout(longPressTimer.current);
           longPressTimer.current = null;
       }
+  };
+
+  const handleLibraryClick = (e: React.MouseEvent) => {
+      if (isMobile && isLongPress.current) {
+          e.stopPropagation();
+          return;
+      }
+      onDraw();
   };
 
   const handleCommanderTouch = (cmd: CardData, e: React.TouchEvent) => {
@@ -312,10 +325,10 @@ const Playmat: React.FC<{
       >
         <div 
             className="w-full h-full rounded bg-gray-800 border-2 border-white/20 flex items-center justify-center hover:border-blue-400 transition relative overflow-hidden cursor-pointer active:scale-95"
-            onClick={isMobile ? undefined : onDraw}
+            onClick={handleLibraryClick}
             onTouchStart={isMobile ? (e) => handleZoneTouchStart('LIBRARY', e) : undefined}
             onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
-            onDoubleClick={() => isMobile && onDoubleClickZone('LIBRARY')}
+            onDoubleClick={() => isMobile && onPlayTopLibrary()}
             style={{ backgroundColor: sleeveColor }}
         >
             <div className="text-white font-bold text-2xl z-10 pointer-events-none">{counts.library}</div>
@@ -694,13 +707,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [showPlayerManager, setShowPlayerManager] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showDamageReportModal, setShowDamageReportModal] = useState(false);
-    const [disconnectModal, setDisconnectModal] = useState<{ isOpen: boolean, player: {id: string, name: string} | null }>({ isOpen: false, player: null });
+    const [disconnectModal, setDisconnectModal] = useState<{ isOpen: boolean, player: {id: string, name: string} | null, seatIdx: number }>({ isOpen: false, player: null, seatIdx: -1 });
     const [mobileZoneMenu, setMobileZoneMenu] = useState<string | null>(null);
     const disconnectModalRef = useRef(disconnectModal);
     const damageTakenThisTurn = useRef(0);
     const healingReceivedThisTurn = useRef(0);
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
-    const [ghostPlayers, setGhostPlayers] = useState<{id: string, name: string, color: string}[]>([]);
+    const [ghostPlayers, setGhostPlayers] = useState<{id: string, name: string, color: string, seatIdx: number}[]>([]);
     const [joinHandlingModal, setJoinHandlingModal] = useState<{ isOpen: boolean, newPlayer: {id: string, name: string} | null }>({ isOpen: false, newPlayer: null });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
     const [isFullScreen, setIsFullScreen] = useState(false);
@@ -1142,9 +1155,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [hand, library, graveyard, exile, commandZone, life, mySeatIndex, gamePhase, roomId]);
 
     // Stats Helper
+    const getMyId = () => isLocal ? playersList[mySeatIndex].id : socket.id;
+
     const updateMyStats = (updates: Partial<PlayerStats>) => {
         setGameStats(prev => {
-            const myId = socket.id;
+            const myId = getMyId();
             const current = prev[myId] || emptyStats;
             const newStats = { ...current, ...updates };
             
@@ -1179,18 +1194,39 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const newPlayerId = joinHandlingModal.newPlayer.id;
         const ghost = ghostPlayers.find(g => g.id === ghostId);
         
-        // Transfer objects
+        // 1. Move New Player to Ghost's Seat (Reorder)
+        if (ghost) {
+            const currentPlayers = playersList;
+            const newPlayerIdx = currentPlayers.findIndex(p => p.id === newPlayerId);
+            
+            if (newPlayerIdx !== -1 && ghost.seatIdx !== -1) {
+                 const newOrder = [...currentPlayers];
+                 const [player] = newOrder.splice(newPlayerIdx, 1);
+                 const targetIdx = Math.min(ghost.seatIdx, newOrder.length);
+                 newOrder.splice(targetIdx, 0, player);
+                 
+                 setPlayersList(newOrder);
+                 setTurnOrder(newOrder.map(p => p.id));
+                 emitAction('UPDATE_PLAYER_ORDER', { players: newOrder });
+                 socket.emit('update_player_order', { room: roomId, players: newOrder });
+            }
+        }
+
+        // 2. Transfer objects
         emitAction('TRANSFER_OBJECTS', { fromId: ghostId, toId: newPlayerId });
         
-        // Restore State (Hand, Library, Life)
+        // 3. Restore State (Hand, Library, Life)
         if (ghost && ghost.seatIdx !== -1) {
              socket.emit('admin_assign_state', { room: roomId, targetId: newPlayerId, seatIndex: ghost.seatIdx });
         }
 
-        // Remove ghost
-        setGhostPlayers(prev => prev.filter(g => g.id !== ghostId));
+        // 4. Remove ghost
+        const newGhosts = ghostPlayers.filter(g => g.id !== ghostId);
+        setGhostPlayers(newGhosts);
+        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
+        
         setJoinHandlingModal({ isOpen: false, newPlayer: null });
-        addLog(`${joinHandlingModal.newPlayer.name} took over ${ghostPlayers.find(g => g.id === ghostId)?.name}'s seat`, 'SYSTEM');
+        addLog(`${joinHandlingModal.newPlayer.name} took over ${ghost?.name}'s seat`, 'SYSTEM');
     };
 
     const handleOverwriteGhost = (ghostId: string) => {
@@ -1199,12 +1235,26 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         toRemove.forEach(o => emitAction('REMOVE_OBJECT', { id: o.id }));
         
         // Remove ghost
-        setGhostPlayers(prev => prev.filter(g => g.id !== ghostId));
+        const newGhosts = ghostPlayers.filter(g => g.id !== ghostId);
+        setGhostPlayers(newGhosts);
+        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
+
         setJoinHandlingModal({ isOpen: false, newPlayer: null });
         addLog(`Cleared ${ghostPlayers.find(g => g.id === ghostId)?.name}'s seat for ${joinHandlingModal.newPlayer?.name}`, 'SYSTEM');
     };
 
     const handleAssignNewSeat = () => {
+        const newPlayer = joinHandlingModal.newPlayer;
+        if (newPlayer) {
+             setTurnOrder(prev => {
+                 const newOrder = [...prev, newPlayer.id];
+                 if (isHost) {
+                     emitAction('UPDATE_PLAYER_ORDER', { players: sortPlayers([...playersList, newPlayer], newOrder) });
+                     socket.emit('update_player_order', { room: roomId, players: sortPlayers([...playersList, newPlayer], newOrder) });
+                 }
+                 return newOrder;
+             });
+        }
         setJoinHandlingModal({ isOpen: false, newPlayer: null });
         addLog(`${joinHandlingModal.newPlayer?.name} assigned to a new seat`, 'SYSTEM');
     };
@@ -1283,16 +1333,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const addLog = (message: string, type: 'ACTION' | 'SYSTEM' = 'ACTION', overrideName?: string) => {
         console.log(`Adding log: ${message} (${type})`); // Debug
+        const actingPlayerName = overrideName || (isLocal ? playersList[mySeatIndex].name : playerName);
         const entry: LogEntry = {
             id: crypto.randomUUID(),
             timestamp: Date.now(),
             playerId: overrideName ? 'remote' : 'local',
-            playerName: overrideName || playerName,
+            playerName: actingPlayerName,
             message,
             type
         };
         setLogs(prev => [entry, ...prev]);
-        const displayMsg = type === 'SYSTEM' ? message : `${overrideName || playerName} ${message.toLowerCase()}`;
+        const displayMsg = type === 'SYSTEM' ? message : `${actingPlayerName} ${message.toLowerCase()}`;
         setStatusMessage(displayMsg);
         setTimeout(() => setStatusMessage(""), 3000);
         
@@ -1390,6 +1441,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const newPlayers = roomPlayers.filter(rp => !prevPlayers.find(p => p.id === rp.id));
             if (newPlayers.length > 0 && amIHost && gamePhaseRef.current !== 'SETUP') {
                  console.log("New player joined game in progress, syncing state...");
+                 
+                 let currentTurnOrder = turnOrderRef.current;
+                 // If no ghosts to take over, auto-add new players to turn order
+                 if (ghostPlayersRef.current.length === 0) {
+                     const newIds = newPlayers.map(p => p.id);
+                     currentTurnOrder = [...currentTurnOrder, ...newIds];
+                     setTurnOrder(currentTurnOrder);
+                 }
+
                  const safeBoardObjects = boardObjectsRef.current.map(obj => ({
                      ...obj,
                      controllerId: obj.controllerId === 'local-player' ? socket.id : obj.controllerId
@@ -1402,7 +1462,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      currentTurnPlayerId: currentTurnPlayerIdRef.current,
                      turnStartTime: turnStartTimeRef.current,
                      commanderDamage: commanderDamageRef.current,
-                     turnOrder: turnOrderRef.current
+                     turnOrder: currentTurnOrder,
+                     ghosts: ghostPlayersRef.current
                  }});
             }
 
@@ -1554,7 +1615,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  if (data.sourceId === socket.id) {
                      // We use updateMyStats helper logic pattern here manually to avoid closure staleness issues if we used the helper directly inside the socket callback
                      // But actually, we can just update local state and emit.
-                     updateMyStats({ healingGiven: (gameStats[socket.id]?.healingGiven || 0) + data.amount });
+                     updateMyStats({ healingGiven: (gameStats[getMyId()]?.healingGiven || 0) + data.amount });
                  }
              }
              else if (action === 'ADD_OBJECT') {
@@ -1611,6 +1672,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      setPlayersList(prev => sortPlayers(prev, data.turnOrder));
                  }
                  addLog("Synced game state from Host", "SYSTEM");
+                 if (data.ghosts) {
+                     setGhostPlayers(data.ghosts);
+                 }
+            }
+            else if (action === 'SYNC_GHOSTS') {
+                setGhostPlayers(data.ghosts);
             }
             else if (action === 'ROLL_DICE') {
                 setActiveDice(prev => [...prev, data]);
@@ -1960,7 +2027,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`kept ${disconnectModal.player.name}'s items on table`, 'SYSTEM');
         
         const player = playersList.find(p => p.id === disconnectModal.player!.id) || { ...disconnectModal.player, color: '#888' };
-        setGhostPlayers(prev => [...prev, { ...player, seatIdx: disconnectModal.seatIdx } as any]);
+        const newGhost = { ...player, seatIdx: disconnectModal.seatIdx } as any;
+        const newGhosts = [...ghostPlayers, newGhost];
+        setGhostPlayers(newGhosts);
+        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
 
         setDisconnectModal({ isOpen: false, player: null, seatIdx: -1 });
     };
@@ -2059,7 +2129,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const untapAll = () => {
         const mySeatPosIndex = getSeatMapping(mySeatIndex, playersList.length);
         const myDefaultRotation = SEAT_ROTATIONS[mySeatPosIndex];
-        const myId = isLocal ? currentTurnPlayerId : (socket.id || 'local-player');
+        const myId = isLocal ? playersList[mySeatIndex].id : (socket.id || 'local-player');
 
         const myCards = boardObjects.filter(o => o.controllerId === myId && (o.tappedQuantity > 0 || o.rotation !== myDefaultRotation));
         if (myCards.length === 0) return;
@@ -2156,15 +2226,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  }
             } else {
                  // Check for Tapping
-                 if (movingObj && movingObj.controllerId === socket.id) {
+                 const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
+                 if (movingObj && movingObj.controllerId === myId) {
                      const isTap = (updates.rotation === 90 && movingObj.rotation === 0) ||
                                    (updates.tappedQuantity !== undefined && updates.tappedQuantity > movingObj.tappedQuantity);
                      if (isTap) {
                          const cardName = movingObj.cardData.name;
                          updateMyStats({
                              tappedCounts: {
-                                 ...gameStats[socket.id]?.tappedCounts,
-                                 [cardName]: (gameStats[socket.id]?.tappedCounts?.[cardName] || 0) + 1
+                                 ...gameStats[myId]?.tappedCounts,
+                                 [cardName]: (gameStats[myId]?.tappedCounts?.[cardName] || 0) + 1
                              }
                          });
                      }
@@ -2224,7 +2295,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        updateMyStats({ cardsPlayed: (gameStats[socket.id]?.cardsPlayed || 0) + 1 });
+        updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         if (!card.isToken) setHand(prev => prev.filter(c => c.id !== card.id));
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
     };
@@ -2246,7 +2317,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        updateMyStats({ cardsPlayed: (gameStats[socket.id]?.cardsPlayed || 0) + 1 });
+        updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog("added a counter");
     };
 
@@ -2274,7 +2345,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
              setHand(h => [...h, ...drawn]);
              return prev.slice(count);
         });
-        updateMyStats({ cardsDrawn: (gameStats[socket.id]?.cardsDrawn || 0) + count });
+        updateMyStats({ cardsDrawn: (gameStats[getMyId()]?.cardsDrawn || 0) + count });
         addLog(`drew ${count} card${count > 1 ? 's' : ''}`);
     };
 
@@ -2293,7 +2364,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        updateMyStats({ cardsPlayed: (gameStats[socket.id]?.cardsPlayed || 0) + 1 });
+        updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`cast commander ${card.name}`);
     };
 
@@ -2310,7 +2381,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         });
         if (totalDamageReceived > 0) {
-            updateMyStats({ damageReceived: (gameStats[myId]?.damageReceived || 0) + totalDamageReceived });
+            updateMyStats({ damageReceived: (gameStats[getMyId()]?.damageReceived || 0) + totalDamageReceived });
         }
 
         // Process Healing
@@ -2326,8 +2397,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
         if (totalHealingReceived > 0) {
             updateMyStats({ 
-                healingReceived: (gameStats[myId]?.healingReceived || 0) + totalHealingReceived,
-                selfHealing: (gameStats[myId]?.selfHealing || 0) + totalSelfHealing
+                healingReceived: (gameStats[getMyId()]?.healingReceived || 0) + totalHealingReceived,
+                selfHealing: (gameStats[getMyId()]?.selfHealing || 0) + totalSelfHealing
             });
         }
     };
@@ -2349,7 +2420,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        updateMyStats({ cardsPlayed: (gameStats[socket.id]?.cardsPlayed || 0) + 1 });
+        updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`played top card of library`);
     };
 
@@ -2370,7 +2441,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        updateMyStats({ cardsPlayed: (gameStats[socket.id]?.cardsPlayed || 0) + 1 });
+        updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`returned ${card.name} from graveyard to battlefield`);
     };
 
@@ -2401,7 +2472,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const rollDice = (sides: number = 6) => {
-        const rollerId = isLocal ? currentTurnPlayerId : socket.id;
+        const rollerId = isLocal ? playersList[mySeatIndex].id : socket.id;
         const rollerIdx = playersList.findIndex(p => p.id === rollerId);
         if (rollerIdx === -1) return;
         
@@ -2507,8 +2578,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (checkZoneCollision(x, y, i, 'MAT')) {
                 const targetPlayer = playersList[i];
                 const targetSeatIdx = getSeatMapping(i, playersList.length);
-                updateBoardObject(id, { controllerId: targetPlayer.id, rotation: SEAT_ROTATIONS[targetSeatIdx] });
-                addLog(`gave control of ${obj.cardData.name} to ${targetPlayer.name}`);
+                if (obj.controllerId !== targetPlayer.id) {
+                    updateBoardObject(id, { controllerId: targetPlayer.id, rotation: SEAT_ROTATIONS[targetSeatIdx] });
+                    addLog(`gave control of ${obj.cardData.name} to ${targetPlayer.name}`);
+                }
                 return;
             }
         }
@@ -3032,11 +3105,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const owner = playersList[ownerIdx];
                     const seatIdx = ownerIdx !== -1 ? getSeatMapping(ownerIdx, playersList.length) : 0;
                     const dieRotation = ownerIdx !== -1 ? SEAT_ROTATIONS[seatIdx] : 0;
+                    const pos = seatPositions[seatIdx];
+                    const x = pos.x + MAT_W / 2;
+                    const y = pos.y + MAT_H / 2;
 
                     return (
                         <Die 
                             key={die.id} 
-                            value={die.value} sides={die.sides} x={die.x} y={die.y} 
+                            value={die.value} sides={die.sides} x={isLocal ? x : die.x} y={isLocal ? y : die.y} 
                             color={owner?.color || '#fff'} 
                             rotation={dieRotation}
                         />
@@ -3075,6 +3151,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             isMobile={isMobile}
                             onMobileAction={() => setMobileActionCardId(obj.id)}
                             isSelected={isSelected}
+                            isAnySelected={!!mobileActionCardId}
+                            onSelect={() => setMobileActionCardId(obj.id)}
                             // onDoubleClick handled in Card component
                         />
                     </div>
@@ -3502,7 +3580,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             {/* Mobile Menu Overlay */}
             {mobileMenuOpen && (
-                <div className="fixed inset-0 z-[10000] bg-gray-900/95 backdrop-blur-xl flex flex-col p-6 animate-in slide-in-from-right">
+                <div className="fixed inset-0 z-[10000] bg-gray-900/95 backdrop-blur-xl flex flex-col p-6 animate-in slide-in-from-right overflow-y-auto">
                     <div className="flex justify-between items-center mb-8">
                         <h2 className="text-2xl font-bold text-white">Menu</h2>
                         <button onClick={() => setMobileMenuOpen(false)} className="p-2 bg-gray-800 rounded-full text-white"><X size={24}/></button>
@@ -3818,8 +3896,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             {/* Mobile Card Actions Modal */}
             {mobileActionCardId && (
-                <div className="fixed left-0 top-16 bottom-0 z-[9000] flex flex-col justify-center pointer-events-none animate-in slide-in-from-left duration-200">
-                    <div className="bg-gray-900/90 backdrop-blur-md border-r border-y border-gray-700 rounded-r-2xl p-3 shadow-2xl pointer-events-auto flex flex-col gap-3 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                <div className="fixed left-0 top-0 bottom-0 z-[9000] flex flex-col justify-center pointer-events-none animate-in slide-in-from-left duration-200">
+                    <div className="bg-black/60 backdrop-blur-sm border-r border-y border-gray-700/50 rounded-r-2xl p-2 shadow-2xl pointer-events-auto flex flex-col gap-2 max-h-[90vh] overflow-y-auto custom-scrollbar w-20 md:w-auto">
                         {(() => {
                             const obj = boardObjects.find(o => o.id === mobileActionCardId);
                             const handCard = hand.find(c => c.id === mobileActionCardId);
@@ -3828,66 +3906,66 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             
                             return (
                                 <>
-                                    <div className="flex flex-col items-center gap-1 mb-2">
-                                        <img src={cardData.imageUrl} className="w-16 h-24 rounded object-cover border border-gray-600 shadow-lg" />
-                                        <div className="text-[10px] text-gray-300 font-bold text-center max-w-[80px] leading-tight line-clamp-2">{cardData.name}</div>
+                                    <div className="flex flex-col items-center gap-1 mb-1">
+                                        <img src={cardData.imageUrl} className="w-12 h-16 md:w-16 md:h-24 rounded object-cover border border-gray-600 shadow-lg" />
+                                        <div className="text-[8px] md:text-[10px] text-gray-300 font-bold text-center max-w-[60px] leading-tight line-clamp-2">{cardData.name}</div>
                                     </div>
                                     
                                     <div className="flex flex-col gap-2">
-                                        <button onClick={() => { setInspectCard(cardData); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                        <button onClick={() => { setInspectCard(cardData); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600">
                                             <ZoomIn size={24} className="text-white"/>
-                                            <span className="text-xs text-gray-300">Inspect</span>
+                                            <span className="text-[10px] text-gray-300">Inspect</span>
                                         </button>
                                         
                                         {obj && (
                                             <>
-                                            <button onClick={() => { updateBoardObject(obj.id, { rotation: obj.rotation === 0 ? 90 : 0 }); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                            <button onClick={() => { updateBoardObject(obj.id, { rotation: obj.rotation === 0 ? 90 : 0 }); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600">
                                                 <RefreshCw size={24} className="text-white"/>
-                                                <span className="text-xs text-gray-300">Tap</span>
+                                                <span className="text-[10px] text-gray-300">Tap</span>
                                             </button>
                                             
-                                            <div className="flex flex-col items-center gap-1 p-2 bg-gray-800 rounded-xl border border-gray-700">
-                                                <span className="text-[10px] text-gray-400 font-bold uppercase">Counters</span>
-                                                <div className="flex items-center gap-2">
-                                                    <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) - 1 } }); }} className="p-1 bg-red-900/50 rounded text-red-200 active:bg-red-700"><Minus size={16}/></button>
-                                                    <span className="text-white font-bold w-6 text-center">{obj.counters["+1/+1"] || 0}</span>
-                                                    <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) + 1 } }); }} className="p-1 bg-green-900/50 rounded text-green-200 active:bg-green-700"><Plus size={16}/></button>
+                                            <div className="flex flex-col items-center gap-1 p-1 bg-gray-800/80 rounded-xl border border-gray-700/50">
+                                                <span className="text-[8px] text-gray-400 font-bold uppercase">Count</span>
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) + 1 } }); }} className="p-1 bg-green-900/50 rounded text-green-200 active:bg-green-700"><Plus size={14}/></button>
+                                                    <span className="text-white font-bold text-xs">{obj.counters["+1/+1"] || 0}</span>
+                                                    <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) - 1 } }); }} className="p-1 bg-red-900/50 rounded text-red-200 active:bg-red-700"><Minus size={14}/></button>
                                                 </div>
                                             </div>
 
-                                            <button onClick={() => { returnToHand(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                            <button onClick={() => { returnToHand(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600">
                                                 <Hand size={24} className="text-blue-300"/>
-                                                <span className="text-xs text-gray-300">Hand</span>
+                                                <span className="text-[10px] text-gray-300">Hand</span>
                                             </button>
-                                            <button onClick={() => { updateBoardObject(obj.id, { isFaceDown: !obj.isFaceDown }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                            <button onClick={() => { updateBoardObject(obj.id, { isFaceDown: !obj.isFaceDown }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600">
                                                 <Eye size={24} className="text-purple-300"/>
-                                                <span className="text-xs text-gray-300">Flip</span>
+                                                <span className="text-[10px] text-gray-300">Flip</span>
                                             </button>
-                                            {obj.quantity > 1 && <button onClick={() => { unstackCards(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600"><Layers size={24} className="text-white"/><span className="text-xs text-gray-300">Unstack All</span></button>}
-                                            <button onClick={() => { sendToZone(cardData, 'GRAVEYARD'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                            {obj.quantity > 1 && <button onClick={() => { unstackCards(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600"><Layers size={24} className="text-white"/><span className="text-[10px] text-gray-300">Unstack</span></button>}
+                                            <button onClick={() => { sendToZone(cardData, 'GRAVEYARD'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                 <Archive size={24} className="text-red-400"/>
-                                                <span className="text-xs text-gray-300">Grave</span>
+                                                <span className="text-[10px] text-gray-300">Grave</span>
                                             </button>
-                                            <button onClick={() => { sendToZone(cardData, 'EXILE'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                            <button onClick={() => { sendToZone(cardData, 'EXILE'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                 <X size={24} className="text-red-400"/>
-                                                <span className="text-xs text-gray-300">Exile</span>
+                                                <span className="text-[10px] text-gray-300">Exile</span>
                                             </button>
                                             </>
                                         )}
 
                                         {handCard && (
                                             <>
-                                            <button onClick={() => { playCardFromHand(handCard); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                            <button onClick={() => { playCardFromHand(handCard); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600">
                                                 <Play size={24} className="text-green-400"/>
-                                                <span className="text-xs text-gray-300">Play</span>
+                                                <span className="text-[10px] text-gray-300">Play</span>
                                             </button>
-                                            <button onClick={() => { sendToZone(handCard, 'GRAVEYARD'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                            <button onClick={() => { sendToZone(handCard, 'GRAVEYARD'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                 <Archive size={24} className="text-red-400"/>
-                                                <span className="text-xs text-gray-300">Discard</span>
+                                                <span className="text-[10px] text-gray-300">Discard</span>
                                             </button>
-                                            <button onClick={() => { sendToZone(handCard, 'EXILE'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                            <button onClick={() => { sendToZone(handCard, 'EXILE'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                 <X size={24} className="text-red-400"/>
-                                                <span className="text-xs text-gray-300">Exile</span>
+                                                <span className="text-[10px] text-gray-300">Exile</span>
                                             </button>
                                             </>
                                         )}
@@ -4125,7 +4203,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
                         
                         <div className="flex items-center gap-4">
-                            {searchModal.source === 'LIBRARY' && (!isMobile || window.innerWidth < window.innerHeight) && (
+                            {searchModal.source === 'LIBRARY' && (
                                 <>
                                     <button onClick={revealAll} className={`flex items-center gap-2 ${isMobile ? 'p-2' : 'px-4 py-2'} bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition`}>
                                         <Eye size={16}/> {!isMobile && 'Reveal All'}
@@ -4135,9 +4213,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     </button>
                                 </>
                             )}
-                            {(!isMobile || window.innerWidth < window.innerHeight) && (
                             <button onClick={() => setSearchModal({...searchModal, isOpen: false})} className="p-2 hover:bg-gray-800 rounded-full text-gray-400 hover:text-white"><X size={32} /></button>
-                            )}
                         </div>
                     </div>
 

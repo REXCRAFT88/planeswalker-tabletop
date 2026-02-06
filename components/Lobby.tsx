@@ -21,7 +21,7 @@ interface LobbyProps {
   savedDecks: SavedDeck[];
   onSaveDeck: (deck: SavedDeck) => void;
   onDeleteDeck: (id: string) => void;
-  onLoadDeck: (deck: CardData[], tokens: CardData[]) => void;
+  onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ 
@@ -173,7 +173,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck(deck.deck, deck.tokens);
+        onLoadDeck([...deck.deck], [...deck.tokens]);
         setIsLibraryOpen(false);
     };
     
@@ -342,7 +342,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); }} className="text-gray-400 hover:text-white"><X size={20}/></button>
                   </div>
                   
-                  <div className="flex-1 overflow-hidden flex flex-col">
+                  <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                       {!editingDeck ? (
                           <div className="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
                               <button onClick={handleCreateNewDeck} className="col-span-full flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">

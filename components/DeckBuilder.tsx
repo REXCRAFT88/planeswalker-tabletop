@@ -6,7 +6,7 @@ import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, 
 interface DeckBuilderProps {
   initialDeck: CardData[];
   initialTokens: CardData[];
-  onDeckReady: (deck: CardData[], tokens: CardData[]) => void;
+  onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
   onBack: () => void;
 }
 
@@ -24,6 +24,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
   const [tokenQuery, setTokenQuery] = useState('');
   const [tokenResults, setTokenResults] = useState<CardData[]>([]);
   const [isSearchingTokens, setIsSearchingTokens] = useState(false);
+  
+  const isNewDeck = !initialDeck || initialDeck.length === 0;
+  const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : '');
   
   // Staging area after fetching but before confirming commander
   // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
@@ -132,7 +135,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
   const finalizeDeck = () => {
       if (!stagedDeck) return;
-      onDeckReady(stagedDeck, stagedTokens);
+      onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName);
   };
 
   const clearDeck = () => {
@@ -171,6 +174,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
                   Add Tokens
                 </h1>
+                {isNewDeck && (
+                    <div className="flex-1 mx-4">
+                        <input 
+                            className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-green-500 outline-none"
+                            placeholder="Deck Name"
+                            value={deckName}
+                            onChange={e => setDeckName(e.target.value)}
+                        />
+                    </div>
+                )}
                 <button onClick={finalizeDeck} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg">
                     <Check size={20} /> Finish & Save
                 </button>
@@ -234,7 +247,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
   }
 
   return (
-    <div className="flex flex-col h-full p-2 md:p-8 max-w-6xl mx-auto">
+    <div className="flex flex-col h-full p-2 md:p-8 max-w-6xl mx-auto overflow-hidden">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
           {stagedDeck ? 'Select Commander' : 'Import Deck'}

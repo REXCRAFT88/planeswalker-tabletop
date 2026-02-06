@@ -173,7 +173,11 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                             <div className="flex items-center gap-2 my-2">
                                 <div className="h-px bg-gray-700 flex-1"/> <span className="text-xs text-gray-500">OR</span> <div className="h-px bg-gray-700 flex-1"/>
                             </div>
-                            <button onClick={() => setShowLibrary(true)} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg">
+                            <button 
+                                onClick={() => setShowLibrary(true)} 
+                                disabled={opponents.length >= 3}
+                                className="w-full py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold rounded-lg"
+                            >
                                 Select from Library
                             </button>
                             {opponents.length >= 3 && <p className="text-xs text-center text-gray-500">Max 3 opponents reached.</p>}

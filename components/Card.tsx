@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus } from 'lucide-react';
@@ -32,9 +33,11 @@ interface CardProps {
   onLongPress?: (id: string) => void;
   isMobile?: boolean;
   isSelected?: boolean;
+  isAnySelected?: boolean;
+  onSelect?: () => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -169,7 +172,17 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     if (!isDragging && !hasMoved && isMobile && isControlledByMe) {
         const now = Date.now();
         if (now - lastTapRef.current < 300) {
-            toggleTap(null);
+            if (object.type === 'COUNTER') {
+                 const nextColor = ((object.counters?.colorIndex || 0) + 1) % 7;
+                 onUpdate(object.id, { counters: { ...object.counters, colorIndex: nextColor } });
+            } else {
+                 toggleTap(null);
+            }
+        } else {
+            // Single tap to switch selection if menu is open
+            if (isAnySelected && onSelect && !isSelected) {
+                onSelect();
+            }
         }
         lastTapRef.current = now;
     }
@@ -360,17 +373,19 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       )
   }
 
-  return (
+  const cardContent = (
       <div
         ref={cardRef}
         className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
         style={{
-          left: object.x,
-          top: object.y,
+          left: isDragging && isMobile ? (viewX || 0) + object.x * (viewScale || 1) : object.x,
+          top: isDragging && isMobile ? (viewY || 0) + object.y * (viewScale || 1) : object.y,
           width: CARD_WIDTH * scale,
           height: CARD_HEIGHT * scale,
           zIndex: object.z,
-          transform: `rotate(${effectiveRotation}deg)`,
+          transform: isDragging && isMobile 
+            ? `scale(${viewScale}) rotate(${effectiveRotation}deg)` 
+            : `rotate(${effectiveRotation}deg)`,
           transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s',
         }}
         onPointerDown={handlePointerDown}
@@ -506,4 +521,9 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         </div>
       </div>
   );
+
+  if (isDragging && isMobile) {
+      return createPortal(cardContent, document.body);
+  }
+  return cardContent;
 };
