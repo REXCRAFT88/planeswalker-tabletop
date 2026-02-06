@@ -155,23 +155,6 @@ export const Lobby: React.FC<LobbyProps> = ({
       joinRoom(roomCode);
   };
 
-    const handleSaveCurrentDeck = () => {
-        if (activeDeck.length === 0) return;
-        const name = prompt("Enter a name for this deck:", "New Deck");
-        if (!name) return;
-        
-        const newDeck: SavedDeck = {
-            id: crypto.randomUUID(),
-            name,
-            deck: activeDeck,
-            tokens: currentTokens,
-            sleeveColor: playerSleeve,
-            createdAt: Date.now()
-        };
-        onSaveDeck(newDeck);
-        alert("Deck saved to library!");
-    };
-
     const handleLoadDeck = (deck: SavedDeck) => {
         onLoadDeck([...deck.deck], [...deck.tokens]);
         setIsLibraryOpen(false);
@@ -344,15 +327,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                   
                   <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                       {!editingDeck ? (
-                          <div className="p-4 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4 pb-32">
+                          <div className="p-4 overflow-y-auto custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4 pb-32">
                               <button onClick={handleCreateNewDeck} className="col-span-full flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
                                   <Plus size={20}/> Create New Deck
-                              </button>
-
-                              <button onClick={handleSaveCurrentDeck} disabled={activeDeck.length === 0} className="flex flex-col items-center justify-center p-6 bg-gray-700/30 border-2 border-dashed border-gray-600 rounded-xl hover:bg-gray-700/50 hover:border-gray-500 transition disabled:opacity-50">
-                                  <Save size={32} className="text-gray-400 mb-2"/>
-                                  <span className="font-bold text-gray-300">Save Current Deck</span>
-                                  <span className="text-xs text-gray-500">{activeDeck.length} cards loaded</span>
                               </button>
                               
                               {savedDecks.map(deck => {
@@ -366,7 +343,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                           <div className="flex-1 min-w-0">
                                               <h4 className="font-bold text-white truncate">{deck.name}</h4>
                                               <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
-                                              <div className="flex gap-2">
+                                              <div className="flex gap-2 flex-wrap">
                                                   <button onClick={() => handleLoadDeck(deck)} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
                                                       <Play size={12}/> Load
                                                   </button>

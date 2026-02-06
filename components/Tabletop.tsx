@@ -21,7 +21,7 @@ interface TabletopProps {
     roomId: string;
     initialGameStarted?: boolean;
     isLocal?: boolean;
-    localOpponents?: { name: string, deck: CardData[], tokens: CardData[], color: string }[];
+    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string }[];
     onExit: () => void;
 }
 
@@ -207,30 +207,6 @@ const Die: React.FC<{ value: number, sides: number, x: number, y: number, color:
         </div>,
         document.body
     );
-};
-
-const PlaymatGhost: React.FC<{
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  playerName: string;
-}> = ({ x, y, width, height, rotation, playerName }) => {
-  return (
-    <div
-      className="absolute border-2 border-dashed border-white/10 rounded-3xl flex flex-col items-center justify-center bg-white/5 pointer-events-none"
-      style={{
-        left: x,
-        top: y,
-        width,
-        height,
-        transform: `rotate(${rotation}deg)`,
-      }}
-    >
-      <div className="text-2xl font-bold text-white/20">{playerName}</div>
-    </div>
-  );
 };
 
 const Playmat: React.FC<{
@@ -707,14 +683,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [showPlayerManager, setShowPlayerManager] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showDamageReportModal, setShowDamageReportModal] = useState(false);
-    const [disconnectModal, setDisconnectModal] = useState<{ isOpen: boolean, player: {id: string, name: string} | null, seatIdx: number }>({ isOpen: false, player: null, seatIdx: -1 });
     const [mobileZoneMenu, setMobileZoneMenu] = useState<string | null>(null);
-    const disconnectModalRef = useRef(disconnectModal);
     const damageTakenThisTurn = useRef(0);
     const healingReceivedThisTurn = useRef(0);
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
-    const [ghostPlayers, setGhostPlayers] = useState<{id: string, name: string, color: string, seatIdx: number}[]>([]);
-    const [joinHandlingModal, setJoinHandlingModal] = useState<{ isOpen: boolean, newPlayer: {id: string, name: string} | null }>({ isOpen: false, newPlayer: null });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
@@ -729,6 +701,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const currentTurnPlayerIdRef = useRef(currentTurnPlayerId);
     const commanderDamageRef = useRef(commanderDamage);
     const lifeRef = useRef(life);
+    const logsRef = useRef(logs);
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
     const isSpacePressed = useRef(false);
@@ -758,7 +731,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const gamePhaseRef = useRef(gamePhase);
     const prevIsHost = useRef(isHost);
     const startingGameRef = useRef(false);
-    const ghostPlayersRef = useRef(ghostPlayers);
     const turnOrderRef = useRef(turnOrder);
     const trackDamageRef = useRef(trackDamage);
     const prevPlayersListForLayout = useRef(playersList);
@@ -792,7 +764,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { commanderDamageRef.current = commanderDamage; }, [commanderDamage]);
     useEffect(() => { turnOrderRef.current = turnOrder; }, [turnOrder]);
     useEffect(() => { lifeRef.current = life; }, [life]);
-    useEffect(() => { ghostPlayersRef.current = ghostPlayers; }, [ghostPlayers]);
+    useEffect(() => { logsRef.current = logs; }, [logs]);
     useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
 
     // --- Persistence & Auto-Restore ---
@@ -815,10 +787,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             commanderDamage,
             turnOrder,
             playersList,
-            mySeatIndex
+            mySeatIndex,
+            logs
         };
         localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
-    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId]);
+    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs]);
 
     const restoreGameFromBackup = () => {
         const backup = localStorage.getItem(`planeswalker_backup_${roomId}`);
@@ -837,6 +810,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setExile(data.exile || []);
             setCommandZone(data.commandZone || []);
             setLife(data.life || 40);
+            if (data.logs) setLogs(data.logs);
             hasLoadedState.current = true;
             
             // Fix Board Object Controllers (Map old ID to new Socket ID)
@@ -868,7 +842,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 currentTurnPlayerId: myNewId,
                 turnStartTime: data.turnStartTime,
                 commanderDamage: data.commanderDamage,
-                turnOrder: [myNewId] 
+                turnOrder: [myNewId],
+                logs: data.logs
             }});
             
             addLog("Restored game from local backup", "SYSTEM");
@@ -979,10 +954,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [playersList]);
 
     useEffect(() => {
-        disconnectModalRef.current = disconnectModal;
-    }, [disconnectModal]);
-
-    useEffect(() => {
         rootRef.current?.focus();
         const checkMobile = () => setIsMobile(window.innerWidth < 768 || (window.innerHeight < 600 && window.innerWidth < 1000));
         checkMobile();
@@ -1042,11 +1013,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             
             // Opponents
             localOpponents.forEach((opp, idx) => {
-                const pid = opp.id || `player-${idx + 1}`;
+                // Ensure we have a valid ID, fallback to player-X if needed
+                const pid = opp.id || playersList[idx + 1]?.id || `player-${idx + 1}`;
                 states[pid] = createInitialState(pid, opp.deck, opp.tokens);
             });
             
             localPlayerStates.current = states;
+            
+            // Force update to ensure counts are rendered
+            setPlayersList([...allPlayers]);
         }
     }, [isLocal, initialDeck, localOpponents]);
 
@@ -1191,133 +1166,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     // --- Helper Logic ---
-    const handleTakeoverGhost = (ghostId: string) => {
-        if (!joinHandlingModal.newPlayer) return;
-        const newPlayerId = joinHandlingModal.newPlayer.id;
-        const ghost = ghostPlayers.find(g => g.id === ghostId);
-        
-        // 1. Move New Player to Ghost's Seat (Reorder)
-        if (ghost) {
-            const currentPlayers = playersList;
-            const newPlayerIdx = currentPlayers.findIndex(p => p.id === newPlayerId);
-            
-            if (newPlayerIdx !== -1 && ghost.seatIdx !== -1) {
-                 const newOrder = [...currentPlayers];
-                 const [player] = newOrder.splice(newPlayerIdx, 1);
-                 const targetIdx = Math.min(ghost.seatIdx, newOrder.length);
-                 newOrder.splice(targetIdx, 0, player);
-                 
-                 setPlayersList(newOrder);
-                 setTurnOrder(newOrder.map(p => p.id));
-                 emitAction('UPDATE_PLAYER_ORDER', { players: newOrder });
-                 socket.emit('update_player_order', { room: roomId, players: newOrder });
-            }
-        }
-
-        // 2. Transfer objects
-        emitAction('TRANSFER_OBJECTS', { fromId: ghostId, toId: newPlayerId });
-        
-        // 3. Restore State (Hand, Library, Life)
-        if (ghost && ghost.seatIdx !== -1) {
-             socket.emit('admin_assign_state', { room: roomId, targetId: newPlayerId, seatIndex: ghost.seatIdx });
-        }
-
-        // 4. Remove ghost
-        const newGhosts = ghostPlayers.filter(g => g.id !== ghostId);
-        setGhostPlayers(newGhosts);
-        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
-        
-        setJoinHandlingModal({ isOpen: false, newPlayer: null });
-        addLog(`${joinHandlingModal.newPlayer.name} took over ${ghost?.name}'s seat`, 'SYSTEM');
-    };
-
-    const handleOverwriteGhost = (ghostId: string) => {
-        // Remove ghost objects
-        const toRemove = boardObjects.filter(o => o.controllerId === ghostId);
-        toRemove.forEach(o => emitAction('REMOVE_OBJECT', { id: o.id }));
-        
-        // Remove ghost
-        const newGhosts = ghostPlayers.filter(g => g.id !== ghostId);
-        setGhostPlayers(newGhosts);
-        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
-
-        setJoinHandlingModal({ isOpen: false, newPlayer: null });
-        addLog(`Cleared ${ghostPlayers.find(g => g.id === ghostId)?.name}'s seat for ${joinHandlingModal.newPlayer?.name}`, 'SYSTEM');
-    };
-
-    const handleAssignNewSeat = () => {
-        const newPlayer = joinHandlingModal.newPlayer;
-        if (newPlayer) {
-             setTurnOrder(prev => {
-                 const newOrder = [...prev, newPlayer.id];
-                 if (isHost) {
-                     emitAction('UPDATE_PLAYER_ORDER', { players: sortPlayers([...playersList, newPlayer], newOrder) });
-                     socket.emit('update_player_order', { room: roomId, players: sortPlayers([...playersList, newPlayer], newOrder) });
-                 }
-                 return newOrder;
-             });
-        }
-        setJoinHandlingModal({ isOpen: false, newPlayer: null });
-        addLog(`${joinHandlingModal.newPlayer?.name} assigned to a new seat`, 'SYSTEM');
-    };
-
-    const JoinHandlingModal: React.FC<{
-        isOpen: boolean;
-        newPlayer: {id: string, name: string} | null;
-        ghosts: {id: string, name: string, color: string}[];
-        onTakeover: (ghostId: string) => void;
-        onOverwrite: (ghostId: string) => void;
-        onNewSeat: () => void;
-    }> = ({ isOpen, newPlayer, ghosts, onTakeover, onOverwrite, onNewSeat }) => {
-        if (!isOpen || !newPlayer) return null;
-    
-        return (
-            <div className="fixed inset-0 z-[13000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-lg w-full">
-                    <h3 className="text-xl font-bold text-white mb-4">New Player Joined</h3>
-                    <p className="text-gray-300 mb-6">
-                        <span className="font-bold text-blue-400">{newPlayer.name}</span> has joined. 
-                        There are abandoned seats from previous players. How would you like to seat them?
-                    </p>
-                    
-                    <div className="space-y-3 mb-6">
-                        {ghosts.map(ghost => (
-                            <div key={ghost.id} className="bg-gray-700/50 p-3 rounded border border-gray-600 flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-4 h-4 rounded-full" style={{backgroundColor: ghost.color}}/>
-                                    <span className="text-gray-300 font-bold">{ghost.name}'s Seat</span>
-                                </div>
-                                <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => onTakeover(ghost.id)}
-                                        className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded"
-                                    >
-                                        Take Over
-                                    </button>
-                                    <button 
-                                        onClick={() => onOverwrite(ghost.id)}
-                                        className="flex-1 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 text-sm font-bold rounded"
-                                    >
-                                        Overwrite (New Mat)
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-    
-                    <div className="pt-4 border-t border-gray-700">
-                        <button 
-                            onClick={onNewSeat}
-                            className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg"
-                        >
-                            Assign to Empty Seat
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
     const emitAction = (action: string, data: any) => {
         if (isLocal) {
             // In local mode, we bypass the socket and handle logic directly if needed, 
@@ -1400,44 +1248,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const leftPlayers = prevPlayers.filter(p => 
                 !roomPlayers.find(rp => rp.id === p.id) && 
                 p.id !== 'local-player' && 
-                p.id !== 'player-0' &&
-                !ghostPlayersRef.current.find(g => g.id === p.id)
+                p.id !== 'player-0'
             );
             
             // Determine if I am the host
             let amIHost = hostId ? socket.id === hostId : false;
             if (hostId) setIsHost(amIHost);
 
-            const currentModal = disconnectModalRef.current;
-            let leaverToHandle = currentModal.isOpen ? currentModal.player : null;
-
             if (leftPlayers.length > 0 && amIHost && gamePhaseRef.current !== 'SETUP') {
-                 if (!leaverToHandle) {
-                     leaverToHandle = leftPlayers[0];
-                     const seatIdx = prevPlayers.findIndex(p => p.id === leaverToHandle!.id);
-                     setDisconnectModal({ isOpen: true, player: leaverToHandle, seatIdx });
+                 const leftIds = new Set(leftPlayers.map(p => p.id));
+                 const objectsToRemove = boardObjectsRef.current.filter(o => leftIds.has(o.controllerId));
+                 
+                 if (objectsToRemove.length > 0) {
+                     setBoardObjects(prev => prev.filter(o => !leftIds.has(o.controllerId)));
+                     objectsToRemove.forEach(o => {
+                         socket.emit('game_action', { room: roomId, action: 'REMOVE_OBJECT', data: { id: o.id } });
+                     });
                  }
             }
 
             // Merge lists: Server Players + Ghosts + Leaver (if handling)
             let combinedPlayers = [...roomPlayers];
             
-            // Add ghosts if not present
-            ghostPlayersRef.current.forEach(g => {
-                if (!combinedPlayers.find(p => p.id === g.id)) {
-                    combinedPlayers.push(g);
-                }
-            });
-
-            // Add leaver if handling and not present
-            if (leaverToHandle) {
-                if (!combinedPlayers.find(p => p.id === leaverToHandle!.id)) {
-                    const leaverObj = prevPlayers.find(p => p.id === leaverToHandle!.id) || leftPlayers.find(p => p.id === leaverToHandle!.id);
-                    if (leaverObj) {
-                        combinedPlayers.push(leaverObj);
-                    }
-                }
-            }
             
             // Detect new players and Sync Game State if Host
             const newPlayers = roomPlayers.filter(rp => !prevPlayers.find(p => p.id === rp.id));
@@ -1446,11 +1278,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                  
                  let currentTurnOrder = turnOrderRef.current;
                  // If no ghosts to take over, auto-add new players to turn order
-                 if (ghostPlayersRef.current.length === 0) {
-                     const newIds = newPlayers.map(p => p.id);
-                     currentTurnOrder = [...currentTurnOrder, ...newIds];
-                     setTurnOrder(currentTurnOrder);
-                 }
+                 const newIds = newPlayers.map(p => p.id);
+                 currentTurnOrder = [...currentTurnOrder, ...newIds];
+                 setTurnOrder(currentTurnOrder);
 
                  const safeBoardObjects = boardObjectsRef.current.map(obj => ({
                      ...obj,
@@ -1465,14 +1295,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      turnStartTime: turnStartTimeRef.current,
                      commanderDamage: commanderDamageRef.current,
                      turnOrder: currentTurnOrder,
-                     ghosts: ghostPlayersRef.current
+                     logs: logsRef.current
                  }});
-            }
-
-            // Check for join handling if Host and there are ghosts
-            if (newPlayers.length > 0 && amIHost && ghostPlayersRef.current.length > 0) {
-                // Handle the first new player found
-                setJoinHandlingModal({ isOpen: true, newPlayer: newPlayers[0] });
             }
 
             let sortedPlayers = sortPlayers(combinedPlayers, turnOrderRef.current);
@@ -1682,12 +1506,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      setPlayersList(prev => sortPlayers(prev, data.turnOrder));
                  }
                  addLog("Synced game state from Host", "SYSTEM");
-                 if (data.ghosts) {
-                     setGhostPlayers(data.ghosts);
-                 }
-            }
-            else if (action === 'SYNC_GHOSTS') {
-                setGhostPlayers(data.ghosts);
             }
             else if (action === 'ROLL_DICE') {
                 setActiveDice(prev => [...prev, data]);
@@ -1799,20 +1617,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
          if (isLocal) {
              // Re-initialize states to ensure fresh deck data
              const states: Record<string, LocalPlayerState> = {};
-             playersList.forEach((p) => {
+             playersList.forEach((p, idx) => {
                  if (p.id === 'player-0' || p.id === 'local-player') {
                      states[p.id] = createInitialState(p.id, initialDeck, initialTokens);
                  } else {
-                     const match = p.id.match(/player-(\d+)/);
-                     if (match) {
-                         const idx = parseInt(match[1]);
-                         const opp = localOpponents[idx - 1];
-                         if (opp) {
-                             states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
-                         }
+                     // Try to find by ID, fallback to index matching (skipping player 0)
+                     let opp = localOpponents.find(o => o.id === p.id);
+                     if (!opp && idx > 0 && localOpponents[idx - 1]) {
+                         opp = localOpponents[idx - 1];
+                     }
+                     
+                     if (opp) {
+                         states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
+                     } else {
+                         states[p.id] = createInitialState(p.id, [], []);
                      }
                  }
-                 if (!states[p.id]) states[p.id] = createInitialState(p.id, [], []);
              });
              localPlayerStates.current = states;
 
@@ -2039,29 +1859,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
         
         setMulliganSelectionMode(false);
-    };
-    
-    const handleRemoveDisconnected = () => {
-        if (!disconnectModal.player) return;
-        const pid = disconnectModal.player.id;
-        const toRemove = boardObjects.filter(o => o.controllerId === pid);
-        toRemove.forEach(o => emitAction('REMOVE_OBJECT', { id: o.id }));
-        setPlayersList(prev => prev.filter(p => p.id !== pid));
-        setDisconnectModal({ isOpen: false, player: null, seatIdx: -1 });
-        addLog(`removed ${disconnectModal.player.name}'s items`, 'SYSTEM');
-    };
-
-    const handleKeepDisconnected = () => {
-        if (!disconnectModal.player) return;
-        addLog(`kept ${disconnectModal.player.name}'s items on table`, 'SYSTEM');
-        
-        const player = playersList.find(p => p.id === disconnectModal.player!.id) || { ...disconnectModal.player, color: '#888' };
-        const newGhost = { ...player, seatIdx: disconnectModal.seatIdx } as any;
-        const newGhosts = [...ghostPlayers, newGhost];
-        setGhostPlayers(newGhosts);
-        emitAction('SYNC_GHOSTS', { ghosts: newGhosts });
-
-        setDisconnectModal({ isOpen: false, player: null, seatIdx: -1 });
     };
 
     const handleLocalViewSwitch = (index: number) => {
@@ -3884,19 +3681,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
-            {disconnectModal.isOpen && disconnectModal.player && (
-                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
-                        <h3 className="text-2xl font-bold text-white mb-4">Player Left</h3>
-                        <p className="text-gray-300 mb-8"><span className="font-bold text-blue-400">{disconnectModal.player.name}</span> has left the game. Do you want to keep their cards on the table?</p>
-                        <div className="flex gap-4 justify-center">
-                            <button onClick={handleRemoveDisconnected} className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex-1">Remove</button>
-                            <button onClick={handleKeepDisconnected} className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold flex-1">Keep</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Mobile Zone Menu */}
             {mobileZoneMenu && (
                 <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-end justify-center animate-in slide-in-from-bottom-10" onClick={() => setMobileZoneMenu(null)}>
@@ -4030,14 +3814,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 onRestoreBackup={restoreGameFromBackup}
             />
 
-            <JoinHandlingModal 
-                isOpen={joinHandlingModal.isOpen}
-                newPlayer={joinHandlingModal.newPlayer}
-                ghosts={ghostPlayers}
-                onTakeover={handleTakeoverGhost}
-                onOverwrite={handleOverwriteGhost}
-                onNewSeat={handleAssignNewSeat}
-            />
 
             <DamageReportModal 
                 isOpen={showDamageReportModal}

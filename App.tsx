@@ -46,12 +46,30 @@ function App() {
   // Initialize state from Local Storage using lazy initialization
   const [playerName, setPlayerName] = useState<string>(() => loadState('playerName', 'Planeswalker'));
   const [playerSleeve, setPlayerSleeve] = useState<string>(() => loadState('playerSleeve', PLAYER_COLORS[0]));
-  const [activeDeck, setActiveDeck] = useState<CardData[]>(() => loadState('activeDeck', []));
-  const [lobbyTokens, setLobbyTokens] = useState<CardData[]>(() => loadState('lobbyTokens', []));
+  const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
+
+  const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
+      const loaded = loadState<CardData[]>('activeDeck', []);
+      if (loaded.length > 0) return loaded;
+      // Fallback to last saved deck
+      if (savedDecks.length > 0) {
+          const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          return sorted[0].deck;
+      }
+      return [];
+  });
+  const [lobbyTokens, setLobbyTokens] = useState<CardData[]>(() => {
+      const loaded = loadState<CardData[]>('lobbyTokens', []);
+      if (loaded.length > 0) return loaded;
+      if (savedDecks.length > 0) {
+          const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          return sorted[0].tokens;
+      }
+      return [];
+  });
   const [roomId, setRoomId] = useState<string>("");
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string }[]>([]);
-  const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
   // Persist state changes to Local Storage
   useEffect(() => {
