@@ -38,6 +38,7 @@ interface Player {
 // Store room state in memory for now
 const rooms: Record<string, Player[]> = {};
 const roomMeta: Record<string, { started: boolean }> = {};
+const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
 io.on('connection', (socket) => {
@@ -139,6 +140,16 @@ io.on('connection', (socket) => {
       }
   });
 
+  socket.on('update_player_color', ({ room, color }) => {
+      if (rooms[room]) {
+          const player = rooms[room].find(p => p.id === socket.id);
+          if (player) {
+              player.color = color;
+              io.to(room).emit('room_players_update', rooms[room]);
+          }
+      }
+  });
+
   socket.on('kick_player', ({ room, targetId }) => {
       const host = rooms[room]?.[0];
       // Verify sender is host
@@ -178,6 +189,25 @@ io.on('connection', (socket) => {
       }
   });
 
+  socket.on('backup_state', ({ room, seatIndex, state }) => {
+      if (!roomStates[room]) roomStates[room] = {};
+      roomStates[room][seatIndex] = state;
+  });
+
+  socket.on('request_state', ({ room, seatIndex }) => {
+      if (roomStates[room] && roomStates[room][seatIndex]) {
+          socket.emit('load_state', roomStates[room][seatIndex]);
+      }
+  });
+
+  socket.on('admin_assign_state', ({ room, targetId, seatIndex }) => {
+      // Host instructs a player to load state from a specific seat index
+      if (roomStates[room] && roomStates[room][seatIndex]) {
+          io.to(targetId).emit('load_state', roomStates[room][seatIndex]);
+          io.to(targetId).emit('notification', { message: `Host assigned you to Seat ${seatIndex + 1}. Loading game data...` });
+      }
+  });
+
   socket.on('game_action', ({ room, action, data }) => {
     if (action === 'START_GAME') {
         if (roomMeta[room]) roomMeta[room].started = true;
@@ -201,6 +231,7 @@ io.on('connection', (socket) => {
             if (rooms[room].length === 0) {
                 delete rooms[room];
                 delete roomMeta[room];
+                delete roomStates[room];
             }
             break;
         }

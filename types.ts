@@ -56,10 +56,10 @@ export interface Player {
 export interface PlayerStats {
   damageDealt: Record<string, number>; // opponentId -> amount
   damageReceived: number;
-  healing: number;
+  healingGiven: number;
+  healingReceived: number;
+  selfHealing: number;
   tappedCounts: Record<string, number>; // cardName -> count
-  cardDamageCounts: Record<string, number>; // cardName -> amount
-  blockCounts: Record<string, number>; // cardName -> count
   totalTurnTime: number; // ms
   cardsPlayed: number;
   cardsSentToGraveyard: number;

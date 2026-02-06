@@ -12,12 +12,15 @@ interface GameStatsModalProps {
 export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose, stats, players }) => {
     if (!isOpen) return null;
 
+    const BASIC_LANDS = new Set(['Plains', 'Island', 'Swamp', 'Mountain', 'Forest', 'Wastes', 'Snow-Covered Plains', 'Snow-Covered Island', 'Snow-Covered Swamp', 'Snow-Covered Mountain', 'Snow-Covered Forest']);
+
     const getMost = (counts: Record<string, number>) => {
         let max = 0;
         let name = '-';
         if (!counts) return { name, count: max };
         Object.entries(counts).forEach(([k, v]) => {
-            if (v > max) {
+            // Filter out basic lands for "Most Tapped"
+            if (v > max && !BASIC_LANDS.has(k)) {
                 max = v;
                 name = k;
             }
@@ -46,15 +49,13 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         {players.map(p => {
                             const s = stats[p.id] || {
-                                damageDealt: {}, damageReceived: 0, healing: 0,
-                                tappedCounts: {}, cardDamageCounts: {}, blockCounts: {},
+                                damageDealt: {}, damageReceived: 0, healingGiven: 0, healingReceived: 0, selfHealing: 0,
+                                tappedCounts: {},
                                 totalTurnTime: 0, cardsPlayed: 0, cardsSentToGraveyard: 0,
                                 cardsExiled: 0, cardsDrawn: 0
                             };
                             
                             const mostTapped = getMost(s.tappedCounts);
-                            const mostDamaging = getMost(s.cardDamageCounts);
-                            const mostBlocking = getMost(s.blockCounts);
                             const totalDamageDealt = (Object.values(s.damageDealt || {}) as number[]).reduce((a, b) => a + b, 0);
 
                             return (
@@ -71,7 +72,9 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                                             <div className="text-gray-400 text-xs uppercase font-bold border-b border-gray-600 pb-1 mb-1">Combat & Health</div>
                                             <div className="flex justify-between text-gray-300"><span>Damage Dealt:</span> <span className="text-white font-mono">{totalDamageDealt}</span></div>
                                             <div className="flex justify-between text-gray-300"><span>Damage Taken:</span> <span className="text-red-400 font-mono">{s.damageReceived}</span></div>
-                                            <div className="flex justify-between text-gray-300"><span>Healing:</span> <span className="text-green-400 font-mono">{s.healing}</span></div>
+                                            <div className="flex justify-between text-gray-300"><span>Healing Given:</span> <span className="text-green-400 font-mono">{s.healingGiven}</span></div>
+                                            <div className="flex justify-between text-gray-300"><span>Healing Recv:</span> <span className="text-green-300 font-mono">{s.healingReceived}</span></div>
+                                            <div className="flex justify-between text-gray-300"><span>Self Healing:</span> <span className="text-green-200 font-mono">{s.selfHealing}</span></div>
                                         </div>
 
                                         <div className="space-y-1">
@@ -87,14 +90,6 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                                             <div className="text-gray-300 text-xs">
                                                 <span className="block text-gray-500">Most Tapped:</span>
                                                 <span className="text-white truncate block" title={mostTapped.name}>{mostTapped.name} ({mostTapped.count})</span>
-                                            </div>
-                                            <div className="text-gray-300 text-xs">
-                                                <span className="block text-gray-500">Most Damage (Card):</span>
-                                                <span className="text-white truncate block" title={mostDamaging.name}>{mostDamaging.name} ({mostDamaging.count})</span>
-                                            </div>
-                                             <div className="text-gray-300 text-xs">
-                                                <span className="block text-gray-500">Most Blocks:</span>
-                                                <span className="text-white truncate block" title={mostBlocking.name}>{mostBlocking.name} ({mostBlocking.count})</span>
                                             </div>
                                         </div>
                                     </div>

@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Lobby } from './components/Lobby';
 import { DeckBuilder } from './components/DeckBuilder';
 import { Tabletop } from './components/Tabletop';
+import { LocalSetup } from './components/LocalSetup';
 import { CardData } from './types';
 import { PLAYER_COLORS } from './constants';
 
 enum View {
   LOBBY = 'LOBBY',
   DECK_BUILDER = 'DECK_BUILDER',
+  LOCAL_SETUP = 'LOCAL_SETUP',
+  LOCAL_GAME = 'LOCAL_GAME',
   GAME = 'GAME',
 }
 
@@ -38,6 +41,7 @@ function App() {
   const [lobbyTokens, setLobbyTokens] = useState<CardData[]>(() => loadState('lobbyTokens', []));
   const [roomId, setRoomId] = useState<string>("");
   const [isGameStarted, setIsGameStarted] = useState(false);
+  const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string }[]>([]);
 
   // Persist state changes to Local Storage
   useEffect(() => {
@@ -62,6 +66,11 @@ function App() {
     setCurrentView(View.GAME);
   };
 
+  const handleStartLocalGame = (opponents: any[]) => {
+      setLocalOpponents(opponents);
+      setCurrentView(View.LOCAL_GAME);
+  };
+
   return (
     <div className="w-full h-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white font-sans antialiased selection:bg-blue-500 selection:text-white">
       {currentView === View.LOBBY && (
@@ -71,6 +80,7 @@ function App() {
             playerSleeve={playerSleeve}
             setPlayerSleeve={setPlayerSleeve}
             onJoin={handleJoinGame} 
+            onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
             onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
             savedDeckCount={activeDeck.length}
             currentTokens={lobbyTokens}
@@ -87,6 +97,13 @@ function App() {
         />
       )}
       
+      {currentView === View.LOCAL_SETUP && (
+          <LocalSetup 
+              onStartGame={handleStartLocalGame}
+              onBack={() => setCurrentView(View.LOBBY)}
+          />
+      )}
+
       {currentView === View.GAME && (
         <Tabletop 
             initialDeck={activeDeck} 
@@ -95,6 +112,19 @@ function App() {
             sleeveColor={playerSleeve}
             roomId={roomId}
             initialGameStarted={isGameStarted}
+            onExit={() => setCurrentView(View.LOBBY)}
+        />
+      )}
+
+      {currentView === View.LOCAL_GAME && (
+        <Tabletop 
+            initialDeck={activeDeck} 
+            initialTokens={lobbyTokens}
+            playerName={playerName}
+            sleeveColor={playerSleeve}
+            roomId="LOCAL"
+            isLocal={true}
+            localOpponents={localOpponents}
             onExit={() => setCurrentView(View.LOBBY)}
         />
       )}

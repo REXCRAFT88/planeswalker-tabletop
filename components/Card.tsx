@@ -29,9 +29,10 @@ interface CardProps {
   viewY?: number;
   onPan?: (dx: number, dy: number) => void;
   initialDragEvent?: React.PointerEvent | null; 
+  onLongPress?: (id: string) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress }) => {
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ offsetX: number, offsetY: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -71,7 +72,11 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     
     // Start Long Press Timer
     longPressTimer.current = setTimeout(() => {
-        setShowOverlay(true);
+        if (onLongPress) {
+            onLongPress(object.id);
+        } else {
+            setShowOverlay(true);
+        }
     }, 500);
 
     setIsDragging(true);
@@ -145,7 +150,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       // Prevent double click if clicking UI
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
       e.stopPropagation();
-      toggleTap(e);
+      onInspect(object.cardData);
   }
 
   const toggleTap = (e: React.MouseEvent | null) => {
@@ -200,6 +205,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       if (!isControlledByMe) return;
       e.preventDefault(); 
       e.stopPropagation();
+      toggleTap(e);
   };
 
   // Determine Image to Show
@@ -218,17 +224,41 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
   // Counter Object Rendering
   if (object.type === 'COUNTER') {
+      const colorIndex = object.counters?.colorIndex || 0;
+      const isNegative = object.quantity < 0;
+      
+      const getBackground = () => {
+          switch (colorIndex) {
+              case 1: return 'radial-gradient(circle at 30% 30%, #43e97b, #38f9d7)'; // Green
+              case 2: return 'radial-gradient(circle at 30% 30%, #f6d365, #fda085)'; // Gold
+              case 3: return 'radial-gradient(circle at 30% 30%, #a18cd1, #fbc2eb)'; // Purple
+              case 4: return 'radial-gradient(circle at 30% 30%, #434343, #000000)'; // Black
+              case 5: return 'radial-gradient(circle at 30% 30%, #e0e0e0, #ffffff)'; // White
+              case 6: return 'radial-gradient(circle at 30% 30%, #ff9a9e, #fecfef)'; // Orange
+              default: return isNegative 
+                  ? 'radial-gradient(circle at 30% 30%, #ff416c, #ff4b2b)' // Red
+                  : 'radial-gradient(circle at 30% 30%, #4facfe, #00f2fe)'; // Blue
+          }
+      };
+
+      const handleCounterDoubleClick = (e: React.MouseEvent) => {
+          if (!isControlledByMe) return;
+          e.stopPropagation();
+          const nextColor = (colorIndex + 1) % 7;
+          onUpdate(object.id, { counters: { ...object.counters, colorIndex: nextColor } });
+      };
+
       return (
           <div
             ref={cardRef}
-            className={`absolute touch-none select-none rounded-full flex items-center justify-center font-bold text-white shadow-lg cursor-grab active:cursor-grabbing group ${isDragging ? 'z-[9999] scale-110' : ''}`}
+            className={`absolute touch-none select-none rounded-full flex items-center justify-center font-bold shadow-lg cursor-grab active:cursor-grabbing group ${isDragging ? 'z-[9999] scale-110' : ''} ${colorIndex === 5 ? 'text-black' : 'text-white'}`}
             style={{
                 left: object.x, 
                 top: object.y,
                 width: 25 * scale,
                 height: 25 * scale,
                 zIndex: object.z,
-                background: 'radial-gradient(circle at 30% 30%, #4facfe, #00f2fe)',
+                background: getBackground(),
                 boxShadow: '0 2px 4px rgba(0,0,0,0.3), inset 1px 1px 3px rgba(255,255,255,0.4)',
                 border: '1px solid rgba(255,255,255,0.2)',
                 transition: isDragging ? 'none' : 'transform 0.1s',
@@ -236,15 +266,19 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onDoubleClick={handleCounterDoubleClick}
             onContextMenu={(e) => { 
                 if (!isControlledByMe) return;
                 e.preventDefault(); 
                 e.stopPropagation(); 
                 onReturnToHand(object.id); // Triggers removal logic in Tabletop
             }} 
-            title="Drag to move. Right click to remove."
+            title="Drag to move. Double click to change color. Right click to remove."
           >
-             <span className="text-xs drop-shadow-md z-10 pointer-events-none select-none">{object.quantity}</span>
+             <span 
+                className="text-xs drop-shadow-md z-10 pointer-events-none select-none"
+                style={{ transform: `rotate(${-viewRotation}deg)` }}
+             >{object.quantity}</span>
 
              {/* Controls (visible on hover) - Only if controlled */}
              {isControlledByMe && (
@@ -252,7 +286,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                  <button 
                     className="w-4 h-4 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-red-500 border border-gray-600 transition-colors"
                     onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); onUpdate(object.id, { quantity: Math.max(1, object.quantity - 1) }); }}
+                    onClick={(e) => { e.stopPropagation(); onUpdate(object.id, { quantity: object.quantity - 1 }); }}
                  >
                      <Minus size={8} />
                  </button>

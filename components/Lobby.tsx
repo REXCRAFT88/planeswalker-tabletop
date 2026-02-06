@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Users, Play, Plus, Palette, Edit3, Layers, Search, X, Loader, ArrowRight } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -11,6 +11,7 @@ interface LobbyProps {
   playerSleeve: string;
   setPlayerSleeve: (color: string) => void;
   onJoin: (code?: string, isStarted?: boolean) => void;
+  onLocalGame: () => void;
   onImportDeck: () => void;
   savedDeckCount: number;
   currentTokens: CardData[];
@@ -20,7 +21,7 @@ interface LobbyProps {
 export const Lobby: React.FC<LobbyProps> = ({ 
     playerName, setPlayerName, 
     playerSleeve, setPlayerSleeve,
-    onJoin, onImportDeck, savedDeckCount,
+    onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange
 }) => {
   const [isTokenModalOpen, setIsTokenModalOpen] = useState(false);
@@ -32,6 +33,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [roomCode, setRoomCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [joinStatus, setJoinStatus] = useState('');
+  const [showReconnectModal, setShowReconnectModal] = useState(false);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const hasAutoAttempted = useRef(false);
 
   // Auto-join if session exists
@@ -39,7 +42,8 @@ export const Lobby: React.FC<LobbyProps> = ({
       const activeSession = localStorage.getItem('active_game_session');
       if (activeSession && playerName && savedDeckCount > 0 && !hasAutoAttempted.current) {
           hasAutoAttempted.current = true;
-          joinRoom(activeSession);
+          setPendingSessionId(activeSession);
+          setShowReconnectModal(true);
       }
   }, [playerName, savedDeckCount]);
 
@@ -88,7 +92,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     socket.off('join_pending');
     socket.off('join_success');
 
-    socket.emit('join_room', { room: code, name: playerName, color: playerSleeve, userId: getUserId() });
+    const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
+    socket.emit('join_room', { room: code, name: playerName, color: randomColor, userId: getUserId() });
     
     socket.on('join_error', ({ message }) => {
         alert(message);
@@ -107,10 +112,31 @@ export const Lobby: React.FC<LobbyProps> = ({
     });
   };
 
+  const handleReconnect = () => {
+      if (pendingSessionId) {
+          joinRoom(pendingSessionId);
+          setShowReconnectModal(false);
+      }
+  };
+
+  const handleNewSession = () => {
+      localStorage.removeItem('active_game_session');
+      setPendingSessionId(null);
+      setShowReconnectModal(false);
+  };
+
   const handleCreateRoom = () => {
     const code = Math.random().toString(36).substring(2, 6).toUpperCase();
     setRoomCode(code); // Ideally pass this up or store in URL
     joinRoom(code);
+  };
+
+  const handleLocalGame = () => {
+      if (savedDeckCount === 0) {
+          alert("Please import a deck first!");
+          return;
+      }
+      onLocalGame();
   };
 
   const handleJoinRoom = () => {
@@ -267,32 +293,6 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
         </div>
 
-        {/* Sleeve Selector */}
-        <div>
-            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Color</label>
-            <div className="flex flex-wrap gap-3 justify-center bg-gray-900 p-3 rounded-lg border border-gray-600">
-                {PLAYER_COLORS.map((color) => (
-                    <button
-                        key={color}
-                        onClick={() => setPlayerSleeve(color)}
-                        className={`w-8 h-8 rounded-full shadow-sm border-2 transition-transform hover:scale-110 ${playerSleeve === color ? 'border-white scale-110' : 'border-transparent opacity-70'}`}
-                        style={{ backgroundColor: color }}
-                        title="Preset Color"
-                    />
-                ))}
-                {/* Custom Color Input */}
-                <div className="relative flex items-center justify-center w-8 h-8 rounded-full overflow-hidden border-2 border-gray-500 hover:border-white transition-colors">
-                    <input 
-                        type="color" 
-                        value={playerSleeve}
-                        onChange={(e) => setPlayerSleeve(e.target.value)}
-                        className="absolute inset-0 w-[150%] h-[150%] -top-[25%] -left-[25%] cursor-pointer p-0 border-0"
-                    />
-                    <Palette size={14} className="pointer-events-none text-white mix-blend-difference z-10"/>
-                </div>
-            </div>
-        </div>
-        
         {/* Token Pre-Select */}
          <div>
             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex justify-between items-center">
@@ -354,6 +354,15 @@ export const Lobby: React.FC<LobbyProps> = ({
                 {isJoining ? (joinStatus || 'Joining...') : (savedDeckCount > 0 ? 'Create New Table' : 'Import Deck to Play')}
               </button>
            </div>
+
+           <div className="flex gap-4 mb-4">
+              <button 
+                onClick={handleLocalGame}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Users size={20} /> Local Game
+              </button>
+           </div>
            
            <div className="flex items-center gap-3 mb-4">
                <div className="h-px bg-gray-700 flex-1"/>
@@ -409,6 +418,24 @@ export const Lobby: React.FC<LobbyProps> = ({
       </div>
       </div>
       </div>
+
+      {/* Reconnect Modal */}
+      {showReconnectModal && (
+          <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
+                  <h3 className="text-2xl font-bold text-white mb-4">Active Session Found</h3>
+                  <p className="text-gray-300 mb-8">You were disconnected from a game. Do you want to reconnect?</p>
+                  <div className="flex flex-col gap-3">
+                      <button onClick={handleReconnect} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2">
+                          <Play size={18}/> Reconnect
+                      </button>
+                      <button onClick={handleNewSession} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2">
+                          <Plus size={18}/> Start New Session
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* Token Modal - Centered and in front */}
       {isTokenModalOpen && (
