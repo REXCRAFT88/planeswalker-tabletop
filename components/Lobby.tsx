@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -322,10 +322,23 @@ export const Lobby: React.FC<LobbyProps> = ({
         setEditingDeck({ ...editingDeck, deck: newCards });
     };
 
+    const toggleFullScreen = () => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(e => console.log(e));
+        } else {
+            document.exitFullscreen();
+        }
+    };
+
   return (
-    <div className="w-full h-full overflow-y-auto relative">
+    <div className="w-full h-full overflow-y-auto relative pb-32">
       <div className="min-h-full flex flex-col items-center justify-center p-2 md:p-6 animate-in fade-in duration-700">
         <div className="w-full max-w-md">
+        <div className="absolute top-4 right-4">
+            <button onClick={toggleFullScreen} className="p-2 bg-gray-800 rounded-full text-white shadow-lg border border-gray-700">
+                <Maximize size={20} />
+            </button>
+        </div>
       <div className="text-center mb-8">
         <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3">
           <Shield size={40} className="text-white" />

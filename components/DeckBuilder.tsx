@@ -135,9 +135,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     : [];
 
   return (
-    <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto">
+    <div className="flex flex-col h-full p-2 md:p-8 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
+        <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
           {stagedDeck ? 'Select Commander' : 'Import Deck'}
         </h1>
         <button onClick={onBack} className="text-gray-400 hover:text-white transition">
@@ -146,7 +146,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
       </div>
 
       {!stagedDeck ? (
-        <div className="bg-gray-800 rounded-xl p-4 md:p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
+        <div className="bg-gray-800 rounded-xl p-3 md:p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
             <label className="block text-sm font-medium text-gray-300 mb-2">
             Paste Deck List (Moxfield/Arena format)
             </label>
@@ -198,18 +198,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
       ) : (
           <div className="flex-1 flex flex-col bg-gray-800 rounded-xl border border-gray-700 overflow-hidden min-h-0">
               <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4 shrink-0">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-300">Click a card to designate it as Commander. (Click again to unselect)</span>
+                  <div className="flex flex-col md:flex-row justify-between items-center gap-2">
+                    <span className="text-gray-300 text-xs md:text-base">Click a card to designate it as Commander.</span>
                     <div className="flex gap-2">
                          <button 
                             onClick={clearDeck}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-900/50 hover:bg-red-900 border border-red-800 text-white rounded-lg font-bold transition-colors"
+                            className="flex items-center gap-2 px-3 py-2 bg-red-900/50 hover:bg-red-900 border border-red-800 text-white rounded-lg font-bold transition-colors text-xs md:text-sm"
                         >
                             <Trash2 size={16} /> New Deck
                         </button>
                         <button 
                             onClick={finalizeDeck}
-                            className="flex items-center gap-2 px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shadow-green-900/20"
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shadow-green-900/20 text-xs md:text-sm"
                         >
                             <Check size={20} /> Save & Return
                         </button>
@@ -227,7 +227,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                   </div>
               </div>
               <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-4">
                       {filteredDeck.map(card => (
                           <div 
                             key={card.id} 

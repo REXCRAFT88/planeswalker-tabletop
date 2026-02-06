@@ -39,6 +39,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   const cardRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const [hasMoved, setHasMoved] = useState(false);
 
   // Handle immediate drag from hand/zones
   React.useEffect(() => {
@@ -70,6 +71,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     e.preventDefault();
     e.stopPropagation();
     onBringToFront(object.id);
+    setHasMoved(false);
     
     // Start Long Press Timer
     longPressTimer.current = setTimeout(() => {
@@ -129,7 +131,18 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const worldX = scaledX * Math.cos(rad) - scaledY * Math.sin(rad);
     const worldY = scaledX * Math.sin(rad) + scaledY * Math.cos(rad);
 
-    onUpdate(object.id, { x: worldX - dragStartRef.current.offsetX, y: worldY - dragStartRef.current.offsetY });
+    const newX = worldX - dragStartRef.current.offsetX;
+    const newY = worldY - dragStartRef.current.offsetY;
+
+    // Threshold check for movement to prevent accidental drags when tapping
+    if (!hasMoved) {
+        const dist = Math.hypot(newX - object.x, newY - object.y);
+        if (dist < 5) return; // Deadzone
+        setHasMoved(true);
+        if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    }
+
+    onUpdate(object.id, { x: newX, y: newY });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {

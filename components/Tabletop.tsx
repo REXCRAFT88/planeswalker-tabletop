@@ -156,7 +156,7 @@ const HandCard: React.FC<{
         <div className="relative w-full h-full rounded-xl overflow-hidden shadow-2xl border border-black/50 bg-gray-800">
             <img src={card.imageUrl} className="w-full h-full object-cover" alt={card.name} />
             
-            <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 ${showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+            <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 ${showOverlay && !isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
                 <button onClick={(e) => { e.stopPropagation(); onPlay(card); }} className="px-4 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm shadow-lg transform hover:scale-105 flex items-center gap-1">
                     <Play size={12} /> Play
                 </button>
@@ -254,12 +254,26 @@ const Playmat: React.FC<{
   isMobile, onMobileZoneAction, onDoubleClickZone
 }) => {
 
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+
   const handleZoneTouch = (zone: string, e: React.TouchEvent) => {
       if (!isMobile || !isControlled) return;
-      // Simple long press simulation for zones or just tap to open menu
-      // For zones, tap is usually fine to open menu since there are multiple actions
       e.stopPropagation();
       onMobileZoneAction(zone);
+  };
+
+  const handleZoneTouchStart = (zone: string, e: React.TouchEvent) => {
+      if (!isMobile || !isControlled) return;
+      longPressTimer.current = setTimeout(() => {
+          onMobileZoneAction(zone);
+      }, 500);
+  };
+
+  const handleZoneTouchEnd = () => {
+      if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+      }
   };
 
   const handleCommanderTouch = (cmd: CardData, e: React.TouchEvent) => {
@@ -290,7 +304,9 @@ const Playmat: React.FC<{
       >
         <div 
             className="w-full h-full rounded bg-gray-800 border-2 border-white/20 flex items-center justify-center hover:border-blue-400 transition relative overflow-hidden cursor-pointer active:scale-95"
-            onClick={isMobile ? (e: any) => handleZoneTouch('LIBRARY', e) : onDraw}
+            onClick={isMobile ? undefined : onDraw}
+            onTouchStart={isMobile ? (e) => handleZoneTouchStart('LIBRARY', e) : undefined}
+            onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
             onDoubleClick={() => isMobile && onDoubleClickZone('LIBRARY')}
             style={{ backgroundColor: sleeveColor }}
         >
@@ -330,7 +346,9 @@ const Playmat: React.FC<{
       >
         <div 
             className="w-full h-full rounded bg-gray-800/50 border-2 border-white/10 flex items-center justify-center relative overflow-hidden cursor-pointer active:scale-95"
-            onClick={isMobile ? (e: any) => handleZoneTouch('GRAVEYARD', e) : () => onOpenSearch('GRAVEYARD')}
+            onClick={isMobile ? undefined : () => onOpenSearch('GRAVEYARD')}
+            onTouchStart={isMobile ? (e) => handleZoneTouchStart('GRAVEYARD', e) : undefined}
+            onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
             onDoubleClick={() => isMobile && onDoubleClickZone('GRAVEYARD')}
         >
             {topGraveyardCard ? (
@@ -363,7 +381,9 @@ const Playmat: React.FC<{
       >
          <div 
             className="w-full h-full rounded bg-black/40 border-2 border-dashed border-white/10 flex items-center justify-center cursor-pointer hover:border-red-400/50 active:scale-95"
-            onClick={isMobile ? (e: any) => handleZoneTouch('EXILE', e) : () => onOpenSearch('EXILE')}
+            onClick={isMobile ? undefined : () => onOpenSearch('EXILE')}
+            onTouchStart={isMobile ? (e) => handleZoneTouchStart('EXILE', e) : undefined}
+            onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
             onDoubleClick={() => isMobile && onDoubleClickZone('EXILE')}
         >
              <div className="text-white/20 text-sm rotate-45">Exile</div>
@@ -646,7 +666,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [maxZ, setMaxZ] = useState(100);
     const [isShuffling, setIsShuffling] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string>("");
-    const [handScale, setHandScale] = useState(1);
+    const [handScale, setHandScale] = useState(window.innerWidth < 768 ? 0.6 : 1);
     
     // Modal States
     const [inspectCard, setInspectCard] = useState<CardData | null>(null);
@@ -3010,7 +3030,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      {!mulliganSelectionMode ? (
                         <>
                              {/* Larger Card Grid for visibility */}
-                             <div className={`flex ${isMobile ? 'overflow-x-auto snap-x snap-mandatory w-full px-[50%] pb-8 gap-4' : 'justify-center gap-6 flex-wrap max-w-[90vw]'} mb-12`}>
+                             <div className={`flex ${isMobile ? 'overflow-x-auto snap-x snap-mandatory w-full px-4 pb-8 gap-4' : 'justify-center gap-6 flex-wrap max-w-[90vw]'} mb-12`}>
                                 {hand.filter(c => !c.isToken).map((card, idx) => (
                                      <div 
                                         key={idx} 
@@ -3841,7 +3861,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
              {searchModal.isOpen && (
-                <div className={`fixed z-[9000] bg-gray-900/95 backdrop-blur-xl flex flex-col animate-in fade-in ${isMobile ? 'bottom-0 left-0 right-0 top-[10vh] rounded-t-2xl p-4' : 'inset-0 p-8'}`}>
+                <div className={`fixed z-[13000] bg-gray-900/95 backdrop-blur-xl flex flex-col animate-in fade-in ${isMobile ? 'inset-0 p-2' : 'inset-0 p-8'}`}>
                     {(() => {
                         const activeId = isLocal ? playersList[mySeatIndex]?.id : socket.id;
                         const searchTargetId = searchModal.playerId || activeId;
@@ -3876,11 +3896,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <div className="flex items-center gap-4">
                             {searchModal.source === 'LIBRARY' && (
                                 <>
-                                    <button onClick={revealAll} className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition">
-                                        <Eye size={16}/> Reveal All
+                                    <button onClick={revealAll} className={`flex items-center gap-2 ${isMobile ? 'p-2' : 'px-4 py-2'} bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition`}>
+                                        <Eye size={16}/> {!isMobile && 'Reveal All'}
                                     </button>
-                                    <button onClick={shuffleAndClose} className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-white transition shadow-lg shadow-purple-900/50">
-                                        <Shuffle size={16}/> Shuffle & Close
+                                    <button onClick={shuffleAndClose} className={`flex items-center gap-2 ${isMobile ? 'p-2' : 'px-4 py-2'} bg-purple-600 hover:bg-purple-500 rounded-lg text-white transition shadow-lg shadow-purple-900/50`}>
+                                        <Shuffle size={16}/> {!isMobile && 'Shuffle & Close'}
                                     </button>
                                 </>
                             )}
@@ -3889,7 +3909,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </div>
 
                     <div className="flex-1 overflow-y-auto pr-2 pb-60">
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+                        <div className={`grid ${isMobile ? 'grid-cols-5 gap-2' : 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4'}`}>
                             {searchModal.items.map((item, idx) => (
                                 <div key={item.card.id} className="relative group aspect-[2.5/3.5] bg-gray-800 rounded-lg">
                                     {searchModal.source !== 'TOKENS' && (
@@ -3931,7 +3951,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </div>
 
                     {searchModal.source !== 'TOKENS' && !searchModal.isReadOnly && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 p-4 h-80 flex flex-col shadow-2xl z-20">
+                        <div className={`absolute bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-700 ${isMobile ? 'p-2 h-40' : 'p-4 h-80'} flex flex-col shadow-2xl z-20`}>
                             <div className="flex flex-col md:flex-row justify-between items-center mb-2 gap-2">
                                 <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wide flex items-center gap-2">
                                     <Layers size={14} /> Selected Cards Tray ({searchModal.tray.length})
