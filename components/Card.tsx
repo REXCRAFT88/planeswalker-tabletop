@@ -393,8 +393,9 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
           height: CARD_HEIGHT * scale,
           zIndex: object.z,
           transform: isDragging && isMobile 
-            ? `scale(${viewScale}) rotate(${effectiveRotation}deg)` 
+            ? `scale(${viewScale}) rotate(${effectiveRotation + viewRotation}deg)` 
             : `rotate(${effectiveRotation}deg)`,
+          transformOrigin: isDragging && isMobile ? '0 0' : undefined,
           transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s',
         }}
         onPointerDown={handlePointerDown}

@@ -48,7 +48,7 @@ function App() {
   const [playerSleeve, setPlayerSleeve] = useState<string>(() => loadState('playerSleeve', PLAYER_COLORS[0]));
   const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
-  const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
+ const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
       const loaded = loadState<CardData[]>('activeDeck', []);
       if (loaded.length > 0) return loaded;
       // Fallback to last saved deck
