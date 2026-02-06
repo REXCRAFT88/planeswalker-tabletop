@@ -149,10 +149,18 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
   const handleDoubleClick = (e: React.MouseEvent) => {
       // Prevent double click if clicking UI
-      if (isMobile) return;
       if ((e.target as HTMLElement).closest('.interactive-ui')) return;
       e.stopPropagation();
-      onInspect(object.cardData);
+      
+      if (isMobile) {
+          if (isControlledByMe) {
+              toggleTap(null);
+          } else {
+              onInspect(object.cardData);
+          }
+      } else {
+          onInspect(object.cardData);
+      }
   }
 
   const toggleTap = (e: React.MouseEvent | null) => {
@@ -207,7 +215,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
       if (!isControlledByMe) return;
       e.preventDefault(); 
       e.stopPropagation();
-      toggleTap(e);
+      if (!isMobile) toggleTap(e);
   };
 
   // Determine Image to Show

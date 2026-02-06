@@ -146,7 +146,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
       </div>
 
       {!stagedDeck ? (
-        <div className="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
+        <div className="bg-gray-800 rounded-xl p-4 md:p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
             <label className="block text-sm font-medium text-gray-300 mb-2">
             Paste Deck List (Moxfield/Arena format)
             </label>

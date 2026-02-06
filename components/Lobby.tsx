@@ -509,7 +509,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       {/* Token Modal - Centered and in front */}
       {isTokenModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-              <div className="bg-gray-800 border border-gray-600 w-full max-w-[95vw] lg:max-w-6xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-[85vh]">
+              <div className="bg-gray-800 border border-gray-600 w-full max-w-[95vw] lg:max-w-6xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-full md:h-[85vh]">
                   <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
                       <h3 className="font-bold text-white flex items-center gap-2"><Layers className="text-yellow-500"/> Select Tokens</h3>
                       <button onClick={() => setIsTokenModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>

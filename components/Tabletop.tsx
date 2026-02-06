@@ -9,7 +9,7 @@ import { PLAYER_COLORS } from '../constants';
 import { 
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -105,6 +105,7 @@ const HandCard: React.FC<{
   onSendToZone: (card: CardData, zone: 'GRAVEYARD' | 'EXILE') => void;
   isMobile: boolean;
   onMobileAction: (card: CardData) => void;
+  onDoubleClick: (card: CardData) => void;
 }> = ({ card, scale, onInspect, onPlay, onSendToZone, isMobile, onMobileAction }) => {
   const width = 140 * scale; 
   const height = 196 * scale; 
@@ -147,6 +148,7 @@ const HandCard: React.FC<{
         style={{ width, height }}
         onClick={() => !isMobile && setShowOverlay(!showOverlay)}
         onMouseLeave={() => setShowOverlay(false)}
+        onDoubleClick={() => isMobile && onInspect(card)}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -244,11 +246,12 @@ const Playmat: React.FC<{
   onInspectCommander: (card: CardData) => void;
   isMobile: boolean;
   onMobileZoneAction: (zone: string) => void;
+  onDoubleClickZone: (zone: 'LIBRARY' | 'GRAVEYARD' | 'EXILE') => void;
 }> = ({
   x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
   topGraveyardCard, isShuffling, isControlled, commanders,
   onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander,
-  isMobile, onMobileZoneAction
+  isMobile, onMobileZoneAction, onDoubleClickZone
 }) => {
 
   const handleZoneTouch = (zone: string, e: React.TouchEvent) => {
@@ -288,6 +291,7 @@ const Playmat: React.FC<{
         <div 
             className="w-full h-full rounded bg-gray-800 border-2 border-white/20 flex items-center justify-center hover:border-blue-400 transition relative overflow-hidden cursor-pointer active:scale-95"
             onClick={isMobile ? (e: any) => handleZoneTouch('LIBRARY', e) : onDraw}
+            onDoubleClick={() => isMobile && onDoubleClickZone('LIBRARY')}
             style={{ backgroundColor: sleeveColor }}
         >
             <div className="text-white font-bold text-2xl z-10 pointer-events-none">{counts.library}</div>
@@ -327,6 +331,7 @@ const Playmat: React.FC<{
         <div 
             className="w-full h-full rounded bg-gray-800/50 border-2 border-white/10 flex items-center justify-center relative overflow-hidden cursor-pointer active:scale-95"
             onClick={isMobile ? (e: any) => handleZoneTouch('GRAVEYARD', e) : () => onOpenSearch('GRAVEYARD')}
+            onDoubleClick={() => isMobile && onDoubleClickZone('GRAVEYARD')}
         >
             {topGraveyardCard ? (
                 <img src={topGraveyardCard.imageUrl} className="w-full h-full object-cover rounded opacity-80 hover:opacity-100" alt="Graveyard" />
@@ -359,6 +364,7 @@ const Playmat: React.FC<{
          <div 
             className="w-full h-full rounded bg-black/40 border-2 border-dashed border-white/10 flex items-center justify-center cursor-pointer hover:border-red-400/50 active:scale-95"
             onClick={isMobile ? (e: any) => handleZoneTouch('EXILE', e) : () => onOpenSearch('EXILE')}
+            onDoubleClick={() => isMobile && onDoubleClickZone('EXILE')}
         >
              <div className="text-white/20 text-sm rotate-45">Exile</div>
              <div className="absolute top-0 right-0 bg-black/80 text-white text-xs px-1.5 rounded-bl font-bold">{counts.exile}</div>
@@ -547,6 +553,36 @@ const PlayerManagerModal: React.FC<{
     );
 };
 
+const HealthModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    players: {id: string, name: string, color: string}[];
+    life: Record<string, number>;
+    commanderDamage: Record<string, Record<string, number>>;
+}> = ({ isOpen, onClose, players, life, commanderDamage }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-[12000] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+            <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Heart className="text-red-500"/> Player Health</h3>
+                <div className="space-y-4">
+                    {players.map(p => (
+                        <div key={p.id} className="bg-gray-700/50 p-3 rounded-lg border border-gray-600">
+                            <div className="flex justify-between items-center mb-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-4 h-4 rounded-full" style={{backgroundColor: p.color}}/>
+                                    <span className="font-bold text-white">{p.name}</span>
+                                </div>
+                                <span className="text-2xl font-bold text-white">{life[p.id]}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const emptyStats: PlayerStats = {
     damageDealt: {}, damageReceived: 0, healingGiven: 0, healingReceived: 0, selfHealing: 0,
     tappedCounts: {},
@@ -634,6 +670,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [ghostPlayers, setGhostPlayers] = useState<{id: string, name: string, color: string}[]>([]);
     const [joinHandlingModal, setJoinHandlingModal] = useState<{ isOpen: boolean, newPlayer: {id: string, name: string} | null }>({ isOpen: false, newPlayer: null });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
+    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [showHealthModal, setShowHealthModal] = useState(false);
     
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -801,6 +839,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         checkMobile();
         window.addEventListener('resize', checkMobile);
         return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    useEffect(() => {
+        const checkFullScreen = () => setIsFullScreen(!!document.fullscreenElement);
+        document.addEventListener('fullscreenchange', checkFullScreen);
+        return () => document.removeEventListener('fullscreenchange', checkFullScreen);
     }, []);
 
     useEffect(() => {
@@ -2744,6 +2788,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 onInspectCommander={setInspectCard}
                                 isMobile={isMobile}
                                 onMobileZoneAction={setMobileZoneMenu}
+                                onDoubleClickZone={(zone) => openSearch(zone)}
                             />
                             {!isMe && (
                                 <div 
@@ -2805,6 +2850,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             onLongPress={isMobile ? setMobileActionCardId : undefined}
                             isMobile={isMobile}
                             onMobileAction={() => setMobileActionCardId(obj.id)}
+                            // onDoubleClick handled in Card component
                         />
                     </div>
                     );
@@ -2964,7 +3010,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      {!mulliganSelectionMode ? (
                         <>
                              {/* Larger Card Grid for visibility */}
-                             <div className="flex justify-center gap-6 mb-12 flex-wrap max-w-[90vw]">
+                             <div className={`flex ${isMobile ? 'overflow-x-auto snap-x snap-mandatory w-full px-[50%] pb-8 gap-4' : 'justify-center gap-6 flex-wrap max-w-[90vw]'} mb-12`}>
                                 {hand.filter(c => !c.isToken).map((card, idx) => (
                                      <div 
                                         key={idx} 
@@ -2972,7 +3018,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         onClick={() => setInspectCard(card)}
                                      >
                                          <img src={card.imageUrl} className="w-full h-full object-cover"/>
-                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center">
+                                          <div className={`absolute inset-0 bg-black/40 opacity-0 ${!isMobile ? 'group-hover:opacity-100' : ''} flex items-center justify-center`}>
                                               <span className="bg-black/80 px-2 py-1 rounded text-xs text-white">Click to Inspect</span>
                                           </div>
                                      </div>
@@ -3066,8 +3112,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
                  {/* Left Side: Player Info (Always Visible) */}
                  <div className="flex items-center gap-2 md:gap-6 overflow-hidden flex-1">
-                    {/* Players List */}
-                    <div className="flex items-center gap-4 overflow-x-auto max-w-[60vw] md:max-w-none custom-scrollbar pb-1">
+                    {/* Players List (Hidden on Mobile) */}
+                    <div className="hidden md:flex items-center gap-4 overflow-x-auto max-w-[60vw] md:max-w-none custom-scrollbar pb-1">
                         {playersList.map((p, idx) => {
                             const isMe = isLocal ? idx === mySeatIndex : p.id === socket.id;
                             const pLife = isMe ? life : (opponentsLife[p.id] ?? 40);
@@ -3110,6 +3156,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         })}
                     </div>
                     
+                    {/* Mobile Health Button */}
+                    <button onClick={() => setShowHealthModal(true)} className="md:hidden p-2 bg-gray-800 rounded-full text-red-500 border border-gray-700">
+                        <Heart size={20} fill="currentColor"/>
+                    </button>
+
                     {/* Life Controls (Local) */}
                     <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1 border border-gray-600 shadow-inner">
                         <button onClick={() => handleLifeChange(-1)} className="text-red-400 hover:text-red-300 font-bold text-lg px-2 active:scale-90 transition">-</button>
@@ -3272,7 +3323,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- Main Content Area --- */}
-            <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+            <div className={`flex-1 flex flex-col md:flex-row overflow-hidden relative ${isMobile && !isFullScreen ? 'pb-16' : ''}`}>
                 
                 {/* Left / Main Pane */}
                 <div className={`${isOpponentViewOpen ? (isMobile ? 'hidden' : 'h-1/2 w-full md:w-1/2 md:h-full border-b md:border-b-0 md:border-r border-gray-700') : 'w-full h-full'} relative transition-all duration-300`}>
@@ -3333,6 +3384,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             onSendToZone={sendToZone}
                                             isMobile={isMobile}
                                             onMobileAction={() => setMobileActionCardId(card.id)}
+                                            onDoubleClick={() => setInspectCard(card)}
                                         />
                                     ))}
                                     
@@ -3360,6 +3412,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                             onSendToZone={sendToZone}
                                                             isMobile={isMobile}
                                                             onMobileAction={() => setMobileActionCardId(card.id)}
+                                                            onDoubleClick={() => setInspectCard(card)}
                                                         />
                                                     ))}
                                                     <div className="flex flex-col gap-2 pb-10">
@@ -3531,50 +3584,81 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             {/* Mobile Card Actions Modal */}
             {mobileActionCardId && (
-                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-end justify-center animate-in slide-in-from-bottom-10" onClick={() => setMobileActionCardId(null)}>
-                    <div className="bg-gray-900 w-full rounded-t-2xl border-t border-gray-700 p-6 pb-10" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in" onClick={() => setMobileActionCardId(null)}>
+                    <div className="bg-gray-900 w-full max-w-sm rounded-2xl border border-gray-700 p-6 m-4 shadow-2xl" onClick={e => e.stopPropagation()}>
                         {(() => {
                             const obj = boardObjects.find(o => o.id === mobileActionCardId);
-                            if (!obj) return null;
-                            const isStack = obj.quantity > 1;
+                            const handCard = hand.find(c => c.id === mobileActionCardId);
+                            const cardData = obj?.cardData || handCard;
+                            if (!cardData) return null;
                             
                             return (
                                 <div className="flex flex-col gap-4">
                                     <div className="flex items-center gap-4 mb-2">
-                                        <img src={obj.cardData.imageUrl} className="w-16 h-24 rounded object-cover border border-gray-600" />
+                                        <img src={cardData.imageUrl} className="w-16 h-24 rounded object-cover border border-gray-600" />
                                         <div>
-                                            <h3 className="text-white font-bold text-lg line-clamp-1">{obj.cardData.name}</h3>
-                                            <p className="text-gray-400 text-sm">{obj.cardData.typeLine}</p>
+                                            <h3 className="text-white font-bold text-lg line-clamp-1">{cardData.name}</h3>
+                                            <p className="text-gray-400 text-sm">{cardData.typeLine}</p>
                                         </div>
                                         <button onClick={() => setMobileActionCardId(null)} className="ml-auto p-2 bg-gray-800 rounded-full text-gray-400"><X/></button>
                                     </div>
                                     
                                     <div className="grid grid-cols-4 gap-3">
-                                        <button onClick={() => { updateBoardObject(obj.id, { rotation: obj.rotation === 0 ? 90 : 0 }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
-                                            <RefreshCw size={24} className="text-white"/>
-                                            <span className="text-xs text-gray-300">Tap</span>
-                                        </button>
-                                        <button onClick={() => { setInspectCard(obj.cardData); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                        <button onClick={() => { setInspectCard(cardData); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
                                             <ZoomIn size={24} className="text-white"/>
                                             <span className="text-xs text-gray-300">Inspect</span>
                                         </button>
-                                        <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) + 1 } }); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
-                                            <Plus size={24} className="text-green-400"/>
-                                            <span className="text-xs text-gray-300">+1/+1</span>
-                                        </button>
-                                        <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) - 1 } }); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
-                                            <Minus size={24} className="text-red-400"/>
-                                            <span className="text-xs text-gray-300">-1/-1</span>
-                                        </button>
-                                        <button onClick={() => { returnToHand(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
-                                            <Hand size={24} className="text-blue-300"/>
-                                            <span className="text-xs text-gray-300">Hand</span>
-                                        </button>
-                                        <button onClick={() => { updateBoardObject(obj.id, { isFaceDown: !obj.isFaceDown }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
-                                            <Eye size={24} className="text-purple-300"/>
-                                            <span className="text-xs text-gray-300">Flip</span>
-                                        </button>
-                                        {isStack && <button onClick={() => { unstackCards(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600 col-span-2"><Layers size={24} className="text-white"/><span className="text-xs text-gray-300">Unstack All</span></button>}
+                                        
+                                        {obj && (
+                                            <>
+                                            <button onClick={() => { updateBoardObject(obj.id, { rotation: obj.rotation === 0 ? 90 : 0 }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <RefreshCw size={24} className="text-white"/>
+                                                <span className="text-xs text-gray-300">Tap</span>
+                                            </button>
+                                            <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) + 1 } }); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <Plus size={24} className="text-green-400"/>
+                                                <span className="text-xs text-gray-300">+1/+1</span>
+                                            </button>
+                                            <button onClick={() => { updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": (obj.counters["+1/+1"] || 0) - 1 } }); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <Minus size={24} className="text-red-400"/>
+                                                <span className="text-xs text-gray-300">-1/-1</span>
+                                            </button>
+                                            <button onClick={() => { returnToHand(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <Hand size={24} className="text-blue-300"/>
+                                                <span className="text-xs text-gray-300">Hand</span>
+                                            </button>
+                                            <button onClick={() => { updateBoardObject(obj.id, { isFaceDown: !obj.isFaceDown }); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <Eye size={24} className="text-purple-300"/>
+                                                <span className="text-xs text-gray-300">Flip</span>
+                                            </button>
+                                            {obj.quantity > 1 && <button onClick={() => { unstackCards(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600 col-span-2"><Layers size={24} className="text-white"/><span className="text-xs text-gray-300">Unstack All</span></button>}
+                                            <button onClick={() => { sendToZone(cardData, 'GRAVEYARD'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                                <Archive size={24} className="text-red-400"/>
+                                                <span className="text-xs text-gray-300">Grave</span>
+                                            </button>
+                                            <button onClick={() => { sendToZone(cardData, 'EXILE'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                                <X size={24} className="text-red-400"/>
+                                                <span className="text-xs text-gray-300">Exile</span>
+                                            </button>
+                                            </>
+                                        )}
+
+                                        {handCard && (
+                                            <>
+                                            <button onClick={() => { playCardFromHand(handCard); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-blue-600">
+                                                <Play size={24} className="text-green-400"/>
+                                                <span className="text-xs text-gray-300">Play</span>
+                                            </button>
+                                            <button onClick={() => { sendToZone(handCard, 'GRAVEYARD'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                                <Archive size={24} className="text-red-400"/>
+                                                <span className="text-xs text-gray-300">Discard</span>
+                                            </button>
+                                            <button onClick={() => { sendToZone(handCard, 'EXILE'); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-3 bg-gray-800 rounded-xl active:bg-red-900/50">
+                                                <X size={24} className="text-red-400"/>
+                                                <span className="text-xs text-gray-300">Exile</span>
+                                            </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -3910,6 +3994,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </div>
                 </div>
             )}
+
+            <HealthModal 
+                isOpen={showHealthModal}
+                onClose={() => setShowHealthModal(false)}
+                players={playersList}
+                life={isLocal ? 
+                    playersList.reduce((acc, p, i) => ({...acc, [p.id]: i === mySeatIndex ? life : (localPlayerStates.current[p.id]?.life || 40)}), {}) 
+                    : {...opponentsLife, [socket.id]: life}}
+                commanderDamage={commanderDamage}
+            />
         </div>
     );
 };
