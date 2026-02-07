@@ -109,8 +109,8 @@ const HandCard: React.FC<{
   onDoubleClick: (card: CardData) => void;
   shortcutKey?: string;
 }> = ({ card, scale, onInspect, onPlay, onSendToZone, isMobile, onMobileAction }) => {
-  const width = 140 * scale; 
-  const height = 196 * scale; 
+  const width = 160 * scale; 
+  const height = 224 * scale; 
   const [showOverlay, setShowOverlay] = useState(false);
   const touchStart = useRef<{x: number, y: number} | null>(null);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -280,35 +280,50 @@ const Playmat: React.FC<PlaymatProps> = ({
 
   const handleZoneTouchStart = (zone: string, e: React.TouchEvent) => {
       if (!isMobile || !isControlled || disconnected) return;
+      e.stopPropagation();
       isLongPress.current = false;
       
       if (zone === 'LIBRARY') {
           tapCount.current += 1;
-          
-          if (tapTimer.current) {
-              clearTimeout(tapTimer.current);
-          }
-          tapTimer.current = setTimeout(() => {
-              if (tapCount.current === 1) {
-                  onDraw();
-              }
-              tapCount.current = 0;
-          }, 300);
+        
+        // Clear any pending single-tap action from a previous tap.
+        if (tapTimer.current) {
+            clearTimeout(tapTimer.current);
+        }
+        // Always clear a pending long press timer on a new touch event.
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+        }
 
-          if (tapCount.current === 2) {
-              onOpenSearch('LIBRARY');
-              tapCount.current = 0;
-              if (tapTimer.current) clearTimeout(tapTimer.current);
-          }
+        if (tapCount.current === 1) {
+            // This is the first tap. Set up timers for single tap and long press.
+            
+            // Timer for single tap. Will fire if not cancelled by double-tap or long-press.
+            tapTimer.current = setTimeout(() => {
+                onDraw();
+                tapCount.current = 0; // Reset after action
+            }, 300); // Time to wait for a potential second tap.
 
-          longPressTimer.current = setTimeout(() => {
-              isLongPress.current = true;
-              tapCount.current = 0;
-              if (tapTimer.current) clearTimeout(tapTimer.current);
-              onMobileZoneAction(zone);
-          }, 600);
+            // Timer for long press.
+            longPressTimer.current = setTimeout(() => {
+                isLongPress.current = true;
+                tapCount.current = 0; // It's a long press, so reset tap count.
+                if (tapTimer.current) {
+                    clearTimeout(tapTimer.current); // Important: Cancel the pending single tap.
+                }
+                onMobileZoneAction(zone);
+            }, 600); // Time until a press is considered "long".
+
+        } else if (tapCount.current === 2) {
+            // This is a double tap. The single-tap timer from the first tap was cleared.
+            // The long-press timer was also cleared.
+            onOpenSearch('LIBRARY');
+            tapCount.current = 0; // Reset for the next interaction.
+        }
+        // For tap counts > 2, do nothing, the count will be reset by the next timeout or action.
 
       } else {
+          // Existing logic for other zones.
           longPressTimer.current = setTimeout(() => {
               isLongPress.current = true;
               onMobileZoneAction(zone);
@@ -789,7 +804,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const initialScale = useRef<number>(1);
     const initialView = useRef<{ x: number, y: number }>({ x: 0, y: 0 });
     const initialPinchCenter = useRef<{ x: number, y: number } | null>(null);
-    const lastPinchCenter = useRef<{ x: number, y: number } | null>(null);
     
     // State Refs for Socket Handlers
     const libraryRef = useRef(library);
@@ -1030,11 +1044,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // ...
     // ...
+    const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
+
     useEffect(() => {
         rootRef.current?.focus();
         const checkMobile = () => {
             const isAutoMobile = window.innerWidth < 768 || (window.innerHeight < 600 && window.innerWidth < 1000);
             setIsMobile(controlMode === 'mobile' || (controlMode === 'auto' && isAutoMobile));
+            setIsLandscape(window.innerWidth > window.innerHeight);
         };
 
         checkMobile();
@@ -1392,7 +1409,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      ...obj,
                      controllerId: obj.controllerId === 'local-player' ? socket.id : obj.controllerId
                  }));
-                 socket.emit('game_action', { room: roomId, action: 'GAME_STATE_SYNC', data: {
+                 const fullPublicState = {
                      phase: gamePhaseRef.current,
                      boardObjects: safeBoardObjects,
                      turn: turnRef.current,
@@ -1401,8 +1418,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      turnStartTime: turnStartTimeRef.current,
                      commanderDamage: commanderDamageRef.current,
                      turnOrder: currentTurnOrder,
-                     logs: logsRef.current
-                 }});
+                     logs: logsRef.current.slice(0, 50), // Limit logs to prevent large payload
+                     // Add all public states
+                     allPlayerLife: { ...opponentsLife, [socket.id]: lifeRef.current },
+                     allPlayerCounts: { ...opponentsCounts, [socket.id]: { library: libraryRef.current.length, graveyard: graveyard.length, exile: exile.length, hand: hand.filter(c => !c.isToken).length, command: commandZone.length } },
+                     allPlayerCommanders: { ...opponentsCommanders, [socket.id]: commandZone }
+                 };
+                 socket.emit('game_action', { room: roomId, action: 'GAME_STATE_SYNC', data: fullPublicState});
             }
 
             let sortedPlayers = sortPlayers(combinedPlayers, turnOrderRef.current);
@@ -1427,6 +1449,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const handleLoadState = (state: unknown) => {
             const loadedState = state as Partial<LocalPlayerState>;
             if (loadedState) {
+                console.log("Loading private state from server", loadedState);
                 if (loadedState.hand) setHand(loadedState.hand);
                 if (loadedState.library) setLibrary(loadedState.library);
                 if (loadedState.graveyard) setGraveyard(loadedState.graveyard);
@@ -1599,7 +1622,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      setRevealedCards(data.cards);
                  }
             }
-            else if (action === 'GAME_STATE_SYNC') {
+             else if (action === 'GAME_STATE_SYNC') {
                  setGamePhase(data.phase);
                  setBoardObjects(data.boardObjects);
                  setTurn(data.turn);
@@ -1611,9 +1634,38 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                      setTurnOrder(data.turnOrder);
                      setPlayersList(prev => sortPlayers(prev, data.turnOrder));
                  }
+                 if (data.logs) setLogs(data.logs);
+
+                 const myId = socket.id;
+                 if (data.allPlayerLife) {
+                    const newOpponentLife = { ...data.allPlayerLife };
+                    if (myId in newOpponentLife) {
+                        setLife(newOpponentLife[myId]);
+                        delete newOpponentLife[myId];
+                    }
+                    setOpponentsLife(newOpponentLife);
+                 }
+                 if (data.allPlayerCounts) {
+                    const newOpponentCounts = { ...data.allPlayerCounts };
+                     if (myId in newOpponentCounts) {
+                        // We trust our local counts more than the sync for our own state
+                        delete newOpponentCounts[myId];
+                    }
+                    setOpponentsCounts(newOpponentCounts);
+                 }
+                 if (data.allPlayerCommanders) {
+                    const newOpponentCommanders = { ...data.allPlayerCommanders };
+                     if (myId in newOpponentCommanders) {
+                        setCommandZone(newOpponentCommanders[myId]);
+                        delete newOpponentCommanders[myId];
+                    }
+                    setOpponentsCommanders(newOpponentCommanders);
+                 }
+
                  addLog("Synced game state from Host", "SYSTEM");
-            }
-            else if (action === 'ROLL_DICE') {
+                 hasLoadedState.current = true;
+             }
+             else if (action === 'ROLL_DICE') {
                 setActiveDice(prev => [...prev, data]);
                 const roller = currentPlayers.find(p => p.id === data.playerId);
                 addLog(`rolled a ${data.value} on a D${data.sides}`, 'ACTION', roller?.name);
@@ -1644,7 +1696,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // --- Initialization ---
     useEffect(() => {
-        if (!isLocal) {
+        if (!isLocal && !initialGameStarted) {
             const commanders = initialDeck.filter(c => c.isCommander);
             const deck = initialDeck.filter(c => !c.isCommander);
             const shuffled = [...deck].sort(() => Math.random() - 0.5);
@@ -1664,7 +1716,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
             scale: startScale
         });
-    }, [initialDeck]);
+    }, [initialDeck, initialGameStarted]);
     
     // Auto-center opponent view
     useEffect(() => {
@@ -2787,14 +2839,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 x: (points[0].x + points[1].x) / 2,
                 y: (points[0].y + points[1].y) / 2
             };
-            lastPinchCenter.current = {
-                x: (points[0].x + points[1].x) / 2,
-                y: (points[0].y + points[1].y) / 2
-            };
             isDraggingView.current = false;
         } else if (activePointers.current.size === 1) {
             const isMouse = e.pointerType === 'mouse';
-            if (e.button === 1 || (e.button === 0 && (!isMouse || isSpacePressed.current))) {
+            if (e.button === 1 || (e.button === 0 && (isMobile || !isMouse || isSpacePressed.current))) {
                  isDraggingView.current = true;
                  lastMousePos.current = { x: e.clientX, y: e.clientY };
                  e.preventDefault();
@@ -2805,7 +2853,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const handleContainerPointerMove = (e: React.PointerEvent) => {
         activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        if (activePointers.current.size === 2 && initialPinchDist.current && initialPinchCenter.current && lastPinchCenter.current) {
+        if (isDraggingView.current && activePointers.current.size === 1) {
+            const dx = e.clientX - lastMousePos.current.x;
+            const dy = e.clientY - lastMousePos.current.y;
+            setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+            lastMousePos.current = { x: e.clientX, y: e.clientY };
+        } else if (activePointers.current.size === 2 && initialPinchDist.current && initialPinchCenter.current) {
             const points = Array.from(activePointers.current.values()) as { x: number; y: number }[];
             const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
             const scaleChange = dist / initialPinchDist.current;
@@ -2816,33 +2869,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 y: (points[0].y + points[1].y) / 2
             };
             
-            // Calculate new view position based on zooming into the initial pinch center
             const worldPointX = (initialPinchCenter.current.x - initialView.current.x) / initialScale.current;
             const worldPointY = (initialPinchCenter.current.y - initialView.current.y) / initialScale.current;
-            
-            // Add panning delta (current center vs last center)
-            const dx = currentCenter.x - lastPinchCenter.current.x;
-            const dy = currentCenter.y - lastPinchCenter.current.y;
-            lastPinchCenter.current = currentCenter;
-
-            // We calculate the new view position such that the world point remains under the pinch center
-            // plus any movement of the pinch center itself.
-            // Actually, simpler: Re-calculate view based on initial pinch center mapping to current pinch center
-            // But we need to account for the fact that the pinch center MOVES.
-            // Standard approach: view = currentCenter - worldPoint * newScale
             
             const newX = currentCenter.x - worldPointX * newScale;
             const newY = currentCenter.y - worldPointY * newScale;
 
             setView({ x: newX, y: newY, scale: newScale });
-            return;
-        }
-
-        if (isDraggingView.current && activePointers.current.size === 1) {
-            const dx = e.clientX - lastMousePos.current.x;
-            const dy = e.clientY - lastMousePos.current.y;
-            setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-            lastMousePos.current = { x: e.clientX, y: e.clientY };
         }
     };
 
@@ -2865,6 +2898,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleWheel = (e: React.WheelEvent) => {
+        if (isDraggingView.current) return;
         const rect = e.currentTarget.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
@@ -3462,10 +3496,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                  {/* Right Side: Desktop Controls */}
                  <div className="hidden md:flex items-center gap-3">
-                    <div className="flex flex-col items-end mr-2 hidden md:flex">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Room Code</span>
-                        <span className="text-sm font-mono font-bold text-gray-300 select-all">{isLocal ? 'LOCAL' : roomId}</span>
-                    </div>
+                    {!isLocal && (
+                        <div className="flex flex-col items-end mr-2">
+                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Room Code</span>
+                            <span className="text-sm font-mono font-bold text-gray-300 select-all">{roomId}</span>
+                        </div>
+                    )}
 
                     {!isLocal && (
                     <button 
@@ -3479,14 +3515,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     
                     <div className="w-px h-6 bg-gray-700 mx-2" />
                     <button 
-                         onClick={() => setShowShortcuts(true)}
+                         onClick={() => !isMobile && setShowShortcuts(true)}
                          className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
                          title="Keyboard Shortcuts"
                     >
                         <Keyboard size={20} />
                     </button>
                     <button 
-                         onClick={() => setShowSettingsModal(true)}
+                         onClick={() => !isMobile && setShowSettingsModal(true)}
                          className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
                          title="Settings"
                     >
@@ -3521,13 +3557,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </button>
                  </div>
 
-                 {/* Mobile Hamburger */}
-                 <button 
-                    className="md:hidden p-2 text-gray-300 hover:text-white"
-                    onClick={() => setMobileMenuOpen(true)}
-                 >
-                     <Menu size={24} />
-                 </button>
+                 {/* Mobile Right Side Controls */}
+                 <div className="md:hidden flex items-center gap-2">
+                    {isMobile && isLandscape && isFullScreen && (
+                        <button onClick={() => setShowHealthModal(true)} className="p-2 bg-gray-800 rounded-full text-red-500 border border-gray-700">
+                            <Heart size={20} fill="currentColor"/>
+                        </button>
+                    )}
+                    {isMobile && isLandscape && isFullScreen ? (
+                        <button onClick={toggleFullScreen} className="p-2 text-gray-300 hover:text-white" title="Exit Full Screen">
+                            <Minimize size={24} />
+                        </button>
+                    ) : (
+                        <button className="p-2 text-gray-300 hover:text-white" onClick={() => setMobileMenuOpen(true)}>
+                             <Menu size={24} />
+                        </button>
+                    )}
+                 </div>
             </div>
 
             {/* Mobile Menu Overlay */}
@@ -3577,7 +3623,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </div>
 
                     <div className="mt-auto space-y-3">
-                        <button onClick={() => {setShowSettingsModal(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings/> Settings</button>
+                        {!isLandscape && (
+                            <button onClick={() => {setShowSettingsModal(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings/> Settings</button>
+                        )}
                         <button onClick={() => {setIsLogOpen(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><History/> Game Log</button>
                         <button onClick={() => {setShowStatsModal(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><BarChart3/> Stats</button>
                         {isHost && <button onClick={() => {setShowPlayerManager(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-blue-900/50 text-blue-200 rounded-xl font-bold flex items-center justify-center gap-2"><Shield/> Host Controls</button>}
@@ -3587,7 +3635,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- Main Content Area --- */}
-            <div className={`flex-1 flex flex-col md:flex-row overflow-hidden relative ${isMobile && !isFullScreen ? 'pb-16' : ''}`}>
+            <div className={`flex-1 flex flex-col md:flex-row overflow-hidden relative ${gamePhase !== 'SETUP' && isMobile && !isFullScreen && !isLandscape ? 'pb-16' : ''}`}>
                 
                 {/* Left / Main Pane */}
                 <div className={`${isOpponentViewOpen ? (isMobile ? 'hidden' : 'h-1/2 w-full md:w-1/2 md:h-full border-b md:border-b-0 md:border-r border-gray-700') : 'w-full h-full'} relative transition-all duration-300`}>
@@ -3621,7 +3669,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </div>
                             )}
 
-                            <div className={`w-full h-48 pointer-events-none absolute bottom-0 ${isMobile ? '' : 'bg-gradient-to-t from-black via-black/80 to-transparent'}`} />
+                            <div className={`w-full h-56 pointer-events-none absolute bottom-0 ${isMobile ? '' : 'bg-gradient-to-t from-black via-black/80 to-transparent'}`} />
                             
                             {/* Hand Scroll Container */}
                             <div 
