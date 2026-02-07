@@ -386,17 +386,14 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
   const cardContent = (
       <div
         ref={cardRef}
-        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl scale-105' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
+        className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
         style={{
           left: object.x,
           top: object.y,
           width: CARD_WIDTH * scale,
           height: CARD_HEIGHT * scale,
           zIndex: object.z,
-          transform: isDragging && isMobile 
-            ? `scale(${viewScale}) rotate(${effectiveRotation + viewRotation}deg)` 
-            : `rotate(${effectiveRotation}deg)`,
-          transformOrigin: isDragging && isMobile ? '0 0' : undefined,
+          transform: isDragging && isMobile ? `rotate(${effectiveRotation}deg) scale(1)` : `rotate(${effectiveRotation}deg)`,
           transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s',
         }}
         onPointerDown={handlePointerDown}

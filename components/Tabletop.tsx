@@ -209,15 +209,39 @@ const Die: React.FC<{ value: number, sides: number, x: number, y: number, color:
     );
 };
 
-const Playmat: React.FC<{
+interface Player {
+    id: string;
+    name: string;
+    color: string;
+    disconnected?: boolean;
+}
+
+interface ZoneLayout {
+    library: { x: number; y: number };
+    graveyard: { x: number; y: number };
+    exile: { x: number; y: number };
+    command: { x: number; y: number };
+}
+
+interface ZoneCounts {
+    library: number;
+    graveyard: number;
+    exile: number;
+    hand: number;
+    command: number;
+}
+
+// ...
+
+interface PlaymatProps {
   x: number;
   y: number;
   width: number;
   height: number;
   playerName: string;
   rotation: number;
-  zones: any;
-  counts: any;
+  zones: ZoneLayout;
+  counts: ZoneCounts;
   sleeveColor: string;
   topGraveyardCard?: CardData;
   isShuffling: boolean;
@@ -233,15 +257,20 @@ const Playmat: React.FC<{
   isMobile: boolean;
   onMobileZoneAction: (zone: string) => void;
   onDoubleClickZone: (zone: 'LIBRARY' | 'GRAVEYARD' | 'EXILE') => void;
-}> = ({
+  disconnected?: boolean;
+}
+
+const Playmat: React.FC<PlaymatProps> = ({
   x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
   topGraveyardCard, isShuffling, isControlled, commanders,
   onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander,
-  isMobile, onMobileZoneAction, onDoubleClickZone
+  isMobile, onMobileZoneAction, onDoubleClickZone, disconnected
 }) => {
 
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
+  const tapTimer = useRef<NodeJS.Timeout | null>(null);
+  const tapCount = useRef(0);
 
   const handleZoneTouch = (zone: string, e: React.TouchEvent) => {
       if (!isMobile || !isControlled) return;
@@ -250,12 +279,41 @@ const Playmat: React.FC<{
   };
 
   const handleZoneTouchStart = (zone: string, e: React.TouchEvent) => {
-      if (!isMobile || !isControlled) return;
+      if (!isMobile || !isControlled || disconnected) return;
       isLongPress.current = false;
-      longPressTimer.current = setTimeout(() => {
-          isLongPress.current = true;
-          onMobileZoneAction(zone);
-      }, 500);
+      
+      if (zone === 'LIBRARY') {
+          tapCount.current += 1;
+          
+          if (tapTimer.current) {
+              clearTimeout(tapTimer.current);
+          }
+          tapTimer.current = setTimeout(() => {
+              if (tapCount.current === 1) {
+                  onDraw();
+              }
+              tapCount.current = 0;
+          }, 300);
+
+          if (tapCount.current === 2) {
+              onOpenSearch('LIBRARY');
+              tapCount.current = 0;
+              if (tapTimer.current) clearTimeout(tapTimer.current);
+          }
+
+          longPressTimer.current = setTimeout(() => {
+              isLongPress.current = true;
+              tapCount.current = 0;
+              if (tapTimer.current) clearTimeout(tapTimer.current);
+              onMobileZoneAction(zone);
+          }, 600);
+
+      } else {
+          longPressTimer.current = setTimeout(() => {
+              isLongPress.current = true;
+              onMobileZoneAction(zone);
+          }, 500);
+      }
   };
 
   const handleZoneTouchEnd = () => {
@@ -266,7 +324,10 @@ const Playmat: React.FC<{
   };
 
   const handleLibraryClick = (e: React.MouseEvent) => {
-      if (isMobile && isLongPress.current) {
+      if (disconnected || isMobile) return;
+      
+      // Desktop logic: check for long press
+      if (isLongPress.current) {
           e.stopPropagation();
           return;
       }
@@ -282,7 +343,7 @@ const Playmat: React.FC<{
 
   return (
     <div
-      className="absolute bg-gray-900/40 rounded-3xl border"
+      className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 ${disconnected ? 'opacity-50' : ''}`}
       style={{
         left: x, top: y, width, height,
         borderColor: sleeveColor,
@@ -293,6 +354,12 @@ const Playmat: React.FC<{
       <div className="absolute bottom-4 left-6 text-white/30 font-bold text-xl uppercase tracking-widest pointer-events-none">
         {playerName}
       </div>
+      
+      {disconnected && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
+              <div className="text-white font-bold text-2xl uppercase tracking-widest -rotate-45 border-4 border-white/50 p-4 rounded-lg">Disconnected</div>
+          </div>
+      )}
 
       {/* Library Zone */}
       <div
@@ -343,10 +410,10 @@ const Playmat: React.FC<{
       >
         <div 
             className="w-full h-full rounded bg-gray-800/50 border-2 border-white/10 flex items-center justify-center relative overflow-hidden cursor-pointer active:scale-95"
-            onClick={isMobile ? undefined : () => onOpenSearch('GRAVEYARD')}
+            onClick={isMobile || disconnected ? undefined : () => onOpenSearch('GRAVEYARD')}
             onTouchStart={isMobile ? (e) => handleZoneTouchStart('GRAVEYARD', e) : undefined}
             onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
-            onDoubleClick={() => isMobile && onDoubleClickZone('GRAVEYARD')}
+            onDoubleClick={() => isMobile && !disconnected && onDoubleClickZone('GRAVEYARD')}
         >
             {topGraveyardCard ? (
                 <img src={topGraveyardCard.imageUrl} className="w-full h-full object-cover rounded opacity-80 hover:opacity-100" alt="Graveyard" />
@@ -379,10 +446,10 @@ const Playmat: React.FC<{
       >
          <div 
             className="w-full h-full rounded bg-black/40 border-2 border-dashed border-white/10 flex items-center justify-center cursor-pointer hover:border-red-400/50 active:scale-95"
-            onClick={isMobile ? undefined : () => onOpenSearch('EXILE')}
+            onClick={isMobile || disconnected ? undefined : () => onOpenSearch('EXILE')}
             onTouchStart={isMobile ? (e) => handleZoneTouchStart('EXILE', e) : undefined}
             onTouchEnd={isMobile ? handleZoneTouchEnd : undefined}
-            onDoubleClick={() => isMobile && onDoubleClickZone('EXILE')}
+            onDoubleClick={() => isMobile && !disconnected && onDoubleClickZone('EXILE')}
         >
              <div className="text-white/20 text-sm rotate-45">Exile</div>
              {isControlled && !isMobile && <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-bold px-1.5 rounded border border-white/20 pointer-events-none z-20 shadow-sm">E</div>}
@@ -427,7 +494,7 @@ const Playmat: React.FC<{
 const DamageReportModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    players: {id: string, name: string, color: string}[];
+    players: Player[];
     damage: number;
     healing: number;
     onConfirm: (damageReport: Record<string, number>, healingReport: Record<string, number>) => void;
@@ -513,7 +580,7 @@ const DamageReportModal: React.FC<{
 const PlayerManagerModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    players: {id: string, name: string, color: string}[];
+    players: Player[];
     onKick: (id: string) => void;
     onReorder: (fromIdx: number, toIdx: number) => void;
     onAssignState: (playerId: string, seatIdx: number) => void;
@@ -558,7 +625,7 @@ const PlayerManagerModal: React.FC<{
                                 <GripVertical className="text-gray-500 cursor-grab" size={16}/>
                                 <span className="text-gray-400 font-mono w-4">{idx+1}.</span>
                                 <div className="w-6 h-6 rounded-full border border-white/20" style={{backgroundColor: p.color}} />
-                                <span className="flex-1 font-semibold text-white truncate">{p.name}</span>
+                                <span className="flex-1 font-semibold text-white truncate">{p.name} {p.disconnected && '(DC)'}</span>
                                 <button onClick={() => onKick(p.id)} className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded border border-red-900/50" title="Kick Player"><Ban size={14}/></button>
                             </div>
                         ))}
@@ -577,7 +644,7 @@ const PlayerManagerModal: React.FC<{
 const HealthModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
-    players: {id: string, name: string, color: string}[];
+    players: Player[];
     life: Record<string, number>;
     commanderDamage: Record<string, Record<string, number>>;
 }> = ({ isOpen, onClose, players, life, commanderDamage }) => {
@@ -627,7 +694,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [turn, setTurn] = useState(1);
     const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string>('');
 
-    const [playersList, setPlayersList] = useState<{id: string, name: string, color: string}[]>([
+    const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
     ]);
     const [turnOrder, setTurnOrder] = useState<string[]>([]);
@@ -689,6 +756,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
     
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -952,13 +1020,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         prevPlayersListForLayout.current = newPlayers;
     }, [playersList]);
 
+    const [controlMode, setControlMode] = useState<'auto' | 'mobile'>(() => {
+        return (localStorage.getItem('planeswalker_control_mode') as 'auto' | 'mobile') || 'auto';
+    });
+
+    useEffect(() => {
+        localStorage.setItem('planeswalker_control_mode', controlMode);
+    }, [controlMode]);
+
+    // ...
+    // ...
     useEffect(() => {
         rootRef.current?.focus();
-        const checkMobile = () => setIsMobile(window.innerWidth < 768 || (window.innerHeight < 600 && window.innerWidth < 1000));
+        const checkMobile = () => {
+            const isAutoMobile = window.innerWidth < 768 || (window.innerHeight < 600 && window.innerWidth < 1000);
+            setIsMobile(controlMode === 'mobile' || (controlMode === 'auto' && isAutoMobile));
+        };
+
         checkMobile();
         window.addEventListener('resize', checkMobile);
         return () => window.removeEventListener('resize', checkMobile);
-    }, []);
+    }, [controlMode]);
 
     useEffect(() => {
         const checkFullScreen = () => setIsFullScreen(!!document.fullscreenElement);
@@ -1021,6 +1103,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             
             // Force update to ensure counts are rendered
             setPlayersList([...allPlayers]);
+            hasLoadedState.current = true;
         }
     }, [isLocal, initialDeck, localOpponents]);
 
@@ -1032,21 +1115,37 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [isHost]);
 
     useEffect(() => {
-        if ((initialGameStarted || isLocal) && gamePhase === 'SETUP') {
-             // Wait for explicit start in local to allow re-ordering if needed, but if auto-start:
-             if (initialGameStarted) handleStartGameLogic({ mulligansAllowed: true, trackDamage: false });
+        // This effect handles the game's initial start.
+        if (gamePhase !== 'SETUP') return;
+
+        if (isLocal) {
+            // For local games, we always want to show the setup screen first.
+            // The user must click "Start Game" manually. So, do nothing here.
+            return;
         }
-    }, [initialGameStarted]);
+        
+        // For online games, if the game has already started (e.g., rejoining),
+        // we should automatically start the game logic for the joining player.
+        if (initialGameStarted) {
+             handleStartGameLogic({ mulligansAllowed: true, trackDamage: false });
+        }
+    }, [isLocal, initialGameStarted, gamePhase]);
 
     // --- Game Phase Persistence ---
     useEffect(() => {
+        if (isLocal) {
+            // For local games, we always want a fresh start, so ignore any persisted phase.
+            localStorage.removeItem(`game_phase_${roomId}`);
+            return;
+        }
+
         const savedPhase = localStorage.getItem(`game_phase_${roomId}`);
         if (savedPhase && (savedPhase === 'MULLIGAN' || savedPhase === 'PLAYING')) {
              if (gamePhase === 'SETUP') {
                  setGamePhase(savedPhase as any);
              }
         }
-    }, []);
+    }, [isLocal, roomId]);
 
     useEffect(() => {
         if (gamePhase !== 'SETUP') {
@@ -1060,27 +1159,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Save session on mount
         sessionStorage.setItem('active_game_session', roomId);
         
-        const getUserId = () => {
-            let id = localStorage.getItem('planeswalker_user_id');
-            if (!id) {
-                id = crypto.randomUUID();
-                localStorage.setItem('planeswalker_user_id', id);
-            }
-            return id;
+        const getUserIdForRoom = (room: string) => {
+            return localStorage.getItem(`planeswalker_user_id_${room}`);
         };
 
         // Handle socket reconnection
         const handleReconnection = () => {
             console.log("Socket reconnected, re-joining room...");
-            socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId: getUserId() });
+            const userId = getUserIdForRoom(roomId);
+            socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId });
         };
 
         socket.on('connect', handleReconnection);
 
+        // Initial join
+        const userId = getUserIdForRoom(roomId);
+        socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId });
+
+
         return () => {
             socket.off('connect', handleReconnection);
         };
-    }, [roomId, playerName, sleeveColor]);
+    }, [roomId, playerName, sleeveColor, isLocal]);
 
     const handleExit = () => {
         socket.emit('leave_room', { room: roomId });
@@ -1114,7 +1214,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [library.length, graveyard.length, exile.length, hand.length, commandZone.length, commandZone, gamePhase, roomId, playersList.length]);
 
-    // --- State Backup ---
+    // --- State Backup & Restore on Reconnect ---
     useEffect(() => {
         if (!isLocal && (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN')) {
             const state = {
@@ -1128,7 +1228,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // Backup state to the current seat index
             socket.emit('backup_state', { room: roomId, seatIndex: mySeatIndex, state });
         }
-    }, [hand, library, graveyard, exile, commandZone, life, mySeatIndex, gamePhase, roomId]);
+    }, [hand, library, graveyard, exile, commandZone, life, mySeatIndex, gamePhase, roomId, isLocal]);
+
+    useEffect(() => {
+        if (!isLocal && mySeatIndex !== -1 && (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN')) {
+            // If we have a valid seat index and the game is running, request our state
+            socket.emit('request_state', { room: roomId, seatIndex: mySeatIndex });
+        }
+    }, [mySeatIndex, gamePhase, isLocal, roomId]);
 
     // Stats Helper
     const getMyId = () => isLocal ? playersList[mySeatIndex].id : socket.id;
@@ -1223,7 +1330,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const sortPlayers = (players: any[], order: string[]) => {
+    const sortPlayers = (players: Player[], order: string[]) => {
         if (!order || order.length === 0) return players;
         const orderMap = new Map(order.map((id, i) => [id, i]));
         return [...players].sort((a, b) => {
@@ -1236,7 +1343,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // --- Socket Logic ---
     useEffect(() => {
         if (isLocal) return;
-        const handleRoomUpdate = (data: any) => {
+        const handleRoomUpdate = (data: Player[] | { players: Player[], hostId: string | null }) => {
             const roomPlayers = Array.isArray(data) ? data : data.players;
             const hostId = !Array.isArray(data) ? data.hostId : null;
             
@@ -1331,7 +1438,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
 
-        const handleAction = ({ action, data, playerId }: { action: string, data: any, playerId: string }) => {
+        const handleAction = ({ action, data, playerId }: { action: string, data: { [key: string]: any }, playerId: string }) => {
              console.log(`Game Action Received: ${action} from ${playerId}`, data);
              const currentPlayers = playersListRef.current;
              const sender = currentPlayers.find(p => p.id === playerId);
@@ -2554,7 +2661,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     // --- Search / Tray / Library Action Helpers ---
-    const openSearch = (source: any, targetPlayerId?: string) => {
+    const openSearch = (source: SearchState['source'], targetPlayerId?: string) => {
         let items: any[] = [];
         let targetLibrary = library;
         let targetGraveyard = graveyard;
@@ -2597,7 +2704,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
     };
 
-    const handleTrayAction = (action: any) => {
+    type TrayAction = 'HAND' | 'HAND_REVEAL' | 'TOP' | 'BOTTOM' | 'GRAVEYARD' | 'EXILE' | 'SHUFFLE';
+
+    const handleTrayAction = (action: TrayAction) => {
         const trayCards = searchModal.tray;
         const trayIds = new Set(trayCards.map(c => c.id));
         if (trayCards.length === 0) return;
@@ -3377,6 +3486,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <Keyboard size={20} />
                     </button>
                     <button 
+                         onClick={() => setShowSettingsModal(true)}
+                         className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
+                         title="Settings"
+                    >
+                        <Settings size={20} />
+                    </button>
+                    <button 
                         onClick={() => setIsLogOpen(!isLogOpen)}
                         className={`p-2 rounded-lg transition-colors ${isLogOpen ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
                         title="Game Log"
@@ -3461,6 +3577,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     </div>
 
                     <div className="mt-auto space-y-3">
+                        <button onClick={() => {setShowSettingsModal(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings/> Settings</button>
                         <button onClick={() => {setIsLogOpen(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><History/> Game Log</button>
                         <button onClick={() => {setShowStatsModal(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><BarChart3/> Stats</button>
                         {isHost && <button onClick={() => {setShowPlayerManager(true); setMobileMenuOpen(false);}} className="w-full py-3 bg-blue-900/50 text-blue-200 rounded-xl font-bold flex items-center justify-center gap-2"><Shield/> Host Controls</button>}
@@ -4190,6 +4307,55 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     : {...opponentsLife, [socket.id]: life}}
                 commanderDamage={commanderDamage}
             />
+
+            {isMobile && isFullScreen && window.innerWidth > window.innerHeight && (
+                <button 
+                    onClick={toggleFullScreen} 
+                    className="fixed bottom-4 right-4 z-[10000] p-3 bg-red-600 text-white rounded-full shadow-lg animate-in fade-in"
+                    title="Exit Full Screen"
+                >
+                    <Minimize size={24} />
+                </button>
+            )}
+
+            {showSettingsModal && (
+                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                <Settings className="text-blue-400"/> Settings
+                            </h3>
+                            <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
+                                <label className="flex justify-between items-center cursor-pointer">
+                                    <div>
+                                        <h4 className="font-bold text-white">Force Mobile Controls</h4>
+                                        <p className="text-xs text-gray-400">Enable touch-friendly controls on desktop. May require refresh.</p>
+                                    </div>
+                                    <div 
+                                        onClick={() => setControlMode(prev => prev === 'auto' ? 'mobile' : 'auto')}
+                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${controlMode === 'mobile' ? 'bg-blue-600 justify-end' : 'bg-gray-600 justify-start'}`}
+                                    >
+                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isMobile && isFullScreen && window.innerWidth > window.innerHeight && (
+                <button 
+                    onClick={toggleFullScreen} 
+                    className="fixed bottom-4 right-4 z-[10000] p-3 bg-red-600 text-white rounded-full shadow-lg animate-in fade-in"
+                    title="Exit Full Screen"
+                >
+                    <Minimize size={24} />
+                </button>
+            )}
         </div>
     );
 };

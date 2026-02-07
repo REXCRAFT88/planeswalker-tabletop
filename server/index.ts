@@ -29,10 +29,13 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 interface Player {
-  id: string;
+  id: string; // socket.id
+  userId: string; // persistent user id
   name: string;
   room: string;
   color: string;
+  disconnected: boolean;
+  disconnectedAt?: number;
 }
 
 // Store room state in memory for now
@@ -42,7 +45,7 @@ const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
 const getSafeColor = (roomPlayers: Player[], requestedColor: string) => {
-    const usedColors = new Set(roomPlayers.map(p => p.color));
+    const usedColors = new Set(roomPlayers.filter(p => !p.disconnected).map(p => p.color));
     if (!usedColors.has(requestedColor)) return requestedColor;
     
     const FALLBACK_COLORS = [
@@ -61,10 +64,40 @@ io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join_room', ({ room, name, color, userId }) => {
-    // Check if game started
+    if (!rooms[room]) {
+        rooms[room] = [];
+    }
+
+    // Attempt to reconnect
+    if (userId) {
+        const existingPlayer = rooms[room].find(p => p.userId === userId);
+        if (existingPlayer) {
+            existingPlayer.disconnected = false;
+            existingPlayer.id = socket.id; // Update socket id
+            socket.join(room);
+
+            // If the reconnected player was the host, re-assign host role
+            if (roomMeta[room] && roomMeta[room].hostId === existingPlayer.userId) {
+                roomMeta[room].hostId = existingPlayer.id;
+            }
+            
+            io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
+            socket.emit('join_success', { 
+                room, 
+                playerId: socket.id,
+                userId: existingPlayer.userId,
+                isGameStarted: roomMeta[room]?.started || false 
+            });
+            console.log(`${existingPlayer.name} reconnected to room ${room}`);
+            return;
+        }
+    }
+    
+    // Check if game started for new players
     if (roomMeta[room]?.started) {
-        const host = rooms[room]?.[0];
-        if (host) {
+        const hostId = roomMeta[room].hostId;
+        const host = rooms[room].find(p => p.id === hostId);
+        if (host && !host.disconnected) {
             pendingJoins[socket.id] = { room, name, color, userId };
             io.to(host.id).emit('host_approval_request', { 
                 applicantId: socket.id, 
@@ -77,13 +110,20 @@ io.on('connection', (socket) => {
     }
 
     const assignedColor = getSafeColor(rooms[room] || [], color);
+    const newUserId = userId || socket.id + Date.now(); // Create a persistent ID
 
     socket.join(room);
     
-    const newPlayer: Player = { id: socket.id, name, room, color: assignedColor };
+    const newPlayer: Player = { 
+        id: socket.id, 
+        userId: newUserId,
+        name, 
+        room, 
+        color: assignedColor,
+        disconnected: false
+    };
     
-    if (!rooms[room]) {
-        rooms[room] = [];
+    if (rooms[room].length === 0) {
         roomMeta[room] = { started: false, hostId: socket.id };
     }
     
@@ -97,7 +137,8 @@ io.on('connection', (socket) => {
     // Emit success to the joiner
     socket.emit('join_success', { 
         room, 
-        playerId: socket.id, 
+        playerId: socket.id,
+        userId: newUserId,
         isGameStarted: roomMeta[room]?.started || false 
     });
 
@@ -113,16 +154,25 @@ io.on('connection', (socket) => {
 
       if (approved) {
           const assignedColor = getSafeColor(rooms[room] || [], pending.color);
+          const newUserId = pending.userId || applicantId + Date.now();
 
           applicantSocket.join(room);
-          const newPlayer: Player = { id: applicantId, name: pending.name, room, color: assignedColor };
+          const newPlayer: Player = { 
+              id: applicantId, 
+              userId: newUserId,
+              name: pending.name, 
+              room, 
+              color: assignedColor,
+              disconnected: false
+          };
           rooms[room].push(newPlayer);
           
           io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
           
           io.to(applicantId).emit('join_success', { 
               room, 
-              playerId: applicantId, 
+              playerId: applicantId,
+              userId: newUserId,
               isGameStarted: roomMeta[room]?.started || false 
           });
 
@@ -171,10 +221,9 @@ io.on('connection', (socket) => {
           
           const index = rooms[room].findIndex(p => p.id === targetId);
           if (index !== -1) {
-              const p = rooms[room][index];
               rooms[room].splice(index, 1);
               io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
-              io.to(room).emit('player_left', targetId);
+              io.to(room).emit('notification', { message: `Player has been kicked.`});
           }
       }
   });
@@ -188,14 +237,14 @@ io.on('connection', (socket) => {
               socket.leave(room);
               
               if (roomMeta[room] && roomMeta[room].hostId === socket.id) {
-                  roomMeta[room].hostId = rooms[room].length > 0 ? rooms[room][0].id : undefined;
+                  roomMeta[room].hostId = rooms[room].find(p => !p.disconnected)?.id;
               }
 
               io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
-              io.to(room).emit('player_left', player.id);
+              io.to(room).emit('notification', { message: `${player.name} left the room.` });
               console.log(`${player.name} left room ${room}`);
               
-              if (rooms[room].length === 0) {
+              if (rooms[room].every(p => p.disconnected)) {
                   delete rooms[room];
                   delete roomMeta[room];
               }
@@ -233,21 +282,44 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
-    // Remove player from their room
+    setTimeout(() => {
+        for (const room in rooms) {
+            const player = rooms[room].find(p => p.id === socket.id);
+            if (player && player.disconnected) {
+                console.log(`Permanently removing ${player.name} from room ${room}`);
+                rooms[room] = rooms[room].filter(p => p.userId !== player.userId);
+                
+                if (rooms[room].length === 0) {
+                    delete rooms[room];
+                    delete roomMeta[room];
+                    delete roomStates[room];
+                } else {
+                    io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
+                    io.to(room).emit('notification', { message: `${player.name} left the room.`});
+                }
+            }
+        }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    // Find player and mark as disconnected
     for (const room in rooms) {
-        const index = rooms[room].findIndex(p => p.id === socket.id);
-        if (index !== -1) {
-            const player = rooms[room][index];
-            rooms[room].splice(index, 1);
+        const player = rooms[room].find(p => p.id === socket.id);
+        if (player) {
+            player.disconnected = true;
+            player.disconnectedAt = Date.now();
             
+            // If the host disconnected, assign a new host
             if (roomMeta[room] && roomMeta[room].hostId === socket.id) {
-                roomMeta[room].hostId = rooms[room].length > 0 ? rooms[room][0].id : undefined;
+                const newHost = rooms[room].find(p => !p.disconnected);
+                if (newHost) {
+                    roomMeta[room].hostId = newHost.id;
+                }
             }
 
-            io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
-            io.to(room).emit('player_left', player.id);
+            io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
+            io.to(room).emit('notification', { message: `${player.name} disconnected. They have 5 minutes to reconnect.`});
             
-            if (rooms[room].length === 0) {
+            if (rooms[room].every(p => p.disconnected)) {
                 delete rooms[room];
                 delete roomMeta[room];
                 delete roomStates[room];

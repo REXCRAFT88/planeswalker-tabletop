@@ -150,7 +150,10 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
   const searchTokensFunc = async () => {
       if (!tokenQuery) return;
       setIsSearchingTokens(true);
-      const results = await searchCards(tokenQuery + " t:token");
+      let results = await searchCards(tokenQuery + " t:token");
+      if (results.length === 0) {
+        results = await searchCards(tokenQuery);
+      }
       setTokenResults(results.map(c => ({...c, isToken: true})));
       setIsSearchingTokens(false);
   };

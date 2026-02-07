@@ -44,14 +44,24 @@ export const Lobby: React.FC<LobbyProps> = ({
   // Library State
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [editingDeck, setEditingDeck] = useState<SavedDeck | null>(null);
+  const [isEditingTokens, setIsEditingTokens] = useState(false);
+  const [tokenImportText, setTokenImportText] = useState('');
+  const [isImportingTokens, setIsImportingTokens] = useState(false);
+  const [tokenImportError, setTokenImportError] = useState<string | null>(null);
 
   // Auto-join if session exists
   useEffect(() => {
       const activeSession = sessionStorage.getItem('active_game_session');
       if (activeSession && playerName && savedDeckCount > 0 && !hasAutoAttempted.current) {
-          hasAutoAttempted.current = true;
-          setPendingSessionId(activeSession);
-          setShowReconnectModal(true);
+          // If there is a userId for this session, we can try to reconnect.
+          if (getUserIdForRoom(activeSession)) {
+              hasAutoAttempted.current = true;
+              setPendingSessionId(activeSession);
+              setShowReconnectModal(true);
+          } else {
+              // Stale session with no user ID, clear it.
+              sessionStorage.removeItem('active_game_session');
+          }
       }
   }, [playerName, savedDeckCount]);
 
@@ -73,13 +83,45 @@ export const Lobby: React.FC<LobbyProps> = ({
       localStorage.setItem('planeswalker_tokens', JSON.stringify(currentTokens));
   }, [currentTokens]);
 
-  const getUserId = () => {
-      let id = localStorage.getItem('planeswalker_user_id');
-      if (!id) {
-          id = crypto.randomUUID();
-          localStorage.setItem('planeswalker_user_id', id);
-      }
-      return id;
+  const getUserIdForRoom = (room: string) => {
+      return localStorage.getItem(`planeswalker_user_id_${room}`);
+  };
+
+  const handleTokenImport = async () => {
+    setIsImportingTokens(true);
+    setTokenImportError(null);
+    const parsed = parseDeckList(tokenImportText);
+    
+    if (parsed.length === 0) {
+      setTokenImportError("No cards found in list.");
+      setIsImportingTokens(false);
+      return;
+    }
+
+    const uniqueNames = parsed.map(p => p.name);
+
+    try {
+        // Here, we don't care about type, as any card can be a token.
+        const cardMap = await fetchBatch(uniqueNames);
+        const newTokens: CardData[] = [];
+        for (const item of parsed) {
+            let data = cardMap.get(item.name.toLowerCase());
+            if (data) {
+                for (let i = 0; i < item.count; i++) {
+                    newTokens.push({ ...data, id: crypto.randomUUID(), isToken: true });
+                }
+            }
+        }
+        // Replace instead of append, to make it a manager
+        onTokensChange(newTokens);
+        setTokenImportText('');
+        setIsEditingTokens(false);
+    } catch (e) {
+        console.error(e);
+        setTokenImportError("Failed to load tokens from list.");
+    } finally {
+        setIsImportingTokens(false);
+    }
   };
 
   const joinRoom = (code: string) => {
@@ -101,7 +143,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     socket.off('join_success');
 
     const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
-    socket.emit('join_room', { room: code, name: playerName, color: randomColor, userId: getUserId() });
+    const userId = getUserIdForRoom(code);
+    socket.emit('join_room', { room: code, name: playerName, color: randomColor, userId });
     
     socket.on('join_error', ({ message }) => {
         alert(message);
@@ -114,7 +157,10 @@ export const Lobby: React.FC<LobbyProps> = ({
         setJoinStatus(message);
     });
 
-    socket.on('join_success', ({ room, isGameStarted }) => {
+    socket.on('join_success', ({ room, isGameStarted, userId }) => {
+        if (userId) {
+            localStorage.setItem(`planeswalker_user_id_${room}`, userId);
+        }
         setIsJoining(false);
         onJoin(room, isGameStarted);
     });
@@ -128,6 +174,9 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   const handleNewSession = () => {
+      if (pendingSessionId) {
+          localStorage.removeItem(`planeswalker_user_id_${pendingSessionId}`);
+      }
       sessionStorage.removeItem('active_game_session');
       setPendingSessionId(null);
       setShowReconnectModal(false);
@@ -144,6 +193,13 @@ export const Lobby: React.FC<LobbyProps> = ({
           alert("Please import a deck first!");
           return;
       }
+
+      // If no deck is active, load the most recent one.
+      if (activeDeck.length === 0 && savedDecks.length > 0) {
+          const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+          onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens);
+      }
+      
       onLocalGame();
   };
 
@@ -321,16 +377,40 @@ export const Lobby: React.FC<LobbyProps> = ({
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-full md:h-auto">
                   <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                      <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500"/> Deck Library</h3>
-                      <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); }} className="text-gray-400 hover:text-white"><X size={20}/></button>
+                      <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500"/> {isEditingTokens ? 'Manage Global Tokens' : 'Deck Library'}</h3>
+                      <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); setIsEditingTokens(false); }} className="text-gray-400 hover:text-white"><X size={20}/></button>
                   </div>
                   
                   <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                      {!editingDeck ? (
+                      {isEditingTokens ? (
+                          <div className="p-4 flex flex-col gap-4 h-full">
+                              <h4 className="text-sm font-bold text-gray-400">Paste Token List</h4>
+                              <textarea
+                                  className="flex-1 w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                  placeholder={`1 Goblin\n2 Treasure\n1 Food...`}
+                                  value={tokenImportText}
+                                  onChange={(e) => setTokenImportText(e.target.value)}
+                                  disabled={isImportingTokens}
+                              />
+                              {tokenImportError && <p className="text-red-400 text-xs">{tokenImportError}</p>}
+                              <div className="flex justify-end gap-4">
+                                  <button onClick={() => setIsEditingTokens(false)} className="text-gray-400 hover:text-white">Cancel</button>
+                                  <button onClick={handleTokenImport} disabled={isImportingTokens} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
+                                      {isImportingTokens ? <Loader className="animate-spin" size={16}/> : <Check size={16}/>}
+                                      {isImportingTokens ? 'Loading...' : 'Save Tokens'}
+                                  </button>
+                              </div>
+                          </div>
+                      ) : !editingDeck ? (
                           <div className="p-4 overflow-y-auto custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4 pb-32">
-                              <button onClick={handleCreateNewDeck} className="col-span-full flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
-                                  <Plus size={20}/> Create New Deck
-                              </button>
+                              <div className="col-span-full flex flex-col md:flex-row gap-2">
+                                <button onClick={handleCreateNewDeck} className="flex-1 flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
+                                    <Plus size={20}/> Create New Deck
+                                </button>
+                                <button onClick={() => setIsEditingTokens(true)} className="flex-1 flex items-center justify-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
+                                    <Layers size={20}/> Manage Global Tokens
+                                </button>
+                              </div>
                               
                               {savedDecks.map(deck => {
                                   const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
@@ -349,9 +429,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                   </button>
                                                   <button onClick={() => handleEditDeck(deck)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
                                                       <Edit3 size={12}/> Edit
-                                                  </button>
-                                                  <button onClick={() => setEditingDeck(deck)} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                      <Layers size={12}/> Tokens
                                                   </button>
                                                   <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
                                                       <Trash2 size={12}/>
