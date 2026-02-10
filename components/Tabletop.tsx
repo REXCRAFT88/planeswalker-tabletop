@@ -144,15 +144,9 @@ const getLayout = (totalPlayers: number, radius: number) => {
     return configs;
 };
 
-const getSeatMapping = (playerIndex: number, totalPlayers: number): number => {
-    if (totalPlayers === 2) {
-        return playerIndex === 0 ? 0 : 2;
-    }
-    return playerIndex;
-};
 
-const seatPositions = getLayout(6, 625);
-const SEAT_ROTATIONS = seatPositions.map(p => p.rot);
+
+
 
 // Zone Offsets (Relative to Mat Top-Left)
 const ZONE_OFFSET_X = MAT_W + 30;
@@ -1619,8 +1613,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const seatIdx = playersList.findIndex(p => p.id === playerId);
         if (seatIdx === -1) return { inset: 0 };
 
-        const seatPosIdx = getSeatMapping(seatIdx, playersList.length);
-        const rotation = SEAT_ROTATIONS[seatPosIdx] || 0;
+        const layout = getLayout(playersList.length, (playersList.length === 2 || (isLocal && localOpponents.length === 1)) ? 210 : 625); // Need layout here if not using hook
+        const rotation = layout[seatIdx]?.rot || 0;
 
         if (rotation === 0) return { inset: 0 };
 
@@ -1762,7 +1756,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 console.log("New/reconnected player joined game in progress, syncing state...");
 
                 let currentTurnOrder = [...turnOrderRef.current];
-                const reconMap = reconnectedPlayerMap.current;
+                const reconMap = { ...reconnectedPlayerMap.current };
+
+                // Robustly detect reconnections via userId matching
+                newPlayers.forEach(np => {
+                    // Check if this user was already in the game with a different ID
+                    const oldP = prevPlayers.find(p => p.userId === np.userId && p.id !== np.id);
+                    if (oldP) {
+                        reconMap[oldP.id] = np.id;
+                        console.log(`Host inferred reconnection: ${oldP.id} -> ${np.id} (User: ${np.name})`);
+                    }
+                });
+
+                // Update Ref for consistency
+                Object.assign(reconnectedPlayerMap.current, reconMap);
 
                 // For reconnected players, remap their old socket IDs in turn order
                 // For truly new players, add them to the end
@@ -1780,8 +1787,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                 // Remap board object controller IDs for reconnected players
                 let safeBoardObjects = boardObjectsRef.current.map(obj => {
-                    let controllerId = obj.controllerId === 'local-player' ? socket.id : obj.controllerId;
+                    let controllerId = obj.controllerId;
+
+                    // Normalize 'local-player' to Host ID if it slipped in, though usually it shouldn't for remote objects 
+                    // But here we are Host processing our own state too? 
+                    // No, boardObjectsRef contains the canonical state. 
+                    // If Host was 'local-player' locally, it should be socket.id in shared state.
+                    if (controllerId === 'local-player') controllerId = socket.id;
+
                     // Check if the controller was a reconnected player
+                    // Logic: If the object was controlled by OldID, it is now NewID
+                    // We check if the KEY of reconMap matches the current controllerId
                     if (reconMap[controllerId]) {
                         controllerId = reconMap[controllerId];
                     }
@@ -1799,11 +1815,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 // Remap commander damage keys
                 let syncCommanderDamage = { ...commanderDamageRef.current };
                 for (const [oldId, newId] of Object.entries(reconMap)) {
+                    // Remap Source keys
                     if (syncCommanderDamage[oldId]) {
                         syncCommanderDamage[newId] = syncCommanderDamage[oldId];
                         delete syncCommanderDamage[oldId];
                     }
-                    // Also remap inner keys
+                    // Remap Victim keys (inner objects)
                     for (const key of Object.keys(syncCommanderDamage)) {
                         const inner = syncCommanderDamage[key];
                         if (inner && typeof inner === 'object' && inner[oldId] !== undefined) {
@@ -1833,7 +1850,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 // Clear the reconnected map entries we've processed
                 for (const np of newPlayers) {
                     const oldId = Object.keys(reconMap).find(k => reconMap[k] === np.id);
-                    if (oldId) delete reconMap[oldId];
+                    if (oldId) delete reconnectedPlayerMap.current[oldId];
                 }
             }
 
@@ -2215,7 +2232,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         }
 
-        const matCenterY = seatPositions[0].y + MAT_H / 2;
+        const validLayout = getLayout(Math.max(playersList.length, 6), 625);
+        const matCenterY = validLayout[0].y + MAT_H / 2;
         const isMobile = window.innerWidth < 768;
         const startScale = isMobile ? 0.5 : 0.8;
         setView({
@@ -2233,9 +2251,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             const targetPlayer = opponents[selectedOpponentIndex % opponents.length];
             const targetSeatIndex = playersList.findIndex(p => p.id === targetPlayer.id);
-            const targetSeatPosIndex = getSeatMapping(targetSeatIndex, playersList.length);
-            const targetPos = seatPositions[targetSeatPosIndex];
-            const targetRot = SEAT_ROTATIONS[targetSeatPosIndex];
+            const targetPos = layout[targetSeatIndex];
+            if (!targetPos) return;
+            const targetRot = targetPos.rot;
 
             const targetX = targetPos.x + MAT_W / 2;
             const targetY = targetPos.y + MAT_H / 2;
@@ -2546,8 +2564,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const playerIdx = playersList.findIndex(p => p.id === playerId);
         if (playerIdx === -1) return;
 
-        const seatIdx = getSeatMapping(playerIdx, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[playerIdx];
+        if (!myPos) return;
+
         const defaultX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const defaultY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
 
@@ -2556,7 +2575,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             x: defaultX + (Math.random() * 40 - 20),
             y: defaultY + (Math.random() * 40 - 20),
             z: maxZ + 1,
-            rotation: SEAT_ROTATIONS[seatIdx],
+            rotation: myPos.rot,
             isFaceDown: false, isTransformed: false,
             counters: {}, commanderDamage: {}, controllerId: playerId,
             quantity: 1, tappedQuantity: 0
@@ -2794,6 +2813,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             });
             updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
         }
+
+        // Optimistic update
+        setCurrentTurnPlayerId(nextPlayer.id);
+        setTurn(nextTurnNum);
+        setTurnStartTime(Date.now());
+
         checkDamageTracking();
         damageTakenThisTurn.current = 0;
         healingReceivedThisTurn.current = 0;
@@ -2807,8 +2832,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const untapAll = () => {
-        const mySeatPosIndex = getSeatMapping(mySeatIndex, playersList.length);
-        const myDefaultRotation = SEAT_ROTATIONS[mySeatPosIndex];
+        const myDefaultRotation = layout[mySeatIndex]?.rot || 0;
         const myId = isLocal ? playersList[mySeatIndex].id : (socket.id || 'local-player');
 
         const myCards = boardObjects.filter(o => o.controllerId === myId && (o.tappedQuantity > 0 || o.rotation !== myDefaultRotation));
@@ -2960,15 +2984,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const playCardFromHand = (card: CardData, spawnX?: number, spawnY?: number) => {
-        const seatIdx = getSeatMapping(mySeatIndex, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[mySeatIndex];
+        if (!myPos) return;
         const defaultX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const defaultY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
             x: spawnX ?? (defaultX + (Math.random() * 40 - 20)),
             y: spawnY ?? (defaultY + (Math.random() * 40 - 20)),
-            z: maxZ + 1, rotation: isLocal ? SEAT_ROTATIONS[seatIdx] : SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
+            z: maxZ + 1, rotation: myPos.rot, isFaceDown: false, isTransformed: false,
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
@@ -2981,8 +3005,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const spawnCounter = () => {
-        const seatIdx = getSeatMapping(mySeatIndex, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[mySeatIndex];
+        if (!myPos) return;
         const defaultX = myPos.x + MAT_W / 2 - 20;
         const defaultY = myPos.y + MAT_H / 2 - 20;
         const newObject: BoardObject = {
@@ -3031,13 +3055,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const playCommander = (card: CardData) => {
         setCommandZone(prev => prev.filter(c => c.id !== card.id));
-        const seatIdx = getSeatMapping(mySeatIndex, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[mySeatIndex];
+        if (!myPos) return;
         const defaultX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const defaultY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
-            x: defaultX, y: defaultY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
+            x: defaultX, y: defaultY, z: maxZ + 1, rotation: myPos.rot, isFaceDown: false, isTransformed: false,
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
@@ -3087,13 +3111,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (library.length === 0) return;
         const card = library[0];
         setLibrary(prev => prev.slice(1));
-        const seatIdx = getSeatMapping(mySeatIndex, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[mySeatIndex];
+        if (!myPos) return;
         const spawnX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const spawnY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
-            x: spawnX, y: spawnY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
+            x: spawnX, y: spawnY, z: maxZ + 1, rotation: myPos.rot, isFaceDown: false, isTransformed: false,
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
@@ -3108,13 +3132,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (graveyard.length === 0) return;
         const card = graveyard[0];
         setGraveyard(prev => prev.slice(1));
-        const seatIdx = getSeatMapping(mySeatIndex, playersList.length);
-        const myPos = seatPositions[seatIdx];
+        const myPos = layout[mySeatIndex];
+        if (!myPos) return;
         const spawnX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const spawnY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
         const newObject: BoardObject = {
             id: crypto.randomUUID(), type: 'CARD', cardData: card,
-            x: spawnX, y: spawnY, z: maxZ + 1, rotation: SEAT_ROTATIONS[seatIdx], isFaceDown: false, isTransformed: false,
+            x: spawnX, y: spawnY, z: maxZ + 1, rotation: myPos.rot, isFaceDown: false, isTransformed: false,
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
@@ -3156,8 +3180,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const rollerIdx = playersList.findIndex(p => p.id === rollerId);
         if (rollerIdx === -1) return;
 
-        const seatIdx = getSeatMapping(rollerIdx, playersList.length);
-        const pos = seatPositions[seatIdx];
+        const pos = layout[rollerIdx];
+        if (!pos) return;
         const x = pos.x + MAT_W / 2;
         const y = pos.y + MAT_H / 2;
 
@@ -3188,9 +3212,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const checkZoneCollision = (cardX: number, cardY: number, playerIndex: number, zoneType: 'LIBRARY' | 'GRAVEYARD' | 'EXILE' | 'COMMAND' | 'MAT') => {
-        const seatIndex = getSeatMapping(playerIndex, playersList.length);
-        const matPos = seatPositions[seatIndex];
-        const rotation = SEAT_ROTATIONS[seatIndex];
+        const matPos = layout[playerIndex];
+        if (!matPos) return false;
+        const rotation = matPos.rot;
         const matW = MAT_W;
         const matH = MAT_H;
         const matCenterX = matPos.x + matW / 2;
@@ -3257,9 +3281,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (i === mySeatIndex && !isLocal) continue;
             if (checkZoneCollision(x, y, i, 'MAT')) {
                 const targetPlayer = playersList[i];
-                const targetSeatIdx = getSeatMapping(i, playersList.length);
+
                 if (obj.controllerId !== targetPlayer.id) {
-                    updateBoardObject(id, { controllerId: targetPlayer.id, rotation: SEAT_ROTATIONS[targetSeatIdx] });
+                    updateBoardObject(id, { controllerId: targetPlayer.id, rotation: layout[i]?.rot || 0 });
                     addLog(`gave control of ${obj.cardData.name} to ${targetPlayer.name}`);
                 }
                 return;
@@ -3269,8 +3293,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Check My Mat for regaining control
         if (checkZoneCollision(x, y, mySeatIndex, 'MAT')) {
             if (!isLocal && obj.controllerId !== socket.id && obj.controllerId !== 'local-player') {
-                const mySeatIdx = getSeatMapping(mySeatIndex, playersList.length);
-                updateBoardObject(id, { controllerId: socket.id || 'local-player', rotation: SEAT_ROTATIONS[mySeatIdx] });
+                updateBoardObject(id, { controllerId: socket.id || 'local-player', rotation: layout[mySeatIndex]?.rot || 0 });
                 addLog(`regained control of ${obj.cardData.name}`);
                 return;
             }
@@ -3841,7 +3864,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const tokensInHand = hand.filter(c => c.isToken);
     const cardsInHandWithShortcuts = cardsInHand.map((c, i) => ({ ...c, shortcutKey: i < 9 ? `${i + 1}` : i === 9 ? '0' : undefined }));
 
-    const mySeatPosIndex = getSeatMapping(mySeatIndex, playersList.length);
+
 
     return (
         <div
@@ -4340,7 +4363,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         onMove: handleContainerPointerMove,
                         onUp: handleContainerPointerUp,
                         onWheel: handleWheel
-                    }, -SEAT_ROTATIONS[mySeatPosIndex], false)}
+                    }, -(layout[mySeatIndex]?.rot || 0), false)}
 
                     {/* Controls Overlay (Zoom) */}
                     <div className="absolute top-4 right-4 flex flex-col gap-2 z-10 hidden md:flex">
@@ -4526,9 +4549,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 const opponents = playersList.filter(p => p.id !== socket.id);
                                 if (opponents.length === 0) return null;
                                 const targetPlayer = opponents[selectedOpponentIndex % opponents.length];
-                                const targetSeatIndex = playersList.findIndex(p => p.id === targetPlayer.id);
-                                const targetSeatPosIndex = getSeatMapping(targetSeatIndex, playersList.length);
-                                const targetRot = SEAT_ROTATIONS[targetSeatPosIndex];
+                                const targetIndex = playersList.findIndex(p => p.id === targetPlayer.id);
+                                const targetRot = layout[targetIndex]?.rot || 0;
 
                                 return renderWorld(opponentView, opponentContainerRef, {
                                     onDown: handleOpponentPointerDown,
