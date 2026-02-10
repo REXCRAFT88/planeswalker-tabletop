@@ -100,41 +100,43 @@ const getLayout = (totalPlayers: number, radius: number) => {
         // Extra spacing to prevent zone overlap (library/graveyard/exile/command extend ~280px to the right of each mat)
         const sideDist = MAT_W + 350; // Distance from center to side mat (enough for zones)
         const longDist = 750; // Vertical distance from center to top/bottom rows
+        const pairGap = 300; // Extra gap between paired mats to prevent deck/zone overlap
 
-        // Bottom row: 2 mats side by side
+        // Bottom row: 2 mats spaced apart
         // Mat 0: Bottom Right
-        configs.push({ x: MAT_GAP / 2, y: longDist - MAT_H / 2, rot: 0 });
+        configs.push({ x: pairGap / 2, y: longDist - MAT_H / 2, rot: 0 });
         // Mat 1: Bottom Left
-        configs.push({ x: -MAT_W - MAT_GAP / 2, y: longDist - MAT_H / 2, rot: 0 });
+        configs.push({ x: -MAT_W - pairGap / 2, y: longDist - MAT_H / 2, rot: 0 });
 
         // Left end: 1 mat rotated 90°
         configs.push({ x: -sideDist - MAT_W / 2, y: -MAT_H / 2, rot: 90 });
 
-        // Top row: 2 mats side by side (rotated 180°)
+        // Top row: 2 mats spaced apart (rotated 180°)
         // Mat 3: Top Left
-        configs.push({ x: -MAT_W - MAT_GAP / 2, y: -longDist - MAT_H / 2, rot: 180 });
+        configs.push({ x: -MAT_W - pairGap / 2, y: -longDist - MAT_H / 2, rot: 180 });
         // Mat 4: Top Right
-        configs.push({ x: MAT_GAP / 2, y: -longDist - MAT_H / 2, rot: 180 });
+        configs.push({ x: pairGap / 2, y: -longDist - MAT_H / 2, rot: 180 });
     } else {
         // 6-Player Layout: 2 on bottom, 1 on left end, 2 on top, 1 on right end
         // Extra spacing to prevent zone overlap
         const sideDist = MAT_W + 350; // Distance from center to side mats (enough for zones)
         const longDist = 750; // Vertical distance from center to top/bottom rows
+        const pairGap = 300; // Extra gap between paired mats to prevent deck/zone overlap
 
-        // Bottom row: 2 mats side by side
+        // Bottom row: 2 mats spaced apart
         // Mat 0: Bottom Right
-        configs.push({ x: MAT_GAP / 2, y: longDist - MAT_H / 2, rot: 0 });
+        configs.push({ x: pairGap / 2, y: longDist - MAT_H / 2, rot: 0 });
         // Mat 1: Bottom Left
-        configs.push({ x: -MAT_W - MAT_GAP / 2, y: longDist - MAT_H / 2, rot: 0 });
+        configs.push({ x: -MAT_W - pairGap / 2, y: longDist - MAT_H / 2, rot: 0 });
 
         // Left end: 1 mat rotated 90°
         configs.push({ x: -sideDist - MAT_W / 2, y: -MAT_H / 2, rot: 90 });
 
-        // Top row: 2 mats side by side (rotated 180°)
+        // Top row: 2 mats spaced apart (rotated 180°)
         // Mat 3: Top Left
-        configs.push({ x: -MAT_W - MAT_GAP / 2, y: -longDist - MAT_H / 2, rot: 180 });
+        configs.push({ x: -MAT_W - pairGap / 2, y: -longDist - MAT_H / 2, rot: 180 });
         // Mat 4: Top Right
-        configs.push({ x: MAT_GAP / 2, y: -longDist - MAT_H / 2, rot: 180 });
+        configs.push({ x: pairGap / 2, y: -longDist - MAT_H / 2, rot: 180 });
 
         // Right end: 1 mat rotated -90°
         configs.push({ x: sideDist - MAT_W / 2, y: -MAT_H / 2, rot: -90 });
