@@ -1,206 +1,395 @@
 import React, { useState, useEffect } from 'react';
-import { CardData, CustomManaRules } from '../types';
-import { MANA_COLORS as colors } from '../services/mana';
-import { X, Save, RotateCw, Hand, Zap, Infinity, Clock, PlayCircle, Plus } from 'lucide-react';
+import { X, RotateCcw, Plus, Minus, Info } from 'lucide-react';
+import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 
-interface ManaRulesModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    card: CardData | null;
-    onSave: (rules: CustomManaRules) => void;
-}
+const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
 
-const DEFAULT_RULES: CustomManaRules = {
-    trigger: 'tap',
-    costType: 'none',
-    cost: {},
-    calculationType: 'fixed',
-    calculationDetail: { multiplier: 1 },
-    producedMana: ['C'],
-    persistence: 'none',
-    autoTap: true,
-    priority: 3
+const getIconPath = (type: string) => {
+    switch (type) {
+        case 'W': return '/mana/white.png';
+        case 'U': return '/mana/blue.png';
+        case 'B': return '/mana/black.png';
+        case 'R': return '/mana/red.png';
+        case 'G': return '/mana/green.png';
+        case 'C': return '/mana/colorless.png';
+        default: return '/mana/colorless.png';
+    }
 };
 
-export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ isOpen, onClose, card, onSave }) => {
-    const [rules, setRules] = useState<CustomManaRules>(DEFAULT_RULES);
+const MANA_LABELS: Record<ManaColor, string> = {
+    W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless'
+};
 
-    useEffect(() => {
-        if (isOpen && card) {
-            setRules(card.customManaRules || DEFAULT_RULES);
-        }
-    }, [isOpen, card]);
+interface ManaRulesModalProps {
+    card: CardData;
+    existingRule?: ManaRule;
+    onSave: (rule: ManaRule | null) => void; // null = reset to default
+    onClose: () => void;
+}
 
-    if (!isOpen || !card) return null;
+// Mana icon + count with +/- buttons
+const ManaCounter: React.FC<{
+    color: ManaColor;
+    value: number;
+    onChange: (val: number) => void;
+    min?: number;
+}> = ({ color, value, onChange, min = 0 }) => (
+    <div className="flex flex-col items-center gap-1">
+        <button
+            onClick={() => onChange(value + 1)}
+            className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white text-xs"
+        >
+            <Plus size={12} />
+        </button>
+        <div className="relative w-9 h-9">
+            <img src={getIconPath(color)} alt={color} className="w-full h-full object-contain drop-shadow-md" />
+            {value > 0 && (
+                <span className="absolute -bottom-1 -right-1 bg-amber-500 text-black text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                    {value}
+                </span>
+            )}
+        </div>
+        <button
+            onClick={() => onChange(Math.max(min, value - 1))}
+            className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white text-xs"
+        >
+            <Minus size={12} />
+        </button>
+    </div>
+);
 
-    const handleMultiplierChange = (idx: number, color: string) => {
-        const newProduced = [...rules.producedMana];
-        newProduced[idx] = color;
-        setRules({ ...rules, producedMana: newProduced });
+// Radio group helper
+const RadioGroup: React.FC<{
+    options: { value: string; label: string; desc?: string }[];
+    selected: string;
+    onChange: (val: any) => void;
+}> = ({ options, selected, onChange }) => (
+    <div className="flex flex-wrap gap-2">
+        {options.map(opt => (
+            <button
+                key={opt.value}
+                onClick={() => onChange(opt.value)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${selected === opt.value
+                        ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/30'
+                        : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-gray-500'
+                    }`}
+                title={opt.desc}
+            >
+                {opt.label}
+            </button>
+        ))}
+    </div>
+);
+
+export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, onSave, onClose }) => {
+    const [rule, setRule] = useState<ManaRule>(() => {
+        if (existingRule) return { ...existingRule };
+        return { ...EMPTY_MANA_RULE };
+    });
+
+    const [hasAlt, setHasAlt] = useState(!!rule.producedAlt);
+
+    const updateRule = <K extends keyof ManaRule>(key: K, value: ManaRule[K]) => {
+        setRule(prev => ({ ...prev, [key]: value }));
     };
 
-    const addProduced = () => setRules({ ...rules, producedMana: [...rules.producedMana, 'C'] });
-    const removeProduced = (idx: number) => setRules({ ...rules, producedMana: rules.producedMana.filter((_, i) => i !== idx) });
+    const updateProduced = (color: ManaColor, value: number) => {
+        setRule(prev => ({
+            ...prev,
+            produced: { ...prev.produced, [color]: Math.max(0, value) }
+        }));
+    };
+
+    const updateProducedAlt = (color: ManaColor, value: number) => {
+        setRule(prev => ({
+            ...prev,
+            producedAlt: { ...(prev.producedAlt || { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }), [color]: Math.max(0, value) }
+        }));
+    };
+
+    const updateActivationCost = (color: ManaColor, value: number) => {
+        setRule(prev => ({
+            ...prev,
+            activationCost: { ...prev.activationCost, [color]: Math.max(0, value) }
+        }));
+    };
+
+    const toggleAlt = () => {
+        if (hasAlt) {
+            setHasAlt(false);
+            setRule(prev => ({ ...prev, producedAlt: undefined }));
+        } else {
+            setHasAlt(true);
+            setRule(prev => ({
+                ...prev,
+                producedAlt: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }
+            }));
+        }
+    };
+
+    const handleSave = () => {
+        onSave(rule);
+        onClose();
+    };
+
+    const handleReset = () => {
+        onSave(null); // null = remove custom rule
+        onClose();
+    };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="bg-gray-800 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-gray-800 border border-gray-600 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                    <h2 className="text-xl font-bold flex items-center gap-2 text-white">
-                        <Zap className="text-yellow-500" />
-                        Mana Rules: <span className="text-blue-400">{card.name}</span>
-                    </h2>
-                    <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded-full text-gray-400 hover:text-white transition-colors">
-                        <X size={24} />
+                <div className="p-4 border-b border-gray-700 bg-gray-900 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-14 bg-black rounded overflow-hidden flex-shrink-0">
+                            <img src={card.imageUrl} className="w-full h-full object-cover" alt={card.name} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-white text-lg">Mana Rules</h3>
+                            <p className="text-sm text-gray-400">{card.name}</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white p-1">
+                        <X size={20} />
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto space-y-6 text-gray-200 flex-1 custom-scrollbar">
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
 
-                    {/* Trigger Section */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-bold uppercase text-gray-500 tracking-wider">Activation Trigger</label>
-                        <div className="grid grid-cols-3 gap-3">
-                            {[
-                                { id: 'tap', label: 'On Tap', icon: RotateCw },
-                                { id: 'activated', label: 'Activated Ability', icon: Hand },
-                                { id: 'passive', label: 'Passive / State', icon: Infinity }
-                            ].map((opt) => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => setRules({ ...rules, trigger: opt.id as any })}
-                                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all ${rules.trigger === opt.id ? 'border-blue-500 bg-blue-900/20 text-white' : 'border-gray-700 bg-gray-800 hover:border-gray-600 text-gray-400'}`}
-                                >
-                                    <opt.icon size={24} />
-                                    <span className="font-bold text-sm">{opt.label}</span>
-                                </button>
-                            ))}
+                    {/* Section 1: Activation Trigger */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Activation Trigger</h4>
+                        <RadioGroup
+                            options={[
+                                { value: 'tap', label: '⟳ When Tapped', desc: 'Mana produced when this card is tapped' },
+                                { value: 'activated', label: '⚡ When Activated', desc: 'Mana produced when player presses mana button' },
+                                { value: 'passive', label: '🔵 Passive', desc: 'Mana auto-added when card is on the battlefield' },
+                            ]}
+                            selected={rule.trigger}
+                            onChange={(v) => updateRule('trigger', v)}
+                        />
+                    </div>
+
+                    {/* Section 2: Activation Cost */}
+                    {rule.trigger === 'activated' && (
+                        <div>
+                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Activation Cost</h4>
+                            <p className="text-[11px] text-gray-500 mb-3">Mana required to activate this ability</p>
+                            <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
+                                {MANA_COLORS.map(color => (
+                                    <ManaCounter
+                                        key={color}
+                                        color={color}
+                                        value={rule.activationCost[color]}
+                                        onChange={(v) => updateActivationCost(color, v)}
+                                    />
+                                ))}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* Calculation Type */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-bold uppercase text-gray-500 tracking-wider">Mana Calculation</label>
-                        <select
-                            value={rules.calculationType}
-                            onChange={(e) => setRules({ ...rules, calculationType: e.target.value as any })}
-                            className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                        >
-                            <option value="fixed">Fixed Amount (e.g. Sol Ring)</option>
-                            <option value="counters">Based on Counters (e.g. Shrine of Boundless Growth)</option>
-                            <option value="creatures">Based on Creatures (e.g. Elvish Archdruid)</option>
-                            <option value="basic_lands">Based on Basic Lands (e.g. Cabal Coffers)</option>
-                            <option value="custom_multiplier">Custom Multiplier</option>
-                        </select>
-
-                        {/* Detail Inputs based on Type */}
-                        {rules.calculationType === 'creatures' && (
-                            <input
-                                placeholder="Creature Type (e.g. Elf) - leave empty for all"
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                value={rules.calculationDetail?.creatureType || ''}
-                                onChange={e => setRules({ ...rules, calculationDetail: { ...rules.calculationDetail, creatureType: e.target.value } })}
-                            />
-                        )}
-                        {rules.calculationType === 'counters' && (
-                            <input
-                                placeholder="Counter Type (e.g. +1/+1, charge)"
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                value={rules.calculationDetail?.counterType || ''}
-                                onChange={e => setRules({ ...rules, calculationDetail: { ...rules.calculationDetail, counterType: e.target.value } })}
-                            />
-                        )}
-                        {rules.calculationType === 'custom_multiplier' && (
-                            <input
-                                type="number"
-                                placeholder="Multiplier (e.g. 2 for doublers)"
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                value={rules.calculationDetail?.multiplier || 1}
-                                onChange={e => setRules({ ...rules, calculationDetail: { ...rules.calculationDetail, multiplier: parseFloat(e.target.value) } })}
-                            />
+                    {/* Section 3: Mana Calculation */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Calculation</h4>
+                        <p className="text-[11px] text-gray-500 mb-3">How the amount of mana to produce is determined</p>
+                        <RadioGroup
+                            options={[
+                                { value: 'set', label: 'Set Value', desc: 'Produces a fixed amount' },
+                                { value: 'counters', label: '× Counters', desc: 'Amount = +1/+1 counters on this card' },
+                                { value: 'creatures', label: '× Creatures', desc: 'Amount = creature cards you control' },
+                                { value: 'basicLands', label: '× Basic Lands', desc: 'Amount = basic lands you control' },
+                            ]}
+                            selected={rule.calcMode}
+                            onChange={(v) => updateRule('calcMode', v)}
+                        />
+                        {rule.calcMode !== 'set' && (
+                            <div className="mt-3 flex items-center gap-3">
+                                <label className="text-sm text-gray-300">Multiplier:</label>
+                                <input
+                                    type="number"
+                                    value={rule.calcMultiplier}
+                                    onChange={(e) => updateRule('calcMultiplier', Math.max(1, parseFloat(e.target.value) || 1))}
+                                    className="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-center"
+                                    min={1}
+                                    step={1}
+                                />
+                                <span className="text-xs text-gray-500">× {rule.calcMode}</span>
+                            </div>
                         )}
                     </div>
 
-                    {/* Produced Mana */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-bold uppercase text-gray-500 tracking-wider">Produced Mana Types</label>
-                        <div className="flex flex-wrap gap-2">
-                            {rules.producedMana.map((color, idx) => (
-                                <div key={idx} className="flex items-center bg-gray-900 rounded-full border border-gray-600 pl-1 pr-2 py-1">
-                                    <select
-                                        value={color}
-                                        onChange={(e) => handleMultiplierChange(idx, e.target.value)}
-                                        className="bg-transparent text-white font-bold outline-none mr-1 cursor-pointer"
-                                    >
-                                        {[...colors, 'C'].map(c => <option key={c} value={c} className="bg-gray-800">{c}</option>)}
-                                    </select>
-                                    <button onClick={() => removeProduced(idx)} className="text-red-400 hover:text-red-200"><X size={14} /></button>
+                    {/* Section 4: Mana Produced */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Produced</h4>
+
+                        <RadioGroup
+                            options={[
+                                { value: 'standard', label: 'Standard', desc: 'Produces specific mana types' },
+                                { value: 'multiplied', label: 'Multiplied', desc: 'Multiplies your existing mana production' },
+                            ]}
+                            selected={rule.prodMode}
+                            onChange={(v) => updateRule('prodMode', v)}
+                        />
+
+                        <div className="mt-3">
+                            {rule.prodMode === 'standard' ? (
+                                <div className="space-y-3">
+                                    {/* Primary production */}
+                                    <div>
+                                        <span className="text-xs text-gray-500 mb-2 block">Produces:</span>
+                                        <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
+                                            {MANA_COLORS.map(color => (
+                                                <ManaCounter
+                                                    key={color}
+                                                    color={color}
+                                                    value={rule.produced[color]}
+                                                    onChange={(v) => updateProduced(color, v)}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* OR alternative */}
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={toggleAlt}
+                                            className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${hasAlt
+                                                    ? 'bg-amber-600 border-amber-500 text-white'
+                                                    : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'
+                                                }`}
+                                        >
+                                            {hasAlt ? 'Remove OR Option' : '+ Add OR Option'}
+                                        </button>
+                                        {!hasAlt && <span className="text-[11px] text-gray-600">e.g. produces {'{W}'} OR {'{U}'}</span>}
+                                    </div>
+
+                                    {hasAlt && rule.producedAlt && (
+                                        <div>
+                                            <span className="text-xs text-amber-400 mb-2 block">OR produces:</span>
+                                            <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3 border border-amber-800/30">
+                                                {MANA_COLORS.map(color => (
+                                                    <ManaCounter
+                                                        key={`alt-${color}`}
+                                                        color={color}
+                                                        value={rule.producedAlt![color]}
+                                                        onChange={(v) => updateProducedAlt(color, v)}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-                            ))}
-                            <button onClick={addProduced} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-sm font-bold flex items-center gap-1">
-                                <Plus size={14} /> Add Type
-                            </button>
+                            ) : (
+                                /* Multiplied mode */
+                                <div className="space-y-3 bg-gray-900/50 rounded-xl p-4">
+                                    <p className="text-xs text-gray-400">
+                                        Multiplies selected mana types by the calculated amount.
+                                    </p>
+                                    <div className="flex gap-3 justify-center">
+                                        {MANA_COLORS.map(color => (
+                                            <ManaCounter
+                                                key={color}
+                                                color={color}
+                                                value={rule.produced[color]}
+                                                onChange={(v) => updateProduced(color, v)}
+                                            />
+                                        ))}
+                                    </div>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={rule.includeNonBasics || false}
+                                            onChange={(e) => updateRule('includeNonBasics', e.target.checked)}
+                                            className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500"
+                                        />
+                                        <span className="text-sm text-gray-300">Include non-basic lands in calculation</span>
+                                    </label>
+                                </div>
+                            )}
                         </div>
-                        <p className="text-xs text-gray-500">
-                            For variable calculations (like creatures), this defines the *type* of mana produced per unit.
-                            For fixed, this is the exact pool produced.
-                        </p>
                     </div>
 
-                    {/* Priority & Auto-Tap */}
-                    <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold uppercase text-gray-500 tracking-wider">Auto-Tap Priority</label>
+                    {/* Section 5: Persistence */}
+                    <div>
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Persistence</h4>
+                        <RadioGroup
+                            options={[
+                                { value: 'permanent', label: '♾ Permanent', desc: 'Mana stays in pool indefinitely' },
+                                { value: 'untilNextTurn', label: '↻ Until Next Turn', desc: 'Mana clears at start of next turn' },
+                                { value: 'untilEndOfTurn', label: '⏱ Until End of Turn', desc: 'Mana clears at end of current turn' },
+                            ]}
+                            selected={rule.persistence}
+                            onChange={(v) => updateRule('persistence', v)}
+                        />
+                    </div>
+
+                    {/* Section 6: Auto-Tap */}
+                    <div className="flex flex-col md:flex-row gap-4">
+                        <div className="flex-1">
+                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Auto-Tap</h4>
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <div
+                                    onClick={() => updateRule('autoTap', !rule.autoTap)}
+                                    className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${rule.autoTap ? 'bg-green-600' : 'bg-gray-600'
+                                        }`}
+                                >
+                                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${rule.autoTap ? 'translate-x-4' : 'translate-x-0.5'
+                                        }`} />
+                                </div>
+                                <span className="text-sm text-gray-300">{rule.autoTap ? 'Yes — include in auto-tap' : 'No — skip during auto-tap'}</span>
+                            </label>
+                        </div>
+
+                        <div>
+                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Auto-Tap Priority</h4>
                             <input
                                 type="number"
-                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                value={rules.priority}
-                                onChange={e => setRules({ ...rules, priority: parseFloat(e.target.value) })}
+                                value={rule.autoTapPriority}
+                                onChange={(e) => updateRule('autoTapPriority', parseFloat(e.target.value) || 0)}
+                                className="w-24 bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-center"
+                                step={0.1}
                             />
-                            <p className="text-xs text-gray-500">Lower = Used first. Basic Lands are 0.</p>
-                        </div>
-                        <div className="flex items-center gap-3 pt-6">
-                            <input
-                                type="checkbox"
-                                id="autoTap"
-                                checked={rules.autoTap}
-                                onChange={e => setRules({ ...rules, autoTap: e.target.checked })}
-                                className="w-5 h-5 rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
-                            />
-                            <label htmlFor="autoTap" className="text-white font-bold cursor-pointer select-none">Allow Auto-Tap</label>
+                            <p className="text-[10px] text-gray-500 mt-1">Lower = tapped first</p>
                         </div>
                     </div>
 
-                    {/* Persistence */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-bold uppercase text-gray-500 tracking-wider">Mana Persistence</label>
-                        <div className="flex gap-2">
-                            {[
-                                { id: 'none', label: 'Normal (Empties)', icon: Clock },
-                                { id: 'until_end_of_turn', label: 'Until End of Turn', icon: PlayCircle },
-                                { id: 'until_next_turn', label: 'Until Next Turn', icon: Infinity }
-                            ].map((opt) => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => setRules({ ...rules, persistence: opt.id as any })}
-                                    className={`flex-1 flex flex-col items-center gap-1 p-2 rounded border transition-all ${rules.persistence === opt.id ? 'border-purple-500 bg-purple-900/20 text-white' : 'border-gray-700 bg-gray-900 text-gray-500'}`}
-                                >
-                                    <opt.icon size={16} />
-                                    <span className="text-xs font-bold text-center">{opt.label}</span>
-                                </button>
-                            ))}
+                    {/* Card Oracle Text Reference */}
+                    {card.oracleText && (
+                        <div className="bg-gray-900/50 border border-gray-700 rounded-xl p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                                <Info size={12} className="text-gray-500" />
+                                <span className="text-[10px] font-bold text-gray-500 uppercase">Card Oracle Text</span>
+                            </div>
+                            <p className="text-xs text-gray-400 italic whitespace-pre-wrap">{card.oracleText}</p>
                         </div>
-                    </div>
-
+                    )}
                 </div>
 
-                <div className="p-4 border-t border-gray-700 bg-gray-900 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-4 py-2 text-gray-400 hover:text-white font-bold">Cancel</button>
-                    <button onClick={() => onSave(rules)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold shadow-lg flex items-center gap-2">
-                        <Save size={18} /> Save Rules
+                {/* Footer */}
+                <div className="p-4 border-t border-gray-700 bg-gray-900 flex items-center justify-between gap-3">
+                    <button
+                        onClick={handleReset}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <RotateCcw size={14} /> Reset to Default
                     </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-900/30 transition-colors"
+                        >
+                            Save Rules
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

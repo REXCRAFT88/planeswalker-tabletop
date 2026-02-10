@@ -4,7 +4,7 @@ import { DeckBuilder } from './components/DeckBuilder';
 import { Tabletop } from './components/Tabletop';
 import { LocalSetup } from './components/LocalSetup';
 import { MobileController } from './components/MobileController';
-import { CardData } from './types';
+import { CardData, ManaRule } from './types';
 import { PLAYER_COLORS } from './constants';
 
 enum View {
@@ -26,6 +26,7 @@ export interface SavedDeck {
     tokens: CardData[];
     sleeveColor: string;
     createdAt?: number;
+    manaRules?: Record<string, ManaRule>; // keyed by scryfallId
 }
 
 function App() {
@@ -75,6 +76,14 @@ function App() {
     const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
+    const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() => {
+        // Load from most recent saved deck if available
+        if (savedDecks.length > 0) {
+            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return sorted[0].manaRules || {};
+        }
+        return {};
+    });
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -96,9 +105,10 @@ function App() {
         return () => clearInterval(interval);
     }, []);
 
-    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string) => {
+    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
+        if (manaRules) setActiveManaRules(manaRules);
 
         if (shouldSave) {
             const newDeck: SavedDeck = {
@@ -107,7 +117,8 @@ function App() {
                 deck,
                 tokens,
                 sleeveColor: playerSleeve,
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                manaRules: manaRules || activeManaRules,
             };
             handleSaveDeck(newDeck);
         }
@@ -135,6 +146,7 @@ function App() {
         if (savedDecks.length === 1) {
             setActiveDeck([...savedDecks[0].deck]);
             setLobbyTokens([...savedDecks[0].tokens]);
+            setActiveManaRules(savedDecks[0].manaRules || {});
         }
 
         if (gameType === 'local_table') {
@@ -147,6 +159,7 @@ function App() {
     const handleDeckSelected = (deck: SavedDeck) => {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
+        setActiveManaRules(deck.manaRules || {});
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);
@@ -210,6 +223,7 @@ function App() {
                 <DeckBuilder
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
+                    initialManaRules={activeManaRules}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
                 />
@@ -231,6 +245,7 @@ function App() {
                     sleeveColor={playerSleeve}
                     roomId={roomId}
                     initialGameStarted={isGameStarted}
+                    manaRules={activeManaRules}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}
@@ -245,6 +260,7 @@ function App() {
                     isLocal={true}
                     isLocalTableHost={isLocalTableHost}
                     localOpponents={localOpponents}
+                    manaRules={activeManaRules}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}

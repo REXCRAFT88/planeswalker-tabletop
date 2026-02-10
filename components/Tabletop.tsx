@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats, ManaRule } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
 import { ManaDisplay } from './ManaDisplay';
@@ -9,7 +9,7 @@ import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
 import {
-    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool, calculateManaFromRules,
+    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
@@ -29,6 +29,7 @@ interface TabletopProps {
     isLocal?: boolean;
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
+    manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
 
@@ -807,7 +808,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -3102,8 +3103,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
             // Handle W/U etc.
         }
-        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors);
-    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation]);
+        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors, manaRules);
+    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation, manaRules]);
 
     // Reset floating mana on turn change
     useEffect(() => {
@@ -3122,35 +3123,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             ...prev,
             [type]: Math.max(0, (prev[type] || 0) - 1)
         }));
-    };
-
-    const handleActivateAbility = (cardId: string) => {
-        const cardObj = boardObjects.find(o => o.id === cardId);
-        if (!cardObj || !cardObj.cardData.customManaRules) return;
-
-        const rules = cardObj.cardData.customManaRules;
-        const produced = calculateManaFromRules(rules, cardObj, boardObjects);
-
-        // Check for Tap cost
-        if (rules.costType === 'mana' && rules.cost && rules.cost.T) {
-            if ((cardObj.tappedQuantity || 0) >= cardObj.quantity) {
-                addLog(`Cannot activate ${cardObj.cardData.name}: already tapped`, 'SYSTEM');
-                return;
-            }
-            // Tap the card
-            updateBoardObject(cardId, { tappedQuantity: (cardObj.tappedQuantity || 0) + 1 });
-        }
-
-        // Add to floating mana
-        setFloatingMana(prev => {
-            const next = { ...prev };
-            produced.forEach(c => {
-                if (MANA_COLORS.includes(c)) next[c] = (next[c] || 0) + 1;
-            });
-            return next;
-        });
-
-        addLog(`Activated ability of ${cardObj.cardData.name}: Added ${produced.join(',')}`, 'SYSTEM');
     };
 
     // Handle auto-tap when Tab is pressed
@@ -4171,7 +4143,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 defaultRotation={defaultRotation}
                                 isHandVisible={isHandVisible}
                                 onHover={(id) => setHoveredCardId(id)}
-                                onActivateAbility={handlers.onActivate}
                             />
                         </div>
                     );
@@ -4688,8 +4659,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         onDown: handleContainerPointerDown,
                         onMove: handleContainerPointerMove,
                         onUp: handleContainerPointerUp,
-                        onWheel: handleWheel,
-                        onActivate: handleActivateAbility
+                        onWheel: handleWheel
                     }, -(layout[mySeatIndex]?.rot || 0), false)}
 
                     {/* Controls Overlay (Zoom) */}

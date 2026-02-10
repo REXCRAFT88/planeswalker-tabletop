@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
-import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
-import { CardData, CustomManaRules } from '../types';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap } from 'lucide-react';
+import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
+import { CardData, ManaRule } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
-    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
+    initialManaRules?: Record<string, ManaRule>;
+    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, manaRules?: Record<string, ManaRule>) => void;
     onBack: () => void;
 }
 
-export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, onDeckReady, onBack }) => {
+export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialManaRules, onDeckReady, onBack }) => {
     const [deckText, setDeckText] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number, total: number } | null>(null);
@@ -28,18 +29,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const isNewDeck = !initialDeck || initialDeck.length === 0;
     const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : '');
+    const [manaRules, setManaRules] = useState<Record<string, ManaRule>>(initialManaRules || {});
+    const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
+    const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+    const [showManaFilter, setShowManaFilter] = useState(false);
 
     // Staging area after fetching but before confirming commander
     // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
     const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
-    const [manaRulesCardId, setManaRulesCardId] = useState<string | null>(null);
-
-    const handleSaveManaRules = (rules: CustomManaRules) => {
-        if (!stagedDeck || !manaRulesCardId) return;
-        setStagedDeck(prev => prev ? prev.map(c => c.id === manaRulesCardId ? { ...c, customManaRules: rules } : c) : null);
-        setManaRulesCardId(null);
-    };
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -116,6 +114,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 setStagedDeck(deck);
                 // Append new tokens found in the imported list to the existing tokens
                 setStagedTokens(prev => [...prev, ...tokens]);
+
+                // Auto-generate mana rules for non-basic mana sources
+                const autoRules: Record<string, ManaRule> = {};
+                const seen = new Set<string>();
+                for (const card of deck) {
+                    if (seen.has(card.scryfallId)) continue;
+                    seen.add(card.scryfallId);
+                    const rule = generateDefaultManaRule(card);
+                    if (rule) autoRules[card.scryfallId] = rule;
+                }
+                if (Object.keys(autoRules).length > 0) {
+                    setManaRules(prev => {
+                        // Preserve user overrides, only add new auto-generated ones
+                        const merged = { ...autoRules, ...prev };
+                        return merged;
+                    });
+                }
             }
 
         } catch (e) {
@@ -143,7 +158,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const finalizeDeck = () => {
         if (!stagedDeck) return;
-        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName);
+        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, manaRules);
+    };
+
+    const handleSaveManaRule = (card: CardData, rule: ManaRule | null) => {
+        setManaRules(prev => {
+            const next = { ...prev };
+            if (rule) {
+                next[card.scryfallId] = rule;
+            } else {
+                delete next[card.scryfallId];
+            }
+            return next;
+        });
     };
 
     const clearDeck = () => {
@@ -175,7 +202,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     };
 
     const filteredDeck = stagedDeck
-        ? stagedDeck.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+        ? stagedDeck.filter(c => {
+            const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
+            const matchesManaFilter = !showManaFilter || c.isManaSource || (c.producedMana && c.producedMana.length > 0);
+            return matchesSearch && matchesManaFilter;
+        })
         : [];
 
     if (step === 'TOKENS') {
@@ -338,15 +369,24 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                 </button>
                             </div>
                         </div>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search for your commander..."
-                                className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                            />
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search cards..."
+                                    className="w-full bg-gray-800 border border-gray-600 rounded-lg py-2 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                />
+                            </div>
+                            <button
+                                onClick={() => setShowManaFilter(prev => !prev)}
+                                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all ${showManaFilter ? 'bg-amber-600 border-amber-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'}`}
+                                title="Filter to mana-producing cards only"
+                            >
+                                <Filter size={14} /> Mana
+                            </button>
                         </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -355,7 +395,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                 <div
                                     key={card.id}
                                     onClick={() => setCommander(card.id)}
-                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 group ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
+                                    onMouseEnter={() => setHoveredCardId(card.id)}
+                                    onMouseLeave={() => setHoveredCardId(null)}
+                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
                                 >
                                     <img src={card.imageUrl} className="w-full h-full object-cover rounded-md" />
                                     {card.isCommander && (
@@ -363,16 +405,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                             <Crown size={20} fill="black" />
                                         </div>
                                     )}
+                                    {/* Mana rules indicator */}
+                                    {manaRules[card.scryfallId] && (
+                                        <div className="absolute top-2 left-2 bg-purple-600 text-white p-1 rounded-full shadow-lg" title="Custom mana rules set">
+                                            <Zap size={12} />
+                                        </div>
+                                    )}
+                                    {/* Hover overlay with Set Mana Rules button */}
+                                    {hoveredCardId === card.id && (
+                                        <div className="absolute inset-0 bg-black/40 flex items-end justify-center pb-8 rounded-md">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setManaRulesCard(card); }}
+                                                className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold rounded-lg flex items-center gap-1 shadow-lg"
+                                            >
+                                                <Zap size={10} /> Set Mana Rules
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 text-center text-xs truncate">
                                         {card.name}
                                     </div>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setManaRulesCardId(card.id); }}
-                                        className="absolute top-2 left-2 p-1.5 bg-gray-800/80 rounded-full text-gray-300 hover:text-yellow-400 hover:bg-gray-700 border border-gray-600 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                        title="Set Mana Rules"
-                                    >
-                                        <Zap size={14} className={card.customManaRules ? "fill-yellow-400 text-yellow-400" : ""} />
-                                    </button>
                                 </div>
                             ))}
                             {filteredDeck.length === 0 && (
@@ -385,12 +437,15 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 </div>
             )}
 
-            <ManaRulesModal
-                isOpen={!!manaRulesCardId}
-                onClose={() => setManaRulesCardId(null)}
-                card={stagedDeck ? stagedDeck.find(c => c.id === manaRulesCardId) || null : null}
-                onSave={handleSaveManaRules}
-            />
+            {/* Mana Rules Modal */}
+            {manaRulesCard && (
+                <ManaRulesModal
+                    card={manaRulesCard}
+                    existingRule={manaRules[manaRulesCard.scryfallId]}
+                    onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
+                    onClose={() => setManaRulesCard(null)}
+                />
+            )}
         </div>
     );
 };

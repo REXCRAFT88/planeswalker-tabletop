@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -37,10 +37,9 @@ interface CardProps {
     defaultRotation?: number;
     isHandVisible?: boolean;
     onHover?: (id: string | null) => void;
-    onActivateAbility?: (id: string) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, onActivateAbility }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -481,22 +480,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                                 </button>
                             </div>
                         ) : null}
-
-                        {isControlledByMe && object.cardData.customManaRules?.trigger === 'activated' && (
-                            <div className="flex gap-1 interactive-ui">
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (onActivateAbility) onActivateAbility(object.id);
-                                        else onLog(`activated ability of ${object.cardData.name}`);
-                                    }}
-                                    className="p-1.5 bg-gray-800 text-yellow-400 rounded-full hover:bg-yellow-900 border border-yellow-600"
-                                    title="Activate Ability"
-                                >
-                                    <Zap size={12} fill="currentColor" />
-                                </button>
-                            </div>
-                        )}
 
                         <div className="flex gap-1 interactive-ui">
                             {isControlledByMe && (

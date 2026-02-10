@@ -1,3 +1,37 @@
+export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C';
+
+export interface ManaRule {
+  // Activation trigger
+  trigger: 'tap' | 'activated' | 'passive';
+  // Activation cost (mana required to activate ability)
+  activationCost: Record<ManaColor, number>;
+  // How the mana amount is calculated
+  calcMode: 'set' | 'counters' | 'creatures' | 'basicLands';
+  calcMultiplier: number; // default 1
+  // How the mana is produced
+  prodMode: 'standard' | 'multiplied';
+  produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
+  producedAlt?: Record<ManaColor, number>; // "or" choice
+  includeNonBasics?: boolean; // for multiplied mode
+  // Persistence of produced mana
+  persistence: 'permanent' | 'untilNextTurn' | 'untilEndOfTurn';
+  // Auto-tap settings
+  autoTap: boolean;
+  autoTapPriority: number; // decimal allowed
+}
+
+export const EMPTY_MANA_RULE: ManaRule = {
+  trigger: 'tap',
+  activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 },
+  calcMode: 'set',
+  calcMultiplier: 1,
+  prodMode: 'standard',
+  produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 },
+  persistence: 'untilEndOfTurn',
+  autoTap: true,
+  autoTapPriority: 1,
+};
+
 export enum CardState {
   UNTAPPED = 'UNTAPPED',
   TAPPED = 'TAPPED',
@@ -23,24 +57,6 @@ export interface CardData {
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
-  customManaRules?: CustomManaRules;
-}
-
-export interface CustomManaRules {
-  trigger: 'tap' | 'activated' | 'passive';
-  costType: 'none' | 'mana';
-  cost?: Record<string, number>; // { W: 1, T: 1 } etc.
-  calculationType: 'fixed' | 'counters' | 'creatures' | 'basic_lands' | 'custom_multiplier';
-  calculationDetail?: {
-    counterType?: string;
-    multiplier?: number;
-    includeNonBasic?: boolean;
-    creatureType?: string;
-  };
-  producedMana: string[]; // e.g. ['G', 'G']
-  persistence: 'none' | 'until_end_of_turn' | 'until_next_turn';
-  autoTap: boolean;
-  priority: number;
 }
 
 export interface BoardObject {

@@ -1,4 +1,4 @@
-import { BoardObject } from '../types';
+import { BoardObject, ManaRule, ManaColor as ManaColorType } from '../types';
 
 // --- Mana Symbol Types ---
 export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C'; // White, Blue, Black, Red, Green, Colorless
@@ -95,92 +95,145 @@ export const parseProducedMana = (producedMana: string[] | undefined): ManaColor
 // --- Available Mana Calculation ---
 // Calculate total available (untapped) mana from board objects
 // Now separates 'tap' sources (free to tap) from 'activated'/'complex' sources (require extra cost)
+// Also accepts optional manaRules for custom per-card rules
 export const calculateAvailableMana = (
     boardObjects: BoardObject[],
     controllerId: string,
     defaultRotation: number,
-    commanderColors?: ManaColor[]
+    commanderColors?: ManaColor[],
+    manaRules?: Record<string, ManaRule>
 ): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[] } => {
     const pool: ManaPool = { ...EMPTY_POOL };
     const potentialPool: ManaPool = { ...EMPTY_POOL };
     const sources: ManaSource[] = [];
     const potentialSources: ManaSource[] = [];
 
+    // Pre-compute board counts for custom rule calcModes
+    let creatureCount = -1; // lazy
+    let basicLandCount = -1; // lazy
+    const getCreatureCount = () => {
+        if (creatureCount < 0) {
+            creatureCount = boardObjects.filter(o =>
+                o.type === 'CARD' && o.controllerId === controllerId &&
+                o.cardData.typeLine?.toLowerCase().includes('creature')
+            ).length;
+        }
+        return creatureCount;
+    };
+    const getBasicLandCount = () => {
+        if (basicLandCount < 0) {
+            basicLandCount = boardObjects.filter(o =>
+                o.type === 'CARD' && o.controllerId === controllerId &&
+                isBasicLand(o.cardData.name)
+            ).length;
+        }
+        return basicLandCount;
+    };
+
     boardObjects.forEach(obj => {
         if (obj.type !== 'CARD') return;
         if (obj.controllerId !== controllerId) return;
 
-        // Custom Mana Rules Override
-        if (obj.cardData.customManaRules) {
-            const rules = obj.cardData.customManaRules;
+        // Check for custom mana rule
+        const customRule = manaRules?.[obj.cardData.scryfallId];
 
-            // Calculate production based on rules
-            const produced = calculateManaFromRules(rules, obj, boardObjects);
+        let produced: ManaColor[];
+        let abilityType: 'tap' | 'activated' | 'multi' | 'complex';
+        let sourcePriority: number;
 
-            // Check availability based on stacking
-            const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
-            if (untappedCount === 0) return;
+        if (customRule) {
+            // --- Custom rule path ---
+            // Calculate the multiplier from calcMode
+            let calcAmount = 1;
+            switch (customRule.calcMode) {
+                case 'set':
+                    calcAmount = 1;
+                    break;
+                case 'counters': {
+                    const counters = obj.counters?.['+1/+1'] || obj.counters?.['counter'] || 0;
+                    calcAmount = counters * (customRule.calcMultiplier || 1);
+                    break;
+                }
+                case 'creatures':
+                    calcAmount = getCreatureCount() * (customRule.calcMultiplier || 1);
+                    break;
+                case 'basicLands':
+                    calcAmount = getBasicLandCount() * (customRule.calcMultiplier || 1);
+                    break;
+            }
+
+            // Build produced mana array from rule
+            produced = [];
+            if (customRule.prodMode === 'standard') {
+                const amount = customRule.calcMode === 'set' ? 1 : calcAmount;
+                for (const [color, count] of Object.entries(customRule.produced)) {
+                    const total = count * amount;
+                    for (let i = 0; i < total; i++) {
+                        produced.push(color as ManaColor);
+                    }
+                }
+                // Add alt colors as additional options (for flexible sources)
+                if (customRule.producedAlt) {
+                    for (const [color, count] of Object.entries(customRule.producedAlt)) {
+                        if (count > 0 && !produced.includes(color as ManaColor)) {
+                            produced.push(color as ManaColor);
+                        }
+                    }
+                }
+            } else {
+                // Multiplied mode: produce calcAmount of each specified color
+                for (const [color, count] of Object.entries(customRule.produced)) {
+                    const total = count * calcAmount;
+                    for (let i = 0; i < total; i++) {
+                        produced.push(color as ManaColor);
+                    }
+                }
+            }
+
+            if (produced.length === 0) return; // No mana production
+
+            // Map trigger to abilityType
+            abilityType = customRule.trigger === 'tap' ? 'tap' :
+                customRule.trigger === 'activated' ? 'activated' : 'tap'; // passive treated as tap for pool
+
+            // Use custom priority if auto-tap enabled
+            sourcePriority = customRule.autoTap ? customRule.autoTapPriority : 999;
+
+        } else {
+            // --- Default path (existing logic) ---
+            produced = obj.cardData.producedMana as ManaColor[];
+
+            // Tracking fix: Estimate if missing
+            if (!produced || produced.length === 0) {
+                const estimated = estimateProducedMana(obj.cardData as any);
+                if (estimated && estimated.length > 0) {
+                    produced = estimated as ManaColor[];
+                } else {
+                    return;
+                }
+            }
+
+            // Handle Command Tower (filter by commander colors)
+            if (obj.cardData.name === 'Command Tower' && commanderColors) {
+                produced = produced.filter(c => commanderColors.includes(c));
+            }
+
+            abilityType = (obj.cardData.manaAbilityType || 'tap') as typeof abilityType;
 
             const isBasic = isBasicLand(obj.cardData.name);
-            const isFlexible = new Set(produced).size > 1;
-
-            const source: ManaSource = {
-                objectId: obj.id,
-                cardName: obj.cardData.name,
-                producedMana: produced,
-                isBasic,
-                isFlexible,
-                priority: rules.priority,
-                abilityType: rules.trigger === 'tap' ? 'tap' : 'activated', // Map custom to internal
-                activationCost: rules.costType === 'mana' && rules.cost ?
-                    Object.entries(rules.cost).map(([k, v]) => `{${v}${k}}`).join('') : undefined,
-                canAutoTap: rules.autoTap
-            };
-
-            if (rules.trigger === 'tap') { // Normal tap
-                for (let i = 0; i < untappedCount; i++) {
-                    sources.push(source);
-                    produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
-                }
-            } else {
-                // activated/passive -> potential
-                for (let i = 0; i < untappedCount; i++) {
-                    potentialSources.push(source);
-                    produced.forEach(c => { potentialPool[c] = (potentialPool[c] || 0) + 1; });
-                }
-            }
-            return; // Skip standard logic if custom rules exist
-        }
-
-        let produced = obj.cardData.producedMana as ManaColor[];
-
-        // Tracking fix: Estimate if missing
-        if (!produced || produced.length === 0) {
-            const estimated = estimateProducedMana(obj.cardData as any);
-            if (estimated && estimated.length > 0) {
-                produced = estimated as ManaColor[];
-            } else {
-                return;
-            }
-        }
-
-        // Handle Command Tower (filter by commander colors)
-        if (obj.cardData.name === 'Command Tower' && commanderColors) {
-            produced = produced.filter(c => commanderColors.includes(c));
+            const uniqueColors = new Set(produced);
+            sourcePriority = isBasic ? 0 : (produced.length === 1 ? 1 : (uniqueColors.size > 1 ? 3 : 2));
         }
 
         // Check availability based on stacking
         const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
-        if (untappedCount === 0) return; // All tapped
+        if (untappedCount === 0 && (!customRule || customRule.trigger !== 'passive')) return;
 
         const isBasic = isBasicLand(obj.cardData.name);
-
-        // Flexible if produces >1 options (but not Sol Ring {C}{C})
         const uniqueColors = new Set(produced);
         const isFlexible = uniqueColors.size > 1;
 
-        const abilityType = obj.cardData.manaAbilityType || 'tap';
-        const activationCost = obj.cardData.manaActivationCost;
+        const activationCost = customRule ? undefined : obj.cardData.manaActivationCost;
 
         const source: ManaSource = {
             objectId: obj.id,
@@ -188,11 +241,17 @@ export const calculateAvailableMana = (
             producedMana: produced,
             isBasic,
             isFlexible,
-            priority: isBasic ? 0 : (produced.length === 1 ? 1 : (isFlexible ? 3 : 2)),
+            priority: sourcePriority,
             abilityType,
             activationCost,
-            canAutoTap: true
         };
+
+        // Passive sources always contribute to pool
+        if (customRule?.trigger === 'passive') {
+            sources.push(source);
+            produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
+            return;
+        }
 
         // Only simple 'tap' sources count as readily available
         if (abilityType === 'tap') {
@@ -221,7 +280,6 @@ export interface ManaSource {
     priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
     abilityType: 'tap' | 'activated' | 'multi' | 'complex'; // How this source produces mana
     activationCost?: string; // Mana cost to activate, if any
-    canAutoTap?: boolean;
 }
 
 // --- Basic Land Detection ---
@@ -329,14 +387,6 @@ export const autoTapForCost = (
     }
 
     // 4. Tap Sources for Remainder
-    // Filter out sources that are not allowed for auto-tap (based on custom rules)
-    // We didn't pass that info to ManaSource yet. Let's update ManaSource or just filter here if we can access the object?
-    // Better to update ManaSource to include 'canAutoTap' property.
-
-    // Actually, let's just assume passed 'sources' are already filtered or valid?
-    // No, calculateAvailableMana returns everything.
-    // We need to update ManaSource interface first.
-
     const availableSources = [...sources].sort((a, b) => a.priority - b.priority);
     const tappedIds: string[] = [];
 
@@ -593,53 +643,4 @@ export const estimateProducedMana = (card: { name: string; typeLine: string; ora
 
     if (produced.length > 0) return produced;
     return undefined;
-};
-
-// --- Custom Mana Rules Calculation ---
-export const calculateManaFromRules = (rules: import('../types').CustomManaRules, obj: BoardObject, boardObjects: BoardObject[]): ManaColor[] => {
-    let produced: ManaColor[] = [];
-    if (rules.calculationType === 'fixed') {
-        produced = parseProducedMana(rules.producedMana);
-    } else {
-        // Dynamic Calculation
-        let multiplier = rules.calculationDetail?.multiplier || 1;
-        let count = 0;
-
-        if (rules.calculationType === 'counters') {
-            // Sum all counters or specific type
-            if (rules.calculationDetail?.counterType) {
-                count = obj.counters?.[rules.calculationDetail.counterType] || 0;
-            } else {
-                count = Object.values(obj.counters || {}).reduce((a, b) => a + b, 0);
-            }
-        } else if (rules.calculationType === 'creatures') {
-            // Count creatures
-            const controllerId = obj.controllerId;
-            const typeFilter = rules.calculationDetail?.creatureType?.toLowerCase();
-            count = boardObjects.filter(o =>
-                o.type === 'CARD' &&
-                o.controllerId === controllerId &&
-                o.cardData.typeLine.toLowerCase().includes('creature') &&
-                (!typeFilter || o.cardData.typeLine.toLowerCase().includes(typeFilter))
-            ).length;
-        } else if (rules.calculationType === 'basic_lands') {
-            const controllerId = obj.controllerId;
-            count = boardObjects.filter(o =>
-                o.type === 'CARD' &&
-                o.controllerId === controllerId &&
-                isBasicLand(o.cardData.name)
-            ).length;
-        } else if (rules.calculationType === 'custom_multiplier') {
-            count = 1;
-        }
-
-        const totalProduction = Math.floor(count * multiplier);
-        rules.producedMana.forEach(colorStr => {
-            const color = colorStr as ManaColor;
-            if (MANA_COLORS.includes(color)) {
-                for (let i = 0; i < totalProduction; i++) produced.push(color);
-            }
-        });
-    }
-    return produced;
 };
