@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
+import { ManaDisplay } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
@@ -884,10 +885,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    // --- Mana Calculator State ---
-    const [manaCalculatorEnabled, setManaCalculatorEnabled] = useState(() => {
-        return localStorage.getItem('planeswalker_mana_calc') === 'true';
-    });
     const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
         return localStorage.getItem('planeswalker_auto_tap') === 'true';
     });
@@ -903,9 +900,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, []);
 
     // Persist mana settings
-    useEffect(() => {
-        localStorage.setItem('planeswalker_mana_calc', String(manaCalculatorEnabled));
-    }, [manaCalculatorEnabled]);
     useEffect(() => {
         localStorage.setItem('planeswalker_auto_tap', String(autoTapEnabled));
     }, [autoTapEnabled]);
@@ -2992,36 +2986,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             previousTappedQuantity: movingObj.tappedQuantity
                         });
 
-                        // Auto-add floating mana for simple tap sources
-                        if (manaCalculatorEnabled && movingObj.cardData.isManaSource && movingObj.cardData.producedMana) {
-                            const abilityType = movingObj.cardData.manaAbilityType || 'tap';
-
-                            if (abilityType === 'tap') {
-                                // Simple tap — auto-add to floating mana
-                                const produced = movingObj.cardData.producedMana as ManaColor[];
-                                if (produced.length === 1 || isBasicLand(movingObj.cardData.name)) {
-                                    const color = isBasicLand(movingObj.cardData.name)
-                                        ? (getBasicLandColor(movingObj.cardData.name) || produced[0])
-                                        : produced[0];
-                                    setFloatingMana(prev => ({ ...prev, [color as ManaColor]: prev[color as ManaColor] + 1 }));
-                                    // Track mana produced
-                                    updateMyStats({
-                                        manaProduced: {
-                                            ...gameStats[myId]?.manaProduced,
-                                            [color]: (gameStats[myId]?.manaProduced?.[color] || 0) + 1
-                                        }
-                                    });
-                                }
-                                // Multi-color sources: user needs to pick, will use +/- buttons
-                            } else if (abilityType === 'activated') {
-                                // Check if player has mana to activate
-                                const available = poolTotal(floatingMana) + poolTotal(manaInfo.pool);
-                                if (available <= 0) {
-                                    setStatusMessage(`⚠️ ${cardName} needs ${movingObj.cardData.manaActivationCost || 'mana'} to produce mana — no mana available`);
-                                    setTimeout(() => setStatusMessage(""), 3500);
-                                }
-                            }
-                        }
                     }
                 }
                 changes.push({ id, updates });
@@ -3096,10 +3060,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Compute available mana from untapped sources
     const manaInfo = useMemo(() => {
-        if (!manaCalculatorEnabled) return { pool: { ...EMPTY_POOL }, potentialPool: { ...EMPTY_POOL }, sources: [] as ManaSource[], potentialSources: [] as ManaSource[] };
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
         return calculateAvailableMana(boardObjects, myId, myDefaultRotation);
-    }, [boardObjects, manaCalculatorEnabled, isLocal, playersList, mySeatIndex, myDefaultRotation]);
+    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation]);
 
     // Handle auto-tap when Tab is pressed
     const handleAutoTap = useCallback((card: CardData) => {
@@ -3165,16 +3128,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         }
 
-        const remainingMana: ManaPool = { ...EMPTY_POOL };
-        MANA_COLORS.forEach(c => {
-            remainingMana[c] = Math.max(0, totalProduced[c] - costPool[c]);
-        });
-
-        setFloatingMana(prev => {
-            const next = { ...prev };
-            MANA_COLORS.forEach(c => { next[c] += remainingMana[c]; });
-            return next;
-        });
 
         // Track mana stats
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
@@ -3194,7 +3147,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             type: 'AUTO_TAP',
             tappedIds: result.tappedIds,
             previousStates,
-            floatingManaAdded: remainingMana,
         });
 
         // Visual flash feedback
@@ -3257,14 +3209,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         rotation: state.rotation,
                         tappedQuantity: state.tappedQuantity
                     });
-                });
-                // Remove floating mana that was added
-                setFloatingMana(prev => {
-                    const next = { ...prev };
-                    MANA_COLORS.forEach(c => {
-                        next[c] = Math.max(0, next[c] - action.floatingManaAdded[c]);
-                    });
-                    return next;
                 });
                 setAutoTappedIds([]);
                 addLog('undid auto-tap');
@@ -3637,7 +3581,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'w': setShowCmdrDamage(prev => !prev); break;
             case 'tab': {
                 e.preventDefault();
-                if (autoTapEnabled && manaCalculatorEnabled && lastPlayedCard) {
+                if (autoTapEnabled && lastPlayedCard) {
                     handleAutoTap(lastPlayedCard);
                 }
                 break;
@@ -3649,7 +3593,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 }
                 break;
             }
-            case 'm': setManaCalculatorEnabled(prev => !prev); break;
             case 'v': setIsOpponentViewOpen(prev => !prev); break;
             case 'arrowleft': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev - 1 + (playersList.length - 1)) % (playersList.length - 1)); break;
             case 'arrowright': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev + 1) % (playersList.length - 1)); break;
@@ -4532,20 +4475,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         )}
                     </button>
                     <button
-                        onClick={() => setManaCalculatorEnabled(prev => !prev)}
-                        className={`p-2 rounded-lg transition-colors ${manaCalculatorEnabled ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
-                        title="Mana Calculator (M)"
-                    >
-                        <Droplets size={20} />
-                    </button>
-                    <button
-                        onClick={() => !isMobile && setShowShortcuts(true)}
-                        className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
-                        title="Keyboard Shortcuts"
-                    >
-                        <Keyboard size={20} />
-                    </button>
-                    <button
                         onClick={() => !isMobile && setShowSettingsModal(true)}
                         className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white"
                         title="Settings"
@@ -4814,215 +4743,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     )}
                 </div>
 
-                {/* Mana Calculator Panel */}
-                {manaCalculatorEnabled && gamePhase === 'PLAYING' && !isMobile && (
-                    <div className="fixed right-4 top-16 z-50 w-60 animate-in slide-in-from-right-5 fade-in duration-300">
-                        <div className="bg-gray-900/95 backdrop-blur-xl border border-gray-700 rounded-2xl shadow-2xl overflow-hidden">
-                            {/* Header */}
-                            <div className="px-4 py-2.5 bg-gradient-to-r from-blue-900/50 to-purple-900/50 border-b border-gray-700 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <Droplets size={16} className="text-blue-400" />
-                                    <span className="text-sm font-bold text-white">Mana</span>
-                                </div>
-                                <button
-                                    onClick={() => setManaCalculatorEnabled(false)}
-                                    className="text-gray-400 hover:text-white p-0.5 rounded hover:bg-gray-700 transition"
-                                    title="Hide (M)"
-                                >
-                                    <X size={14} />
-                                </button>
-                            </div>
-
-                            {/* Available Mana with +/- buttons */}
-                            <div className="px-3 py-2.5 border-b border-gray-800">
-                                <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold mb-1.5">Available</div>
-                                <div className="grid grid-cols-3 gap-1">
-                                    {MANA_COLORS.map(color => {
-                                        const avail = manaInfo.pool[color];
-                                        const potential = manaInfo.potentialPool[color];
-                                        const floating = floatingMana[color];
-                                        const hasAny = avail > 0 || potential > 0 || floating > 0;
-                                        return (
-                                            <div
-                                                key={color}
-                                                className={`flex flex-col items-center px-1.5 py-1 rounded-lg border transition-all ${hasAny ? 'bg-gray-800 border-gray-600' : 'bg-gray-900/50 border-gray-800 opacity-30'
-                                                    }`}
-                                            >
-                                                <span className="text-xs" style={{ filter: hasAny ? 'none' : 'grayscale(1)' }}>
-                                                    {MANA_DISPLAY[color].symbol}
-                                                </span>
-                                                <div className="flex items-baseline gap-0.5">
-                                                    <span className={`text-sm font-bold ${avail > 0 ? 'text-white' : 'text-gray-600'}`}>
-                                                        {avail}
-                                                    </span>
-                                                    {potential > 0 && (
-                                                        <span className="text-[9px] text-purple-400 font-mono" title={`+${potential} from abilities`}>
-                                                            +{potential}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                {/* +/- buttons for manual float adjustment */}
-                                                <div className="flex items-center gap-0.5 mt-0.5">
-                                                    <button
-                                                        onClick={() => setFloatingMana(prev => ({
-                                                            ...prev,
-                                                            [color]: Math.max(0, prev[color] - 1)
-                                                        }))}
-                                                        disabled={floating <= 0}
-                                                        className={`w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center transition ${floating > 0 ? 'bg-red-900/50 text-red-300 hover:bg-red-800/60' : 'bg-gray-800 text-gray-700 cursor-not-allowed'
-                                                            }`}
-                                                        title={`Remove 1 ${color} floating mana`}
-                                                    >−</button>
-                                                    <button
-                                                        onClick={() => {
-                                                            setFloatingMana(prev => ({ ...prev, [color]: prev[color] + 1 }));
-                                                            // Track manually added mana
-                                                            const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-                                                            updateMyStats({
-                                                                manaProduced: {
-                                                                    ...gameStats[myId]?.manaProduced,
-                                                                    [color]: (gameStats[myId]?.manaProduced?.[color] || 0) + 1
-                                                                }
-                                                            });
-                                                        }}
-                                                        className="w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center bg-green-900/50 text-green-300 hover:bg-green-800/60 transition"
-                                                        title={`Add 1 ${color} floating mana`}
-                                                    >+</button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                                <div className="mt-1.5 text-[10px] text-gray-400 flex justify-between">
-                                    <span>Tap: <span className="font-bold text-white">{poolTotal(manaInfo.pool)}</span>  ({manaInfo.sources.length})</span>
-                                    {poolTotal(manaInfo.potentialPool) > 0 && (
-                                        <span className="text-purple-400">Ability: <span className="font-bold">{poolTotal(manaInfo.potentialPool)}</span> ({manaInfo.potentialSources.length})</span>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Floating Mana Pool */}
-                            {poolTotal(floatingMana) > 0 && (
-                                <div className="px-3 py-2.5 border-b border-gray-800 bg-gradient-to-r from-amber-900/10 to-orange-900/10">
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <div className="text-[10px] uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1">
-                                            <Zap size={10} /> Floating ({poolTotal(floatingMana)})
-                                        </div>
-                                        <button
-                                            onClick={() => setFloatingMana({ ...EMPTY_POOL })}
-                                            className="text-[10px] text-gray-500 hover:text-red-400 transition"
-                                        >
-                                            Clear
-                                        </button>
-                                    </div>
-                                    <div className="flex gap-0.5 flex-wrap">
-                                        {MANA_COLORS.map(color => {
-                                            if (floatingMana[color] <= 0) return null;
-                                            return Array.from({ length: floatingMana[color] }).map((_, i) => (
-                                                <span
-                                                    key={`${color}-${i}`}
-                                                    className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs shadow-inner border animate-in zoom-in cursor-pointer hover:scale-110 transition"
-                                                    style={{
-                                                        background: `linear-gradient(135deg, ${MANA_DISPLAY[color].bg}44, ${MANA_DISPLAY[color].bg}88)`,
-                                                        borderColor: MANA_DISPLAY[color].bg + '66',
-                                                    }}
-                                                    onClick={() => {
-                                                        // Click to spend 1 floating mana
-                                                        setFloatingMana(prev => ({
-                                                            ...prev,
-                                                            [color]: Math.max(0, prev[color] - 1)
-                                                        }));
-                                                        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-                                                        updateMyStats({
-                                                            manaUsed: {
-                                                                ...gameStats[myId]?.manaUsed,
-                                                                [color]: (gameStats[myId]?.manaUsed?.[color] || 0) + 1
-                                                            }
-                                                        });
-                                                    }}
-                                                    title={`Click to spend 1 ${color}`}
-                                                >
-                                                    {MANA_DISPLAY[color].symbol}
-                                                </span>
-                                            ));
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Activated Ability Sources */}
-                            {manaInfo.potentialSources.length > 0 && (
-                                <div className="px-3 py-2.5 border-b border-gray-800">
-                                    <div className="text-[10px] uppercase tracking-wider text-purple-400 font-bold mb-1.5 flex items-center gap-1">
-                                        ⚡ Ability Sources
-                                    </div>
-                                    <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
-                                        {manaInfo.potentialSources.map(source => (
-                                            <div key={source.objectId} className="flex items-center justify-between gap-1 p-1 bg-gray-800/50 rounded border border-gray-700 text-[10px]">
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-gray-300 truncate" title={source.cardName}>{source.cardName}</div>
-                                                    <div className="text-gray-500">
-                                                        {source.activationCost && <span className="text-red-400 mr-1">{source.activationCost}</span>}
-                                                        → {source.producedMana.map(c => MANA_DISPLAY[c].symbol).join('')}
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    onClick={() => {
-                                                        // Activate: add produced mana to floating pool
-                                                        const produced = source.producedMana;
-                                                        if (produced.length === 1 || isBasicLand(source.cardName)) {
-                                                            const color = produced[0];
-                                                            setFloatingMana(prev => ({ ...prev, [color]: prev[color] + 1 }));
-                                                            const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-                                                            updateMyStats({
-                                                                manaProduced: {
-                                                                    ...gameStats[myId]?.manaProduced,
-                                                                    [color]: (gameStats[myId]?.manaProduced?.[color] || 0) + 1
-                                                                }
-                                                            });
-                                                        }
-                                                        // Tap the source card
-                                                        const tappedRotation = (myDefaultRotation + 90) % 360;
-                                                        updateBoardObject(source.objectId, { rotation: tappedRotation });
-                                                        addLog(`activated ${source.cardName} for mana`);
-                                                    }}
-                                                    className="px-1.5 py-0.5 bg-purple-700/40 hover:bg-purple-700/60 text-purple-300 text-[9px] font-bold rounded border border-purple-700/50 transition flex-shrink-0"
-                                                    title={`Tap ${source.cardName} for mana (costs ${source.activationCost || 'ability'})`}
-                                                >
-                                                    Activate
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Last Played Card Cost */}
-                            {lastPlayedCard && lastPlayedCard.manaCost && autoTapEnabled && (
-                                <div className="px-3 py-2.5 border-b border-gray-800 bg-gradient-to-r from-green-900/10 to-emerald-900/10">
-                                    <div className="text-[10px] uppercase tracking-wider text-green-400 font-bold mb-1">Last Played</div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs text-gray-300 truncate max-w-[100px]">{lastPlayedCard.name}</span>
-                                        <span className="text-xs text-gray-400 font-mono">{lastPlayedCard.manaCost}</span>
-                                    </div>
-                                    <button
-                                        onClick={() => handleAutoTap(lastPlayedCard)}
-                                        className="mt-1.5 w-full px-3 py-1.5 bg-green-700/40 hover:bg-green-700/60 text-green-300 text-xs font-bold rounded-lg border border-green-700/50 transition-colors flex items-center justify-center gap-1"
-                                    >
-                                        <Zap size={12} /> Auto-Tap (Tab)
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* Auto-Tap Status */}
-                            {autoTapEnabled && (
-                                <div className="px-3 py-1.5 flex items-center gap-1.5 text-[10px] text-gray-500">
-                                    <Zap size={10} className="text-yellow-500" />
-                                    <span>Auto-Tap: <span className="text-yellow-400 font-bold">ON</span></span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                {/* Mana Display (New) */}
+                {gamePhase === 'PLAYING' && !isMobile && (
+                    <ManaDisplay pool={manaInfo.pool} potentialPool={manaInfo.potentialPool} />
                 )}
 
                 {/* Auto-Tap Flash Overlay — highlights tapped cards */}
@@ -5666,21 +5389,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
                                 <label className="flex justify-between items-center cursor-pointer">
                                     <div>
-                                        <h4 className="font-bold text-white flex items-center gap-2"><Droplets size={16} className="text-blue-400" /> Mana Calculator</h4>
-                                        <p className="text-xs text-gray-400">Show available mana panel on the right side. Press M to toggle.</p>
-                                    </div>
-                                    <div
-                                        onClick={() => setManaCalculatorEnabled(prev => !prev)}
-                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${manaCalculatorEnabled ? 'bg-blue-600 justify-end' : 'bg-gray-600 justify-start'}`}
-                                    >
-                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
-                                    </div>
-                                </label>
-                            </div>
-
-                            <div className={`bg-gray-700/50 p-4 rounded-lg border border-gray-600 ${!manaCalculatorEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
-                                <label className="flex justify-between items-center cursor-pointer">
-                                    <div>
                                         <h4 className="font-bold text-white flex items-center gap-2"><Zap size={16} className="text-yellow-400" /> Auto-Tap Mana</h4>
                                         <p className="text-xs text-gray-400">Press Tab after playing a card to auto-tap lands/mana sources. Basics first.</p>
                                     </div>
@@ -5692,6 +5400,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     </div>
                                 </label>
                             </div>
+
+                            <button
+                                onClick={() => { setShowShortcuts(true); setShowSettingsModal(false); }}
+                                className="w-full bg-gray-700/50 hover:bg-gray-700 p-4 rounded-lg border border-gray-600 flex justify-between items-center transition-colors group"
+                            >
+                                <div className="flex flex-col items-start">
+                                    <h4 className="font-bold text-white flex items-center gap-2"><Keyboard size={16} className="text-blue-400" /> Keyboard Shortcuts</h4>
+                                    <p className="text-xs text-gray-400 group-hover:text-gray-300">View all available hotkeys</p>
+                                </div>
+                                <ChevronRight className="text-gray-500 group-hover:text-white" size={20} />
+                            </button>
                         </div>
                     </div>
                 </div>

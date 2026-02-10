@@ -108,13 +108,22 @@ export const calculateAvailableMana = (
     boardObjects.forEach(obj => {
         if (obj.type !== 'CARD') return;
         if (obj.controllerId !== controllerId) return;
-        if (!obj.cardData.producedMana || obj.cardData.producedMana.length === 0) return;
+        let produced = obj.cardData.producedMana as ManaColor[];
 
-        // Check if untapped (rotation matches default = untapped)
+        // Tracking fix: Estimate if missing
+        if (!produced || produced.length === 0) {
+            const estimated = estimateProducedMana(obj.cardData as any);
+            if (estimated && estimated.length > 0) {
+                produced = estimated as ManaColor[];
+            } else {
+                return;
+            }
+        }
+
+        // Check if tapped (rotation matches default = untapped)
         const isTapped = obj.rotation !== defaultRotation || obj.tappedQuantity > 0;
         if (isTapped) return;
 
-        const produced = obj.cardData.producedMana as ManaColor[];
         const isBasic = isBasicLand(obj.cardData.name);
         const isFlexible = produced.length > 2 || produced.includes('W' as ManaColor) && produced.includes('U' as ManaColor) && produced.includes('B' as ManaColor);
         const abilityType = obj.cardData.manaAbilityType || 'tap';
@@ -379,7 +388,47 @@ export type UndoableAction = {
     type: 'AUTO_TAP';
     tappedIds: string[];
     previousStates: { id: string; rotation: number; tappedQuantity: number }[];
-    floatingManaAdded: ManaPool;
 };
 
 export const MAX_UNDO_HISTORY = 6;
+
+
+// --- Mana Production Estimation ---
+// Heuristic to determine produced mana colors if Scryfall data is missing
+export const estimateProducedMana = (card: { name: string; typeLine: string; oracleText: string; producedMana?: string[] }): import('../types').CardData['producedMana'] => {
+    // If we already have data, trust it (unless empty and it's a basic land)
+    if (card.producedMana && card.producedMana.length > 0) return card.producedMana;
+
+    const produced: Set<string> = new Set();
+    const typeLine = card.typeLine.toLowerCase();
+    const text = card.oracleText ? card.oracleText.toLowerCase() : "";
+
+    // 1. Basic Land Types (intrinsic ability)
+    if (typeLine.includes('plains')) produced.add('W');
+    if (typeLine.includes('island')) produced.add('U');
+    if (typeLine.includes('swamp')) produced.add('B');
+    if (typeLine.includes('mountain')) produced.add('R');
+    if (typeLine.includes('forest')) produced.add('G');
+    if (typeLine.includes('wastes')) produced.add('C');
+
+    // 2. Oracle Text Analysis "Add {X}"
+    if (text.includes('add {w}')) produced.add('W');
+    if (text.includes('add {u}')) produced.add('U');
+    if (text.includes('add {b}')) produced.add('B');
+    if (text.includes('add {r}')) produced.add('R');
+    if (text.includes('add {g}')) produced.add('G');
+    if (text.includes('add {c}')) produced.add('C');
+
+    // 3. "Add one mana of any color"
+    if (text.includes('one mana of any color') || text.includes('add one mana of any type')) {
+        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
+    }
+
+    // 4. Common keywords/patterns
+    if (card.name === 'Sol Ring') produced.add('C');
+    if (card.name === 'Arcane Signet') ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
+    if (card.name === 'Command Tower') ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
+
+    if (produced.size > 0) return Array.from(produced);
+    return undefined;
+};

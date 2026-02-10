@@ -1,4 +1,5 @@
 import { CardData } from '../types';
+import { estimateProducedMana } from './mana';
 
 const BASE_URL = 'https://api.scryfall.com';
 
@@ -188,8 +189,12 @@ const transformScryfallData = (data: any): CardData => {
                 data.oracle_text.includes('{T}: Add') ||
                 data.oracle_text.includes('Add {')
             )),
-        producedMana: data.produced_mana ||
-            (data.type_line.toLowerCase().includes('land') ? inferLandMana(data) : undefined),
+        producedMana: estimateProducedMana({
+            name: data.name,
+            typeLine: data.type_line,
+            oracleText: data.oracle_text || "",
+            producedMana: data.produced_mana
+        }),
         ...detectManaAbilityType(data),
         power: data.power,
         toughness: data.toughness,
@@ -266,29 +271,6 @@ const detectManaAbilityType = (data: any): { manaAbilityType?: 'tap' | 'activate
     return {};
 };
 
-// Infer what mana a land produces if Scryfall didn't provide produced_mana
-const inferLandMana = (data: any): string[] | undefined => {
-    const name = (data.name || '').toLowerCase();
-    const basicMap: Record<string, string> = {
-        'plains': 'W', 'island': 'U', 'swamp': 'B', 'mountain': 'R', 'forest': 'G', 'wastes': 'C',
-        'snow-covered plains': 'W', 'snow-covered island': 'U', 'snow-covered swamp': 'B',
-        'snow-covered mountain': 'R', 'snow-covered forest': 'G',
-    };
-    if (basicMap[name]) return [basicMap[name]];
-
-    // Try to infer from oracle text
-    const oracleText = data.oracle_text || '';
-    const colors: string[] = [];
-    if (oracleText.includes('{W}')) colors.push('W');
-    if (oracleText.includes('{U}')) colors.push('U');
-    if (oracleText.includes('{B}')) colors.push('B');
-    if (oracleText.includes('{R}')) colors.push('R');
-    if (oracleText.includes('{G}')) colors.push('G');
-    if (oracleText.includes('{C}')) colors.push('C');
-    if (oracleText.toLowerCase().includes('any color')) return ['W', 'U', 'B', 'R', 'G'];
-
-    return colors.length > 0 ? colors : undefined;
-};
 
 export const parseDeckList = (text: string): { count: number; name: string }[] => {
     const lines = text.split('\n');
