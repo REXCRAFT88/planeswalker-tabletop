@@ -17,6 +17,10 @@ export interface CardData {
   power?: string;
   toughness?: string;
   isCommander?: boolean;
+  isManaSource?: boolean;
+  producedMana?: string[]; // e.g. ['G'], ['C','C'], ['W','U','B','R','G']
+  manaAbilityType?: 'tap' | 'activated' | 'multi' | 'complex'; // How this card produces mana
+  manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
 }
@@ -35,7 +39,7 @@ export interface BoardObject {
   commanderDamage: { [playerId: string]: number }; // Damage dealt BY this commander TO specific players
   controllerId: string;
   // Stacking properties
-  quantity: number; 
+  quantity: number;
   tappedQuantity: number;
 }
 
@@ -66,6 +70,8 @@ export interface PlayerStats {
   cardsSentToGraveyard: number;
   cardsExiled: number;
   cardsDrawn: number;
+  manaUsed: Record<string, number>; // color -> total spent (W, U, B, R, G, C)
+  manaProduced: Record<string, number>; // color -> total produced
 }
 
 export interface GameState {
