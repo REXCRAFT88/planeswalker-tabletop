@@ -109,6 +109,49 @@ export const calculateAvailableMana = (
     boardObjects.forEach(obj => {
         if (obj.type !== 'CARD') return;
         if (obj.controllerId !== controllerId) return;
+
+        // Custom Mana Rules Override
+        if (obj.cardData.customManaRules) {
+            const rules = obj.cardData.customManaRules;
+
+            // Calculate production based on rules
+            const produced = calculateManaFromRules(rules, obj, boardObjects);
+
+            // Check availability based on stacking
+            const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
+            if (untappedCount === 0) return;
+
+            const isBasic = isBasicLand(obj.cardData.name);
+            const isFlexible = new Set(produced).size > 1;
+
+            const source: ManaSource = {
+                objectId: obj.id,
+                cardName: obj.cardData.name,
+                producedMana: produced,
+                isBasic,
+                isFlexible,
+                priority: rules.priority,
+                abilityType: rules.trigger === 'tap' ? 'tap' : 'activated', // Map custom to internal
+                activationCost: rules.costType === 'mana' && rules.cost ?
+                    Object.entries(rules.cost).map(([k, v]) => `{${v}${k}}`).join('') : undefined,
+                canAutoTap: rules.autoTap
+            };
+
+            if (rules.trigger === 'tap') { // Normal tap
+                for (let i = 0; i < untappedCount; i++) {
+                    sources.push(source);
+                    produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
+                }
+            } else {
+                // activated/passive -> potential
+                for (let i = 0; i < untappedCount; i++) {
+                    potentialSources.push(source);
+                    produced.forEach(c => { potentialPool[c] = (potentialPool[c] || 0) + 1; });
+                }
+            }
+            return; // Skip standard logic if custom rules exist
+        }
+
         let produced = obj.cardData.producedMana as ManaColor[];
 
         // Tracking fix: Estimate if missing
@@ -148,6 +191,7 @@ export const calculateAvailableMana = (
             priority: isBasic ? 0 : (produced.length === 1 ? 1 : (isFlexible ? 3 : 2)),
             abilityType,
             activationCost,
+            canAutoTap: true
         };
 
         // Only simple 'tap' sources count as readily available
@@ -177,6 +221,7 @@ export interface ManaSource {
     priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
     abilityType: 'tap' | 'activated' | 'multi' | 'complex'; // How this source produces mana
     activationCost?: string; // Mana cost to activate, if any
+    canAutoTap?: boolean;
 }
 
 // --- Basic Land Detection ---
@@ -284,16 +329,28 @@ export const autoTapForCost = (
     }
 
     // 4. Tap Sources for Remainder
+    // Filter out sources that are not allowed for auto-tap (based on custom rules)
+    // We didn't pass that info to ManaSource yet. Let's update ManaSource or just filter here if we can access the object?
+    // Better to update ManaSource to include 'canAutoTap' property.
+
+    // Actually, let's just assume passed 'sources' are already filtered or valid?
+    // No, calculateAvailableMana returns everything.
+    // We need to update ManaSource interface first.
+
     const availableSources = [...sources].sort((a, b) => a.priority - b.priority);
     const tappedIds: string[] = [];
 
     // Helpers for Tapping
+    // Helpers for Tapping
     const processTap = (reqColor: ManaColor): boolean => {
-        const sourceIdx = availableSources.findIndex(s => !tappedIds.includes(s.objectId) && s.producedMana.includes(reqColor));
+        const sourceIdx = availableSources.findIndex(s => s.producedMana.includes(reqColor));
         if (sourceIdx === -1) return false;
 
         const source = availableSources[sourceIdx];
         tappedIds.push(source.objectId);
+
+        // Remove from availableSources to prevent reuse of this specific instance
+        availableSources.splice(sourceIdx, 1);
 
         const unique = new Set(source.producedMana);
         if (unique.size === 1) {
@@ -466,7 +523,7 @@ export type UndoableAction = {
     previousFloatingMana: ManaPool;
 };
 
-export const MAX_UNDO_HISTORY = 6;
+export const MAX_UNDO_HISTORY = 20;
 
 
 // --- Mana Production Estimation ---
@@ -536,4 +593,53 @@ export const estimateProducedMana = (card: { name: string; typeLine: string; ora
 
     if (produced.length > 0) return produced;
     return undefined;
+};
+
+// --- Custom Mana Rules Calculation ---
+export const calculateManaFromRules = (rules: import('../types').CustomManaRules, obj: BoardObject, boardObjects: BoardObject[]): ManaColor[] => {
+    let produced: ManaColor[] = [];
+    if (rules.calculationType === 'fixed') {
+        produced = parseProducedMana(rules.producedMana);
+    } else {
+        // Dynamic Calculation
+        let multiplier = rules.calculationDetail?.multiplier || 1;
+        let count = 0;
+
+        if (rules.calculationType === 'counters') {
+            // Sum all counters or specific type
+            if (rules.calculationDetail?.counterType) {
+                count = obj.counters?.[rules.calculationDetail.counterType] || 0;
+            } else {
+                count = Object.values(obj.counters || {}).reduce((a, b) => a + b, 0);
+            }
+        } else if (rules.calculationType === 'creatures') {
+            // Count creatures
+            const controllerId = obj.controllerId;
+            const typeFilter = rules.calculationDetail?.creatureType?.toLowerCase();
+            count = boardObjects.filter(o =>
+                o.type === 'CARD' &&
+                o.controllerId === controllerId &&
+                o.cardData.typeLine.toLowerCase().includes('creature') &&
+                (!typeFilter || o.cardData.typeLine.toLowerCase().includes(typeFilter))
+            ).length;
+        } else if (rules.calculationType === 'basic_lands') {
+            const controllerId = obj.controllerId;
+            count = boardObjects.filter(o =>
+                o.type === 'CARD' &&
+                o.controllerId === controllerId &&
+                isBasicLand(o.cardData.name)
+            ).length;
+        } else if (rules.calculationType === 'custom_multiplier') {
+            count = 1;
+        }
+
+        const totalProduction = Math.floor(count * multiplier);
+        rules.producedMana.forEach(colorStr => {
+            const color = colorStr as ManaColor;
+            if (MANA_COLORS.includes(color)) {
+                for (let i = 0; i < totalProduction; i++) produced.push(color);
+            }
+        });
+    }
+    return produced;
 };

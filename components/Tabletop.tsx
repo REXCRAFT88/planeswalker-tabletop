@@ -9,7 +9,7 @@ import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
 import {
-    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
+    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool, calculateManaFromRules,
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
@@ -848,6 +848,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mobileControllers, setMobileControllers] = useState<Set<string>>(new Set());
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
+    const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+    const [showManaCalculator, setShowManaCalculator] = useState(true);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
 
@@ -3122,6 +3124,35 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }));
     };
 
+    const handleActivateAbility = (cardId: string) => {
+        const cardObj = boardObjects.find(o => o.id === cardId);
+        if (!cardObj || !cardObj.cardData.customManaRules) return;
+
+        const rules = cardObj.cardData.customManaRules;
+        const produced = calculateManaFromRules(rules, cardObj, boardObjects);
+
+        // Check for Tap cost
+        if (rules.costType === 'mana' && rules.cost && rules.cost.T) {
+            if ((cardObj.tappedQuantity || 0) >= cardObj.quantity) {
+                addLog(`Cannot activate ${cardObj.cardData.name}: already tapped`, 'SYSTEM');
+                return;
+            }
+            // Tap the card
+            updateBoardObject(cardId, { tappedQuantity: (cardObj.tappedQuantity || 0) + 1 });
+        }
+
+        // Add to floating mana
+        setFloatingMana(prev => {
+            const next = { ...prev };
+            produced.forEach(c => {
+                if (MANA_COLORS.includes(c)) next[c] = (next[c] || 0) + 1;
+            });
+            return next;
+        });
+
+        addLog(`Activated ability of ${cardObj.cardData.name}: Added ${produced.join(',')}`, 'SYSTEM');
+    };
+
     // Handle auto-tap when Tab is pressed
     const handleAutoTap = useCallback((card: CardData) => {
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
@@ -3152,9 +3183,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
 
         // Tap each source
+        // Tap sources (handling stacks)
         const tappedRotation = (myDefaultRotation + 90) % 360;
+        const tapCounts: Record<string, number> = {};
         result.tappedIds.forEach(id => {
-            updateBoardObject(id, { rotation: tappedRotation });
+            tapCounts[id] = (tapCounts[id] || 0) + 1;
+        });
+
+        Object.entries(tapCounts).forEach(([id, count]) => {
+            const obj = boardObjects.find(o => o.id === id);
+            if (!obj) return;
+
+            if (obj.quantity > 1) {
+                const newTappedQty = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
+                updateBoardObject(id, { tappedQuantity: newTappedQty });
+            } else {
+                updateBoardObject(id, { rotation: tappedRotation });
+            }
         });
 
         // Update floating mana — subtract what was spent and add any excess produced
@@ -3616,8 +3661,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
+            case 'm': setShowManaCalculator(prev => !prev); break;
             case 'tab': {
                 e.preventDefault();
+                if (hoveredCardId) {
+                    const obj = boardObjects.find(o => o.id === hoveredCardId);
+                    if (obj) {
+                        handleAutoTap(obj.cardData);
+                        return;
+                    }
+                }
                 if (autoTapEnabled && lastPlayedCard) {
                     handleAutoTap(lastPlayedCard);
                 }
@@ -4117,6 +4170,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 onSelect={() => setMobileActionCardId(obj.id)}
                                 defaultRotation={defaultRotation}
                                 isHandVisible={isHandVisible}
+                                onHover={(id) => setHoveredCardId(id)}
+                                onActivateAbility={handlers.onActivate}
                             />
                         </div>
                     );
@@ -4633,7 +4688,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         onDown: handleContainerPointerDown,
                         onMove: handleContainerPointerMove,
                         onUp: handleContainerPointerUp,
-                        onWheel: handleWheel
+                        onWheel: handleWheel,
+                        onActivate: handleActivateAbility
                     }, -(layout[mySeatIndex]?.rot || 0), false)}
 
                     {/* Controls Overlay (Zoom) */}
@@ -4781,7 +4837,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
 
                 {/* Mana Display */}
-                {(gamePhase === 'PLAYING') && (
+                {(gamePhase === 'PLAYING' && showManaCalculator) && (
                     <ManaDisplay
                         pool={manaInfo.pool}
                         potentialPool={manaInfo.potentialPool}

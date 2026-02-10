@@ -23,6 +23,24 @@ export interface CardData {
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
+  customManaRules?: CustomManaRules;
+}
+
+export interface CustomManaRules {
+  trigger: 'tap' | 'activated' | 'passive';
+  costType: 'none' | 'mana';
+  cost?: Record<string, number>; // { W: 1, T: 1 } etc.
+  calculationType: 'fixed' | 'counters' | 'creatures' | 'basic_lands' | 'custom_multiplier';
+  calculationDetail?: {
+    counterType?: string;
+    multiplier?: number;
+    includeNonBasic?: boolean;
+    creatureType?: string;
+  };
+  producedMana: string[]; // e.g. ['G', 'G']
+  persistence: 'none' | 'until_end_of_turn' | 'until_next_turn';
+  autoTap: boolean;
+  priority: number;
 }
 
 export interface BoardObject {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
-import { CardData } from '../types';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight } from 'lucide-react';
+import { CardData, CustomManaRules } from '../types';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap } from 'lucide-react';
+import { ManaRulesModal } from './ManaRulesModal';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
@@ -32,6 +33,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
     const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
+    const [manaRulesCardId, setManaRulesCardId] = useState<string | null>(null);
+
+    const handleSaveManaRules = (rules: CustomManaRules) => {
+        if (!stagedDeck || !manaRulesCardId) return;
+        setStagedDeck(prev => prev ? prev.map(c => c.id === manaRulesCardId ? { ...c, customManaRules: rules } : c) : null);
+        setManaRulesCardId(null);
+    };
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -347,7 +355,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                 <div
                                     key={card.id}
                                     onClick={() => setCommander(card.id)}
-                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
+                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 group ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
                                 >
                                     <img src={card.imageUrl} className="w-full h-full object-cover rounded-md" />
                                     {card.isCommander && (
@@ -358,6 +366,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                     <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 text-center text-xs truncate">
                                         {card.name}
                                     </div>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setManaRulesCardId(card.id); }}
+                                        className="absolute top-2 left-2 p-1.5 bg-gray-800/80 rounded-full text-gray-300 hover:text-yellow-400 hover:bg-gray-700 border border-gray-600 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Set Mana Rules"
+                                    >
+                                        <Zap size={14} className={card.customManaRules ? "fill-yellow-400 text-yellow-400" : ""} />
+                                    </button>
                                 </div>
                             ))}
                             {filteredDeck.length === 0 && (
@@ -369,6 +384,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     </div>
                 </div>
             )}
+
+            <ManaRulesModal
+                isOpen={!!manaRulesCardId}
+                onClose={() => setManaRulesCardId(null)}
+                card={stagedDeck ? stagedDeck.find(c => c.id === manaRulesCardId) || null : null}
+                onSave={handleSaveManaRules}
+            />
         </div>
     );
 };
