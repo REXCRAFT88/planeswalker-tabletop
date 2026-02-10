@@ -329,7 +329,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         type="text"
                                         placeholder="Room Code"
                                         value={roomCode}
-                                        onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                                        onChange={(e) => setRoomCode(e.target.value.toUpperCase().trim())}
                                         className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 text-white focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono tracking-widest placeholder:normal-case placeholder:tracking-normal"
                                         maxLength={6}
                                     />

@@ -64,6 +64,8 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     socket.on('join_room', ({ room, name, color, userId, isTable }) => {
+        if (!room) return;
+        room = room.trim().toUpperCase();
         if (!rooms[room]) {
             rooms[room] = [];
         }
@@ -172,6 +174,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('resolve_join_request', ({ room, applicantId, approved }) => {
+        if (room) room = room.trim().toUpperCase();
         const applicantSocket = io.sockets.sockets.get(applicantId);
         const pending = pendingJoins[applicantId];
 
@@ -210,12 +213,14 @@ io.on('connection', (socket) => {
     });
 
     socket.on('get_players', ({ room }) => {
+        if (room) room = room.trim().toUpperCase();
         if (rooms[room]) {
             socket.emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
         }
     });
 
     socket.on('update_player_order', ({ room, players }) => {
+        if (room) room = room.trim().toUpperCase();
         if (rooms[room]) {
             // In a real app, verify sender is host. For now, trust the client.
             rooms[room] = players;
@@ -224,6 +229,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('update_player_color', ({ room, color }) => {
+        if (room) room = room.trim().toUpperCase();
         if (rooms[room]) {
             const isTaken = rooms[room].some(p => p.color === color && p.id !== socket.id);
             if (isTaken) return;
@@ -237,6 +243,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('kick_player', ({ room, targetId }) => {
+        if (room) room = room.trim().toUpperCase();
         // Verify sender is host
         if (roomMeta[room]?.hostId === socket.id) {
             const targetSocket = io.sockets.sockets.get(targetId);
@@ -255,6 +262,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('leave_room', ({ room }) => {
+        if (room) room = room.trim().toUpperCase();
         if (rooms[room]) {
             const index = rooms[room].findIndex(p => p.id === socket.id);
             if (index !== -1) {
@@ -279,18 +287,21 @@ io.on('connection', (socket) => {
     });
 
     socket.on('backup_state', ({ room, seatIndex, state, userId }) => {
+        if (room) room = room.trim().toUpperCase();
         if (!roomStates[room]) roomStates[room] = {};
         // Store with userId so we can find it on reconnection regardless of seat index
         roomStates[room][seatIndex] = { ...state, userId };
     });
 
     socket.on('request_state', ({ room, seatIndex }) => {
+        if (room) room = room.trim().toUpperCase();
         if (roomStates[room] && roomStates[room][seatIndex]) {
             socket.emit('load_state', roomStates[room][seatIndex]);
         }
     });
 
     socket.on('admin_assign_state', ({ room, targetId, seatIndex }) => {
+        if (room) room = room.trim().toUpperCase();
         // Host instructs a player to load state from a specific seat index
         if (roomStates[room] && roomStates[room][seatIndex]) {
             io.to(targetId).emit('load_state', roomStates[room][seatIndex]);
@@ -299,6 +310,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('game_action', ({ room, action, data }) => {
+        if (room) room = room.trim().toUpperCase();
         if (action === 'START_GAME') {
             if (roomMeta[room]) roomMeta[room].started = true;
         }
@@ -308,6 +320,7 @@ io.on('connection', (socket) => {
 
     // --- Local Table Slot Logic ---
     socket.on('request_claim_slot', ({ room, slotId, deck, tokens, playerName }) => {
+        if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('slot_claim_request', {
@@ -321,6 +334,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('confirm_slot_claim', ({ room, applicantId, slotId, approved }) => {
+        if (room) room = room.trim().toUpperCase();
         const applicantSocket = io.sockets.sockets.get(applicantId);
         if (applicantSocket) {
             if (approved) {
@@ -337,6 +351,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('play_card', ({ room, cardId }) => {
+        if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_play_card', { playerId: socket.id, cardId });
@@ -344,6 +359,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mulligan_decision', ({ room, keep }) => {
+        if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_mulligan', { playerId: socket.id, keep });
@@ -351,6 +367,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mobile_update_life', ({ room, amount }) => {
+        if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_update_life', { playerId: socket.id, amount });
@@ -358,6 +375,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mobile_update_counter', ({ room, type, amount, targetId }) => {
+        if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_update_counter', { playerId: socket.id, type, amount, targetId });
