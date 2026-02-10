@@ -3061,12 +3061,72 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // Compute available mana from untapped sources
     const manaInfo = useMemo(() => {
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-        return calculateAvailableMana(boardObjects, myId, myDefaultRotation);
+
+        // Determine commander colors for Command Tower logic
+        // Look for commander in command zone or on board
+        const myPlayer = playersList.find(p => p.id === myId);
+        let commander: CardData | undefined;
+        // Check if I am the controller
+        const amIController = (isLocal && myId === (playersList[mySeatIndex]?.id || 'player-0')) || (!isLocal && myId === (socket.id || 'local-player'));
+
+        if (amIController) {
+            // Use local state
+            commander = commandZone.find(c => c.isCommander);
+        } else {
+            // Check opponents commanders
+            const oppCmds = opponentsCommanders[myId];
+            if (oppCmds) {
+                commander = oppCmds.find(c => c.isCommander);
+            }
+        }
+
+        // Fallback to board search
+        if (!commander) {
+            commander = boardObjects.find(o => o.controllerId === myId && o.cardData.isCommander)?.cardData;
+        }
+
+        let cmdColors: ManaColor[] | undefined;
+        if (commander) {
+            // Estimate colors from mana cost
+            // This is a simplification; ideally we parse mana cost symbols
+            // For now, let's use producedMana if available, or just infer from cost string
+            const cost = commander.manaCost || "";
+            cmdColors = [];
+            if (cost.includes('W')) cmdColors.push('W');
+            if (cost.includes('U')) cmdColors.push('U');
+            if (cost.includes('B')) cmdColors.push('B');
+            if (cost.includes('R')) cmdColors.push('R');
+            if (cost.includes('G')) cmdColors.push('G');
+            if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
+            // Handle W/U etc.
+        }
+        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors);
     }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation]);
+
+    // Reset floating mana on turn change
+    useEffect(() => {
+        setFloatingMana({ ...EMPTY_POOL });
+    }, [turn, currentTurnPlayerId]);
+
+    const handleAddMana = (type: keyof ManaPool) => {
+        setFloatingMana(prev => ({
+            ...prev,
+            [type]: (prev[type] || 0) + 1
+        }));
+    };
+
+    const handleRemoveMana = (type: keyof ManaPool) => {
+        setFloatingMana(prev => ({
+            ...prev,
+            [type]: Math.max(0, (prev[type] || 0) - 1)
+        }));
+    };
 
     // Handle auto-tap when Tab is pressed
     const handleAutoTap = useCallback((card: CardData) => {
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
+
+        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
 
         const cost = parseManaCost(card.manaCost);
         if (cost.symbols.length === 0) return;
@@ -3077,7 +3137,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return;
         }
 
-        const result = autoTapForCost(cost, manaInfo.sources);
+        // 1. Try to pay with Floating Mana first
+        const result = autoTapForCost(cost, manaInfo.sources, floatingMana);
 
         if (!result.success) {
             addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
@@ -3096,46 +3157,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             updateBoardObject(id, { rotation: tappedRotation });
         });
 
-        // Update floating mana — subtract what was spent
-        const totalProduced: ManaPool = { ...EMPTY_POOL };
-        result.tappedIds.forEach(id => {
-            const obj = boardObjects.find(o => o.id === id);
-            if (obj?.cardData.producedMana) {
-                const colors = obj.cardData.producedMana as ManaColor[];
-                if (colors.length === 1) {
-                    totalProduced[colors[0]]++;
-                } else if (colors.length > 0) {
-                    // Multi-color: just add first color for simplicity
-                    totalProduced[colors[0]]++;
-                }
-            }
-        });
-
-        // The floating mana is what was produced minus the cost
-        const costPool: ManaPool = { ...EMPTY_POOL };
-        for (const sym of cost.symbols) {
-            if (sym.type === 'colored') costPool[sym.color]++;
-            else if (sym.type === 'generic') {
-                // Generic was paid with whatever was available
-                let rem = sym.count;
-                for (const c of MANA_COLORS) {
-                    const available = totalProduced[c] - costPool[c];
-                    const take = Math.min(rem, available);
-                    costPool[c] += take;
-                    rem -= take;
-                    if (rem <= 0) break;
-                }
-            }
-        }
-
+        // Update floating mana — subtract what was spent and add any excess produced
+        setFloatingMana(result.floatingManaRemaining);
 
         // Track mana stats
-        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
         const addProduced: Record<string, number> = {};
         const addUsed: Record<string, number> = {};
         MANA_COLORS.forEach(c => {
-            if (totalProduced[c] > 0) addProduced[c] = (gameStats[myId]?.manaProduced?.[c] || 0) + totalProduced[c];
-            if (costPool[c] > 0) addUsed[c] = (gameStats[myId]?.manaUsed?.[c] || 0) + costPool[c];
+            // Mana produced from tapping
+            if (result.manaProducedFromTap[c] > 0) {
+                addProduced[c] = (gameStats[myId]?.manaProduced?.[c] || 0) + result.manaProducedFromTap[c];
+            }
+            // Mana used from floating or tapping
+            if (result.manaUsed[c] > 0) {
+                addUsed[c] = (gameStats[myId]?.manaUsed?.[c] || 0) + result.manaUsed[c];
+            }
         });
         updateMyStats({
             manaProduced: { ...gameStats[myId]?.manaProduced, ...addProduced },
@@ -3147,6 +3183,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             type: 'AUTO_TAP',
             tappedIds: result.tappedIds,
             previousStates,
+            previousFloatingMana: floatingMana, // Save previous floating mana for undo
         });
 
         // Visual flash feedback
@@ -3157,7 +3194,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
         addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
         setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo]);
+    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats]);
 
     // Handle undo (Ctrl+Z)
     const handleUndo = useCallback(() => {
@@ -4743,9 +4780,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     )}
                 </div>
 
-                {/* Mana Display (New) */}
-                {gamePhase === 'PLAYING' && !isMobile && (
-                    <ManaDisplay pool={manaInfo.pool} potentialPool={manaInfo.potentialPool} />
+                {/* Mana Display */}
+                {(gamePhase === 'PLAYING') && (
+                    <ManaDisplay
+                        pool={manaInfo.pool}
+                        potentialPool={manaInfo.potentialPool}
+                        floatingMana={floatingMana}
+                        onAddMana={handleAddMana}
+                        onRemoveMana={handleRemoveMana}
+                    />
                 )}
 
                 {/* Auto-Tap Flash Overlay — highlights tapped cards */}

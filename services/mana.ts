@@ -98,7 +98,8 @@ export const parseProducedMana = (producedMana: string[] | undefined): ManaColor
 export const calculateAvailableMana = (
     boardObjects: BoardObject[],
     controllerId: string,
-    defaultRotation: number
+    defaultRotation: number,
+    commanderColors?: ManaColor[]
 ): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[] } => {
     const pool: ManaPool = { ...EMPTY_POOL };
     const potentialPool: ManaPool = { ...EMPTY_POOL };
@@ -120,12 +121,21 @@ export const calculateAvailableMana = (
             }
         }
 
-        // Check if tapped (rotation matches default = untapped)
-        const isTapped = obj.rotation !== defaultRotation || obj.tappedQuantity > 0;
-        if (isTapped) return;
+        // Handle Command Tower (filter by commander colors)
+        if (obj.cardData.name === 'Command Tower' && commanderColors) {
+            produced = produced.filter(c => commanderColors.includes(c));
+        }
+
+        // Check availability based on stacking
+        const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
+        if (untappedCount === 0) return; // All tapped
 
         const isBasic = isBasicLand(obj.cardData.name);
-        const isFlexible = produced.length > 2 || produced.includes('W' as ManaColor) && produced.includes('U' as ManaColor) && produced.includes('B' as ManaColor);
+
+        // Flexible if produces >1 options (but not Sol Ring {C}{C})
+        const uniqueColors = new Set(produced);
+        const isFlexible = uniqueColors.size > 1;
+
         const abilityType = obj.cardData.manaAbilityType || 'tap';
         const activationCost = obj.cardData.manaActivationCost;
 
@@ -142,12 +152,16 @@ export const calculateAvailableMana = (
 
         // Only simple 'tap' sources count as readily available
         if (abilityType === 'tap') {
-            sources.push(source);
-            produced.forEach(c => { pool[c] += 1; });
+            for (let i = 0; i < untappedCount; i++) {
+                sources.push(source);
+                produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
+            }
         } else {
             // activated, multi, complex — goes to potential pool
-            potentialSources.push(source);
-            produced.forEach(c => { potentialPool[c] += 1; });
+            for (let i = 0; i < untappedCount; i++) {
+                potentialSources.push(source);
+                produced.forEach(c => { potentialPool[c] = (potentialPool[c] || 0) + 1; });
+            }
         }
     });
 
@@ -192,120 +206,181 @@ export const getBasicLandColor = (name: string): ManaColor | null => {
 export const autoTapForCost = (
     cost: ManaCost,
     sources: ManaSource[],
+    initialFloatingMana: ManaPool = { ...EMPTY_POOL },
     xValue: number = 0
-): { tappedIds: string[]; success: boolean; floatingMana: ManaPool } => {
-    if (cost.symbols.length === 0 && !cost.hasX) {
-        return { tappedIds: [], success: true, floatingMana: { ...EMPTY_POOL } };
-    }
+): {
+    tappedIds: string[];
+    success: boolean;
+    floatingManaRemaining: ManaPool;
+    manaProducedFromTap: ManaPool;
+    manaUsed: ManaPool;
+} => {
+    // 1. Calculate stats tracking
+    const manaProducedFromTap: ManaPool = { ...EMPTY_POOL };
+    const manaUsed: ManaPool = { ...EMPTY_POOL };
+    const currentFloating = { ...initialFloatingMana };
 
-    // Sort sources by priority: basics first (0), then single-color (1), duals (2), flexible (3)
-    const availableSources = [...sources].sort((a, b) => a.priority - b.priority);
-    const tappedIds: string[] = [];
-    const floatingMana: ManaPool = { ...EMPTY_POOL };
+    // Helper to pay with floating
+    const payWithFloating = (color: ManaColor, count: number): number => {
+        const available = currentFloating[color] || 0;
+        const paid = Math.min(available, count);
+        currentFloating[color] -= paid;
+        manaUsed[color] += paid;
+        return paid;
+    };
 
-    // Phase 1: Pay colored costs first (most restrictive)
-    const coloredCosts: ManaColor[] = [];
-    const hybridCosts: ManaColor[][] = [];
-    let genericCost = 0;
+    // 2. Flatten cost to individual requirements
+    const costToPay: { type: 'colored' | 'generic' | 'hybrid', color?: ManaColor, options?: ManaColor[] }[] = [];
 
     for (const sym of cost.symbols) {
         if (sym.type === 'colored') {
-            coloredCosts.push(sym.color);
+            costToPay.push({ type: 'colored', color: sym.color });
         } else if (sym.type === 'generic') {
-            genericCost += sym.count;
+            for (let i = 0; i < sym.count; i++) costToPay.push({ type: 'generic' });
         } else if (sym.type === 'hybrid') {
-            hybridCosts.push(sym.options);
+            costToPay.push({ type: 'hybrid', options: sym.options });
         } else if (sym.type === 'x') {
-            genericCost += xValue;
+            for (let i = 0; i < xValue; i++) costToPay.push({ type: 'generic' });
         }
     }
 
-    // Sort colored costs so rarest colors are paid first
-    const colorCounts: Record<ManaColor, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
-    availableSources.forEach(s => s.producedMana.forEach(c => colorCounts[c]++));
-    coloredCosts.sort((a, b) => colorCounts[a] - colorCounts[b]);
+    // 3. Pay cost using Floating Mana first
+    const finalCostToTap: typeof costToPay = [];
 
-    // Pay each colored cost
-    for (const color of coloredCosts) {
-        const sourceIdx = availableSources.findIndex(s =>
-            !tappedIds.includes(s.objectId) && s.producedMana.includes(color)
-        );
-        if (sourceIdx === -1) {
-            return { tappedIds: [], success: false, floatingMana: { ...EMPTY_POOL } };
+    for (const req of costToPay) {
+        let paid = false;
+        if (req.type === 'colored' && req.color) {
+            if ((currentFloating[req.color] || 0) > 0) {
+                payWithFloating(req.color, 1);
+                paid = true;
+            }
+        } else if (req.type === 'hybrid' && req.options) {
+            // Prefer the option we have most of?
+            const best = req.options.sort((a, b) => (currentFloating[b] || 0) - (currentFloating[a] || 0))[0];
+            if ((currentFloating[best] || 0) > 0) {
+                payWithFloating(best, 1);
+                paid = true;
+            }
+        } else if (req.type === 'generic') {
+            // Pay with Colorless first
+            if ((currentFloating.C || 0) > 0) {
+                payWithFloating('C', 1);
+                paid = true;
+            } else {
+                // Pay with any available floating
+                const available = MANA_COLORS.find(c => (currentFloating[c] || 0) > 0);
+                if (available) {
+                    payWithFloating(available, 1);
+                    paid = true;
+                }
+            }
         }
+
+        if (!paid) finalCostToTap.push(req);
+    }
+
+    if (finalCostToTap.length === 0) {
+        return { tappedIds: [], success: true, floatingManaRemaining: currentFloating, manaProducedFromTap, manaUsed };
+    }
+
+    // 4. Tap Sources for Remainder
+    const availableSources = [...sources].sort((a, b) => a.priority - b.priority);
+    const tappedIds: string[] = [];
+
+    // Helpers for Tapping
+    const processTap = (reqColor: ManaColor): boolean => {
+        const sourceIdx = availableSources.findIndex(s => !tappedIds.includes(s.objectId) && s.producedMana.includes(reqColor));
+        if (sourceIdx === -1) return false;
+
         const source = availableSources[sourceIdx];
         tappedIds.push(source.objectId);
 
-        // Any extra mana this source produces becomes floating
-        if (source.producedMana.length === 1) {
-            // Single producer - the color is "spent," but if it produces multiple (like Sol Ring),
-            // extra goes to floating
-            // Actually for single-color sources, just mark the color as used
+        const unique = new Set(source.producedMana);
+        if (unique.size === 1) {
+            // Fixed producer (e.g. Land or Sol Ring)
+            const color = source.producedMana[0] as ManaColor;
+            const count = source.producedMana.length;
+            manaProducedFromTap[color] += count; // Stats
+            currentFloating[color] += count; // Add to pool
+
+            // Spend 1 for requirement
+            currentFloating[reqColor]--;
+            manaUsed[reqColor]++;
         } else {
-            // Multi-color: the player "chose" this color, extra mana doesn't apply for tap-for-one sources
+            // Flexible producer (e.g. City of Brass)
+            manaProducedFromTap[reqColor] += 1; // Stats
+            // Implicitly produced and used 1
+            manaUsed[reqColor]++;
         }
+        return true;
+    };
+
+    // Separate requirements
+    const colorReqs = finalCostToTap.filter(r => r.type === 'colored');
+    const hybridReqs = finalCostToTap.filter(r => r.type === 'hybrid');
+    const genReqs = finalCostToTap.filter(r => r.type === 'generic');
+
+    // Tap for Colored
+    for (const req of colorReqs) {
+        if (!req.color || !processTap(req.color)) return { tappedIds: [], success: false, floatingManaRemaining: initialFloatingMana, manaProducedFromTap: { ...EMPTY_POOL }, manaUsed: { ...EMPTY_POOL } };
     }
 
-    // Pay hybrid costs (pick whichever color we have more of)
-    for (const options of hybridCosts) {
-        // Try each option, prefer the one with more available sources
-        let paid = false;
-        const sortedOptions = [...options].sort((a, b) => colorCounts[b] - colorCounts[a]);
-        for (const color of sortedOptions) {
-            const sourceIdx = availableSources.findIndex(s =>
-                !tappedIds.includes(s.objectId) && s.producedMana.includes(color)
-            );
-            if (sourceIdx !== -1) {
-                tappedIds.push(availableSources[sourceIdx].objectId);
-                paid = true;
+    // Tap for Hybrid
+    for (const req of hybridReqs) {
+        if (!req.options) continue;
+        let done = false;
+        // Try paying with floating (if new mana was produced?)
+        for (const opt of req.options) {
+            if ((currentFloating[opt] || 0) > 0) {
+                payWithFloating(opt, 1);
+                done = true;
                 break;
             }
         }
-        if (!paid) {
-            return { tappedIds: [], success: false, floatingMana: { ...EMPTY_POOL } };
-        }
-    }
-
-    // Pay generic costs with remaining untapped sources (basics first, flex last)
-    for (let i = 0; i < genericCost; i++) {
-        const sourceIdx = availableSources.findIndex(s => !tappedIds.includes(s.objectId));
-        if (sourceIdx === -1) {
-            return { tappedIds: [], success: false, floatingMana: { ...EMPTY_POOL } };
-        }
-        tappedIds.push(availableSources[sourceIdx].objectId);
-    }
-
-    // Calculate floating mana from tapped sources
-    // Each tapped source contributes its primary color to the floating pool
-    for (const id of tappedIds) {
-        const source = availableSources.find(s => s.objectId === id);
-        if (source) {
-            if (source.isBasic) {
-                const basicColor = getBasicLandColor(source.cardName);
-                if (basicColor) floatingMana[basicColor]++;
-            } else if (source.producedMana.length === 1) {
-                floatingMana[source.producedMana[0]]++;
-            } else {
-                // For multi-color sources, we assigned a specific color above
-                // For simplicity, add the first produced color
-                // In a perfect implementation, we'd track which color was chosen
-                floatingMana[source.producedMana[0]]++;
+        if (!done) {
+            for (const opt of req.options) {
+                if (processTap(opt)) {
+                    done = true;
+                    break;
+                }
             }
         }
+        if (!done) return { tappedIds: [], success: false, floatingManaRemaining: initialFloatingMana, manaProducedFromTap: { ...EMPTY_POOL }, manaUsed: { ...EMPTY_POOL } };
     }
 
-    // Now subtract the cost from floating mana
-    const spent: ManaPool = { ...EMPTY_POOL };
-    for (const color of coloredCosts) { spent[color]++; }
-    for (const options of hybridCosts) { spent[options[0]]++; } // simplified
-    // Generic: spent from whatever was tapped
-    // The floating mana shows what's produced minus what's spent for the cost
+    // Tap for Generic
+    for (const req of genReqs) {
+        // Try paying with floating
+        const anyFloat = MANA_COLORS.find(c => (currentFloating[c] || 0) > 0);
+        if (anyFloat) {
+            payWithFloating(anyFloat, 1);
+            continue;
+        }
 
-    MANA_COLORS.forEach(c => {
-        floatingMana[c] = Math.max(0, floatingMana[c] - spent[c]);
-    });
+        // Tap generic
+        const sourceIdx = availableSources.findIndex(s => !tappedIds.includes(s.objectId));
+        if (sourceIdx === -1) return { tappedIds: [], success: false, floatingManaRemaining: initialFloatingMana, manaProducedFromTap: { ...EMPTY_POOL }, manaUsed: { ...EMPTY_POOL } };
 
-    return { tappedIds, success: true, floatingMana };
+        const source = availableSources[sourceIdx];
+        tappedIds.push(source.objectId);
+
+        const unique = new Set(source.producedMana);
+        if (unique.size === 1) {
+            const color = source.producedMana[0] as ManaColor;
+            const count = source.producedMana.length;
+            manaProducedFromTap[color] += count;
+            currentFloating[color] += count;
+
+            currentFloating[color]--;
+            manaUsed[color]++;
+        } else {
+            const color = source.producedMana[0] as ManaColor;
+            manaProducedFromTap[color] += 1;
+            manaUsed[color]++;
+        }
+    }
+
+    return { tappedIds, success: true, floatingManaRemaining: currentFloating, manaProducedFromTap, manaUsed };
 };
 
 // --- Floating Mana from Manual Taps ---
@@ -388,6 +463,7 @@ export type UndoableAction = {
     type: 'AUTO_TAP';
     tappedIds: string[];
     previousStates: { id: string; rotation: number; tappedQuantity: number }[];
+    previousFloatingMana: ManaPool;
 };
 
 export const MAX_UNDO_HISTORY = 6;
@@ -396,39 +472,68 @@ export const MAX_UNDO_HISTORY = 6;
 // --- Mana Production Estimation ---
 // Heuristic to determine produced mana colors if Scryfall data is missing
 export const estimateProducedMana = (card: { name: string; typeLine: string; oracleText: string; producedMana?: string[] }): import('../types').CardData['producedMana'] => {
-    // If we already have data, trust it (unless empty and it's a basic land)
-    if (card.producedMana && card.producedMana.length > 0) return card.producedMana;
+    // If we already have confirmed data from Scryfall, trust it (with exceptions)
+    if (card.producedMana && card.producedMana.length > 0) {
+        if (card.name === 'Sol Ring') {
+            const cCount = card.producedMana.filter(m => m === 'C').length;
+            if (cCount < 2) return [...card.producedMana, 'C'];
+        }
+        return card.producedMana;
+    }
 
-    const produced: Set<string> = new Set();
+    const produced: string[] = [];
     const typeLine = card.typeLine.toLowerCase();
     const text = card.oracleText ? card.oracleText.toLowerCase() : "";
 
     // 1. Basic Land Types (intrinsic ability)
-    if (typeLine.includes('plains')) produced.add('W');
-    if (typeLine.includes('island')) produced.add('U');
-    if (typeLine.includes('swamp')) produced.add('B');
-    if (typeLine.includes('mountain')) produced.add('R');
-    if (typeLine.includes('forest')) produced.add('G');
-    if (typeLine.includes('wastes')) produced.add('C');
+    if (typeLine.includes('plains')) produced.push('W');
+    if (typeLine.includes('island')) produced.push('U');
+    if (typeLine.includes('swamp')) produced.push('B');
+    if (typeLine.includes('mountain')) produced.push('R');
+    if (typeLine.includes('forest')) produced.push('G');
+    if (typeLine.includes('wastes')) produced.push('C');
 
     // 2. Oracle Text Analysis "Add {X}"
-    if (text.includes('add {w}')) produced.add('W');
-    if (text.includes('add {u}')) produced.add('U');
-    if (text.includes('add {b}')) produced.add('B');
-    if (text.includes('add {r}')) produced.add('R');
-    if (text.includes('add {g}')) produced.add('G');
-    if (text.includes('add {c}')) produced.add('C');
+    // Match specific symbols
+    const matches = text.match(/add\s*((?:\{[wubrgc0-9]\})+)/g);
+    if (matches) {
+        matches.forEach(match => {
+            if (match.includes('{w}')) produced.push('W');
+            if (match.includes('{u}')) produced.push('U');
+            if (match.includes('{b}')) produced.push('B');
+            if (match.includes('{r}')) produced.push('R');
+            if (match.includes('{g}')) produced.push('G');
+            if (match.includes('{c}')) produced.push('C');
+            // Duplicate handling for {C}{C} (Sol Ring)
+            // If the string has multiple of same char, push multiple?
+            // "add {c}{c}" -> match group "{c}{c}"
+            const cCount = (match.match(/\{c\}/g) || []).length;
+            // We already pushed one C if includes('{c}').
+            // If cCount > 1, push extra.
+            for (let i = 1; i < cCount; i++) produced.push('C');
+        });
+    }
 
-    // 3. "Add one mana of any color"
-    if (text.includes('one mana of any color') || text.includes('add one mana of any type')) {
-        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
+    // 3. "Add one mana of any color" or Command Tower / Arcane Signet
+    if (text.includes('one mana of any color') || text.includes('add one mana of any type') || card.name === 'Command Tower' || card.name === 'Arcane Signet') {
+        const anyColor = ['W', 'U', 'B', 'R', 'G'];
+        // We return ALL colors as "potential" production
+        // But for flexible sources, we usually want to know OPTIONS.
+        // producedMana usually stores OPTIONS for multi.
+        // For Sol Ring, it stores ['C', 'C'].
+        // For Arcane Signet, it stores ['W', 'U', 'B', 'R', 'G'].
+        anyColor.forEach(c => {
+            if (!produced.includes(c)) produced.push(c);
+        });
     }
 
     // 4. Common keywords/patterns
-    if (card.name === 'Sol Ring') produced.add('C');
-    if (card.name === 'Arcane Signet') ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
-    if (card.name === 'Command Tower') ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.add(c));
+    if (card.name === 'Sol Ring') {
+        // Ensure at least 2 C
+        const cCount = produced.filter(c => c === 'C').length;
+        if (cCount < 2) produced.push('C'); // Add missing C
+    }
 
-    if (produced.size > 0) return Array.from(produced);
+    if (produced.length > 0) return produced;
     return undefined;
 };
