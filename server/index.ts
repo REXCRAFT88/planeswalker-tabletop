@@ -3,11 +3,16 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import helmet from 'helmet';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Security headers (CSP disabled — requires careful tuning for CDN scripts)
+app.use(helmet({ contentSecurityPolicy: false }));
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
@@ -44,6 +49,27 @@ const roomMeta: Record<string, { started: boolean, hostId?: string, gameType?: '
 const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
+// --- Security Helpers ---
+const MAX_STATE_SIZE = 1 * 1024 * 1024; // 1MB max for state backups
+
+const isInRoom = (socketId: string, room: string): boolean => {
+    return rooms[room]?.some(p => p.id === socketId) ?? false;
+};
+
+const isHost = (socketId: string, room: string): boolean => {
+    return roomMeta[room]?.hostId === socketId;
+};
+
+const sanitizeName = (name: string): string => {
+    if (typeof name !== 'string') return 'Unknown';
+    return name.trim().slice(0, 32).replace(/[<>"']/g, '');
+};
+
+const isValidRoom = (room: string): boolean => {
+    if (typeof room !== 'string') return false;
+    return /^[A-Z0-9]{1,10}$/.test(room.trim().toUpperCase());
+};
+
 const getSafeColor = (roomPlayers: Player[], requestedColor: string) => {
     const usedColors = new Set(roomPlayers.filter(p => !p.disconnected).map(p => p.color));
     if (!usedColors.has(requestedColor)) return requestedColor;
@@ -67,6 +93,8 @@ io.on('connection', (socket) => {
         if (!room) return;
         const rawRoom = room;
         room = room.trim().toUpperCase();
+        name = sanitizeName(name);
+        if (!isValidRoom(room)) return;
         console.log(`[JOIN_ROOM] Socket: ${socket.id}, RawRoom: "${rawRoom}", ProcessedRoom: "${room}", Name: "${name}", UserId: "${userId}"`);
         if (!rooms[room]) {
             rooms[room] = [];
@@ -177,6 +205,7 @@ io.on('connection', (socket) => {
 
     socket.on('resolve_join_request', ({ room, applicantId, approved }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return; // Only host can approve/deny
         const applicantSocket = io.sockets.sockets.get(applicantId);
         const pending = pendingJoins[applicantId];
 
@@ -223,11 +252,9 @@ io.on('connection', (socket) => {
 
     socket.on('update_player_order', ({ room, players }) => {
         if (room) room = room.trim().toUpperCase();
-        if (rooms[room]) {
-            // In a real app, verify sender is host. For now, trust the client.
-            rooms[room] = players;
-            io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
-        }
+        if (!rooms[room] || !isHost(socket.id, room)) return; // Host-only
+        rooms[room] = players;
+        io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
     });
 
     socket.on('update_player_color', ({ room, color }) => {
@@ -290,6 +317,10 @@ io.on('connection', (socket) => {
 
     socket.on('backup_state', ({ room, seatIndex, state, userId }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return; // Must be in the room
+        // Limit state size to prevent memory abuse
+        const stateStr = JSON.stringify(state);
+        if (stateStr.length > MAX_STATE_SIZE) return;
         if (!roomStates[room]) roomStates[room] = {};
         // Store with userId so we can find it on reconnection regardless of seat index
         roomStates[room][seatIndex] = { ...state, userId };
@@ -297,6 +328,7 @@ io.on('connection', (socket) => {
 
     socket.on('request_state', ({ room, seatIndex }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return; // Must be in the room
         if (roomStates[room] && roomStates[room][seatIndex]) {
             socket.emit('load_state', roomStates[room][seatIndex]);
         }
@@ -304,7 +336,7 @@ io.on('connection', (socket) => {
 
     socket.on('admin_assign_state', ({ room, targetId, seatIndex }) => {
         if (room) room = room.trim().toUpperCase();
-        // Host instructs a player to load state from a specific seat index
+        if (!isHost(socket.id, room)) return; // Host-only action
         if (roomStates[room] && roomStates[room][seatIndex]) {
             io.to(targetId).emit('load_state', roomStates[room][seatIndex]);
             io.to(targetId).emit('notification', { message: `Host assigned you to Seat ${seatIndex + 1}. Loading game data...` });
@@ -313,7 +345,9 @@ io.on('connection', (socket) => {
 
     socket.on('game_action', ({ room, action, data }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return; // Must be in the room
         if (action === 'START_GAME') {
+            if (!isHost(socket.id, room)) return; // Only host can start
             if (roomMeta[room]) roomMeta[room].started = true;
         }
         // Broadcast the action to everyone else in the room
@@ -337,6 +371,7 @@ io.on('connection', (socket) => {
 
     socket.on('confirm_slot_claim', ({ room, applicantId, slotId, approved }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return; // Only host can confirm
         const applicantSocket = io.sockets.sockets.get(applicantId);
         if (applicantSocket) {
             if (approved) {
@@ -348,12 +383,18 @@ io.on('connection', (socket) => {
     });
 
     // --- Mobile Gameplay Events ---
+    // --- Mobile Gameplay Events (all require room membership) ---
     socket.on('send_hand_update', ({ roomId, targetId, hand, phase, mulliganCount }) => {
+        if (roomId) {
+            const r = roomId.trim().toUpperCase();
+            if (!isInRoom(socket.id, r)) return;
+        }
         io.to(targetId).emit('hand_update', { hand, phase, mulliganCount });
     });
 
     socket.on('play_card', ({ room, cardId }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_play_card', { playerId: socket.id, cardId });
@@ -362,6 +403,7 @@ io.on('connection', (socket) => {
 
     socket.on('mulligan_decision', ({ room, keep }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_mulligan', { playerId: socket.id, keep });
@@ -370,6 +412,7 @@ io.on('connection', (socket) => {
 
     socket.on('mobile_update_life', ({ room, amount }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_update_life', { playerId: socket.id, amount });
@@ -378,6 +421,7 @@ io.on('connection', (socket) => {
 
     socket.on('mobile_update_counter', ({ room, type, amount, targetId }) => {
         if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
         const hostId = roomMeta[room]?.hostId;
         if (hostId) {
             io.to(hostId).emit('mobile_update_counter', { playerId: socket.id, type, amount, targetId });
@@ -435,6 +479,28 @@ io.on('connection', (socket) => {
         delete pendingJoins[socket.id];
     });
 });
+
+// Periodic cleanup of stale rooms (every 60 seconds)
+setInterval(() => {
+    const now = Date.now();
+    for (const room in rooms) {
+        if (rooms[room].every(p => p.disconnected)) {
+            const oldest = Math.min(...rooms[room].map(p => p.disconnectedAt || now));
+            if (now - oldest > 10 * 60 * 1000) { // 10 min fully-disconnected = remove
+                console.log(`[CLEANUP] Removing stale room: ${room}`);
+                delete rooms[room];
+                delete roomMeta[room];
+                delete roomStates[room];
+            }
+        }
+    }
+    // Clean up dangling pending joins from disconnected sockets
+    for (const socketId in pendingJoins) {
+        if (!io.sockets.sockets.has(socketId)) {
+            delete pendingJoins[socketId];
+        }
+    }
+}, 60 * 1000);
 
 httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

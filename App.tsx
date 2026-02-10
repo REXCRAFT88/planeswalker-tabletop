@@ -160,7 +160,7 @@ function App() {
         setIsLocalTableHost(isLocalTable);
         if (isLocalTable) {
             // Generate a 4-letter room code
-            const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+            const code = crypto.randomUUID().slice(0, 6).toUpperCase();
             setRoomId(code);
         } else {
             setRoomId("LOCAL");

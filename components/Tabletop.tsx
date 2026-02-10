@@ -3530,6 +3530,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const obj = boardObjects.find(o => o.id === id);
         if (!obj) { setLibraryAction({ isOpen: false, cardId: '' }); return; }
         setBoardObjects(prev => prev.filter(o => o.id !== id));
+        emitAction('REMOVE_OBJECT', { id });
         const card = obj.cardData;
         if (action === 'TOP') setLibrary(prev => [card, ...prev]);
         else if (action === 'BOTTOM') setLibrary(prev => [...prev, card]);
