@@ -65,7 +65,9 @@ io.on('connection', (socket) => {
 
     socket.on('join_room', ({ room, name, color, userId, isTable }) => {
         if (!room) return;
+        const rawRoom = room;
         room = room.trim().toUpperCase();
+        console.log(`[JOIN_ROOM] Socket: ${socket.id}, RawRoom: "${rawRoom}", ProcessedRoom: "${room}", Name: "${name}", UserId: "${userId}"`);
         if (!rooms[room]) {
             rooms[room] = [];
         }

@@ -1528,6 +1528,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 exile: exile.length,
                 hand: hand.filter(c => !c.isToken).length,
                 command: commandZone.length,
+                commanders: commandZone
             };
             socket.emit('game_action', {
                 room: roomId,
@@ -1761,7 +1762,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 // Robustly detect reconnections via userId matching
                 newPlayers.forEach(np => {
                     // Check if this user was already in the game with a different ID
-                    const oldP = prevPlayers.find(p => p.userId === np.userId && p.id !== np.id);
+                    const oldP = prevPlayers.find(p => p.userId && np.userId && p.userId === np.userId && p.id !== np.id);
                     if (oldP) {
                         reconMap[oldP.id] = np.id;
                         console.log(`Host inferred reconnection: ${oldP.id} -> ${np.id} (User: ${np.name})`);

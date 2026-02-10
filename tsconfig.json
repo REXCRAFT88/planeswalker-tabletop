@@ -10,7 +10,7 @@
       "DOM.Iterable"
     ],
     "skipLibCheck": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -27,6 +27,8 @@
     "**/*.tsx"
   ],
   "exclude": [
+    "planeswalker-tabletop old",
+    "dist",
     "node_modules"
   ]
 }
