@@ -116,6 +116,10 @@ function App() {
     };
 
     const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string) => {
+        // Prevent re-triggering if already in a game-related view (fixes infinite deck-select loop)
+        if (currentView === View.GAME || currentView === View.DECK_SELECT ||
+            currentView === View.MOBILE_CONTROLLER || currentView === View.LOCAL_GAME) return;
+
         if (code) setRoomId(code);
         setIsGameStarted(!!isStarted);
 

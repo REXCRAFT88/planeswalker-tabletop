@@ -157,10 +157,13 @@ export const Lobby: React.FC<LobbyProps> = ({
             setJoinStatus(message);
         });
 
-        socket.on('join_success', ({ room, isGameStarted, userId, gameType }) => {
+        socket.once('join_success', ({ room, isGameStarted, userId, gameType }: any) => {
             if (userId) {
                 localStorage.setItem(`planeswalker_user_id_${room}`, userId);
             }
+            // Clean up all join-related listeners
+            socket.off('join_error');
+            socket.off('join_pending');
             setIsJoining(false);
             onJoin(room, isGameStarted, gameType);
         });
