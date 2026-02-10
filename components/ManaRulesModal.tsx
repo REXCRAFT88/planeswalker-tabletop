@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, RotateCcw, Plus, Minus, Info } from 'lucide-react';
+import { X, RotateCcw, Plus, Minus, Info, Crown } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 
 const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
@@ -23,6 +23,7 @@ const MANA_LABELS: Record<ManaColor, string> = {
 interface ManaRulesModalProps {
     card: CardData;
     existingRule?: ManaRule;
+    commanderColors?: ManaColor[];
     onSave: (rule: ManaRule | null) => void; // null = reset to default
     onClose: () => void;
 }
@@ -70,8 +71,8 @@ const RadioGroup: React.FC<{
                 key={opt.value}
                 onClick={() => onChange(opt.value)}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-all border ${selected === opt.value
-                        ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/30'
-                        : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-gray-500'
+                    ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/30'
+                    : 'bg-gray-800 border-gray-600 text-gray-300 hover:border-gray-500'
                     }`}
                 title={opt.desc}
             >
@@ -81,7 +82,7 @@ const RadioGroup: React.FC<{
     </div>
 );
 
-export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, onSave, onClose }) => {
+export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, commanderColors, onSave, onClose }) => {
     const [rule, setRule] = useState<ManaRule>(() => {
         if (existingRule) return { ...existingRule };
         return { ...EMPTY_MANA_RULE };
@@ -240,6 +241,33 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                     {/* Primary production */}
                                     <div>
                                         <span className="text-xs text-gray-500 mb-2 block">Produces:</span>
+                                        {/* Preset buttons */}
+                                        <div className="flex gap-2 mb-2">
+                                            {commanderColors && commanderColors.length > 0 && (
+                                                <button
+                                                    onClick={() => {
+                                                        const preset: Record<ManaColor, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
+                                                        commanderColors.forEach(c => { preset[c] = 1; });
+                                                        updateRule('produced', preset);
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-purple-500 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition-all"
+                                                    title="Set to commander color identity"
+                                                >
+                                                    <Crown size={12} className="text-purple-400" />
+                                                    Commander Color
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => {
+                                                    updateRule('produced', { W: 1, U: 1, B: 1, R: 1, G: 1, C: 0 });
+                                                }}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-amber-500 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition-all"
+                                                title="Set to all 5 colors (WUBRG)"
+                                            >
+                                                <img src="/mana/all.png" alt="WUBRG" className="w-4 h-4 object-contain" />
+                                                WUBRG
+                                            </button>
+                                        </div>
                                         <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
                                             {MANA_COLORS.map(color => (
                                                 <ManaCounter
@@ -257,8 +285,8 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                         <button
                                             onClick={toggleAlt}
                                             className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${hasAlt
-                                                    ? 'bg-amber-600 border-amber-500 text-white'
-                                                    : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'
+                                                ? 'bg-amber-600 border-amber-500 text-white'
+                                                : 'bg-gray-800 border-gray-600 text-gray-400 hover:border-gray-500'
                                                 }`}
                                         >
                                             {hasAlt ? 'Remove OR Option' : '+ Add OR Option'}

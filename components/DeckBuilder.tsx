@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
-import { CardData, ManaRule } from '../types';
+import { CardData, ManaRule, ManaColor } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter } from 'lucide-react';
 
@@ -442,6 +442,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 <ManaRulesModal
                     card={manaRulesCard}
                     existingRule={manaRules[manaRulesCard.scryfallId]}
+                    commanderColors={(() => {
+                        const commander = stagedDeck?.find(c => c.isCommander);
+                        if (!commander?.manaCost) return undefined;
+                        const colors: ManaColor[] = [];
+                        if (commander.manaCost.includes('W')) colors.push('W');
+                        if (commander.manaCost.includes('U')) colors.push('U');
+                        if (commander.manaCost.includes('B')) colors.push('B');
+                        if (commander.manaCost.includes('R')) colors.push('R');
+                        if (commander.manaCost.includes('G')) colors.push('G');
+                        return colors.length > 0 ? colors : undefined;
+                    })()}
                     onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                     onClose={() => setManaRulesCard(null)}
                 />

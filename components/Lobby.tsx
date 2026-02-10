@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
-import { CardData, ManaRule } from '../types';
+import { CardData, ManaRule, ManaColor } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
 import { connectSocket } from '../services/socket';
 import { SavedDeck } from '../App';
@@ -594,6 +594,17 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <ManaRulesModal
                         card={manaRulesCard}
                         existingRule={editingDeck.manaRules?.[manaRulesCard.scryfallId]}
+                        commanderColors={(() => {
+                            const commander = editingDeck.deck.find((c: CardData) => c.isCommander);
+                            if (!commander?.manaCost) return undefined;
+                            const colors: ManaColor[] = [];
+                            if (commander.manaCost.includes('W')) colors.push('W');
+                            if (commander.manaCost.includes('U')) colors.push('U');
+                            if (commander.manaCost.includes('B')) colors.push('B');
+                            if (commander.manaCost.includes('R')) colors.push('R');
+                            if (commander.manaCost.includes('G')) colors.push('G');
+                            return colors.length > 0 ? colors : undefined;
+                        })()}
                         onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                         onClose={() => setManaRulesCard(null)}
                     />
