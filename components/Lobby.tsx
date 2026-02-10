@@ -418,22 +418,22 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     {savedDecks.map(deck => {
                                         const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
                                         return (
-                                            <div key={deck.id} className="bg-gray-700/50 border border-gray-600 rounded-xl p-4 flex flex-col sm:flex-row gap-4 hover:border-gray-500 transition group relative overflow-hidden">
-                                                <div className="w-20 h-28 bg-black rounded mx-auto sm:mx-0 overflow-hidden flex-shrink-0 relative">
+                                            <div key={deck.id} className="bg-gray-700/50 border border-gray-600 rounded-xl p-3 sm:p-4 flex flex-row gap-3 hover:border-gray-500 transition group relative">
+                                                <div className="w-14 h-20 sm:w-20 sm:h-28 bg-black rounded overflow-hidden flex-shrink-0 relative">
                                                     {commander ? <img src={commander.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-gray-800" />}
                                                     {deck.deck.some(c => c.isCommander) && <div className="absolute top-0 right-0 bg-amber-500 p-0.5 rounded-bl"><Crown size={8} className="text-black" /></div>}
                                                 </div>
-                                                <div className="flex-1 min-w-0 text-center sm:text-left">
-                                                    <h4 className="font-bold text-white truncate">{deck.name}</h4>
+                                                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                    <h4 className="font-bold text-white text-sm sm:text-base truncate">{deck.name}</h4>
                                                     <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
-                                                    <div className="flex gap-2 flex-wrap justify-center sm:justify-start">
-                                                        <button onClick={() => handleLoadDeck(deck)} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                    <div className="flex gap-2 flex-wrap">
+                                                        <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
                                                             <Play size={12} /> Load
                                                         </button>
-                                                        <button onClick={() => handleEditDeck(deck)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                        <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
                                                             <Edit3 size={12} /> Edit
                                                         </button>
-                                                        <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
+                                                        <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
                                                             <Trash2 size={12} /> Delete
                                                         </button>
                                                     </div>
