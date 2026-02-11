@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter } from 'lucide-react';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Share2, Clipboard } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
@@ -67,15 +67,86 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         }
     };
 
+    // Auto-generate default mana rules for new cards
+    useEffect(() => {
+        if (!stagedDeck) return;
+
+        const newRules = { ...manaRules };
+        let changed = false;
+
+        stagedDeck.forEach(card => {
+            if (card.isManaSource && !newRules[card.scryfallId]) {
+                const defaultRule = generateDefaultManaRule(card);
+                if (defaultRule) {
+                    newRules[card.scryfallId] = defaultRule;
+                    changed = true;
+                }
+            }
+        });
+
+        if (changed) {
+            setManaRules(newRules);
+        }
+    }, [stagedDeck]);
+
     const handleImport = async () => {
-        // ... (existing import logic, huge block, I should avoid replacing if possible but I selected a large range)
-        // I will just use the exact logic as before for handleImport, I only need to change finalizeDeck and Props
-        // Wait, replace_file_content shouldn't need me to paste the whole huge block if I can target smaller chunks.
-        // But my 'EndLine' is 164 which includes handleImport.
-        // I will use multi_replace to be surgical.
+        if (!deckText.trim()) return;
         setLoading(true);
-        // ...
-        // Actually, let me cancel this replace_file_content and use multi_replace to target Props and finalizeDeck separately.
+        setError(null);
+        setProgress(null);
+
+        try {
+            const parsed = parseDeckList(deckText);
+            if (parsed.length === 0) {
+                setError("No cards found in the list.");
+                setLoading(false);
+                return;
+            }
+
+            const names = parsed.map(p => p.name);
+            const cardMap = await fetchBatch(names, (current, total) => {
+                setProgress({ current, total });
+            });
+
+            // Preserve existing commander selection if possible
+            const existingCommanderId = stagedDeck?.find(c => c.isCommander)?.scryfallId;
+
+            const newDeck: CardData[] = [];
+            let commanderFound = false;
+
+            for (const item of parsed) {
+                const data = cardMap.get(item.name.toLowerCase());
+                if (data) {
+                    for (let i = 0; i < item.count; i++) {
+                        const isCmd = !commanderFound && data.scryfallId === existingCommanderId;
+                        if (isCmd) commanderFound = true;
+
+                        newDeck.push({
+                            ...data,
+                            id: crypto.randomUUID(),
+                            isCommander: isCmd
+                        });
+                    }
+
+                    // If we don't have a mana rule for this card yet, but it's a mana source,
+                    // we might have one from a previous version of this deck.
+                    // Actually, manaRules is a state variable in DeckBuilder which is NOT cleared
+                    // unless the card is missing from the final deck.
+                    // So we don't strictly need to "inject" them into the card objects,
+                    // but we should ensure they ARE generated if missing.
+                }
+            }
+
+            setStagedDeck(newDeck);
+            setDeckText('');
+            setStep('DECK');
+        } catch (err) {
+            console.error(err);
+            setError("Failed to import deck. Please check your internet connection.");
+        } finally {
+            setLoading(false);
+            setProgress(null);
+        }
     };
 
     const setCommander = (id: string) => {
@@ -309,6 +380,34 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                     className="flex items-center gap-2 px-3 py-2 bg-red-900/50 hover:bg-red-900 border border-red-800 text-white rounded-lg font-bold transition-colors text-xs md:text-sm"
                                 >
                                     <Trash2 size={16} /> New Deck
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(JSON.stringify(manaRules, null, 2));
+                                        alert("All mana rules copied to clipboard!");
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 rounded-lg font-bold transition-colors text-xs md:text-sm"
+                                    title="Export All Mana Rules (JSON)"
+                                >
+                                    <Share2 size={16} /> Export Rules
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const text = await navigator.clipboard.readText();
+                                            const parsed = JSON.parse(text);
+                                            if (typeof parsed === 'object') {
+                                                setManaRules(prev => ({ ...prev, ...parsed }));
+                                                alert("Mana rules imported!");
+                                            }
+                                        } catch (e) {
+                                            alert("Failed to import rules");
+                                        }
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-300 rounded-lg font-bold transition-colors text-xs md:text-sm"
+                                    title="Import Mana Rules from Clipboard"
+                                >
+                                    <Clipboard size={16} /> Import Rules
                                 </button>
                                 <button
                                     onClick={proceedToTokens}

@@ -897,6 +897,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
     const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
 
+    const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
+
+    // Sync state with prop initially or if prop changes (but allow internal override)
+    useEffect(() => {
+        if (manaRules) setManaRulesState(manaRules);
+    }, [manaRules]);
+
     // --- Undo System ---
     const [undoHistory, setUndoHistory] = useState<UndoableAction[]>([]);
     const pushUndo = useCallback((action: UndoableAction) => {
@@ -1142,6 +1149,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { turnStartTimeRef.current = turnStartTime; }, [turnStartTime]);
     useEffect(() => { gamePhaseRef.current = gamePhase; }, [gamePhase]);
 
+    const manaInfoRef = useRef<any>(null);
     useEffect(() => { boardObjectsRef.current = boardObjects; }, [boardObjects]);
     useEffect(() => { turnRef.current = turn; }, [turn]);
     useEffect(() => { roundRef.current = round; }, [round]);
@@ -1151,6 +1159,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { lifeRef.current = life; }, [life]);
     useEffect(() => { logsRef.current = logs; }, [logs]);
     useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
+
+    const hoveredCardIdRef = useRef<string | null>(null);
+    const lastPlayedCardRef = useRef<CardData | null>(null);
+    useEffect(() => { hoveredCardIdRef.current = hoveredCardId; }, [hoveredCardId]);
+    useEffect(() => { lastPlayedCardRef.current = lastPlayedCard; }, [lastPlayedCard]);
+    useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
+
 
     // --- Persistence & Auto-Restore ---
     useEffect(() => {
@@ -1177,10 +1192,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             opponentsLife,
             opponentsCounts,
             opponentsCommanders,
-            currentTurnPlayerId
+            currentTurnPlayerId,
+            manaRules: manaRulesState // Use local state for backup
         };
         localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
-    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId]);
+    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId, manaRules]);
 
     const restoreGameFromBackup = () => {
         const backup = localStorage.getItem(`planeswalker_backup_${roomId}`);
@@ -1221,6 +1237,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setRound(data.round || 1);
             setTurnStartTime(data.turnStartTime || Date.now());
             setCommanderDamage(data.commanderDamage || {});
+            if (data.manaRules) setManaRulesState(data.manaRules);
 
             // Sync to Server
             socket.emit('game_action', {
@@ -1232,6 +1249,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     currentTurnPlayerId: myNewId,
                     turnStartTime: data.turnStartTime,
                     commanderDamage: data.commanderDamage,
+                    manaRules: data.manaRules,
                     turnOrder: [myNewId],
                     logs: data.logs
                 }
@@ -1364,7 +1382,38 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         checkMobile();
         window.addEventListener('resize', checkMobile);
-        return () => window.removeEventListener('resize', checkMobile);
+
+        const onKeyPress = (e: KeyboardEvent) => {
+            // Convert KeyboardEvent to React.KeyboardEvent-like if needed
+            // or just use e.key
+            if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+            const key = e.key.toLowerCase();
+            if (key === 'tab') {
+                e.preventDefault();
+                const cardToTapFor = hoveredCardId
+                    ? boardObjects.find(o => o.id === hoveredCardId)?.cardData
+                    : lastPlayedCard;
+
+                if (cardToTapFor) {
+                    handleAutoTap(cardToTapFor);
+                }
+            } else if (key === 'enter') {
+                nextTurn();
+            } else {
+                // Call handleKeyDown or inline logic
+                // For simplicity, I'll just keep handleKeyDown as a function and call it
+                // and I'll update it to handle the window event
+                handleKeyDown(e as any);
+            }
+        };
+
+        window.addEventListener('keydown', onKeyPress);
+
+        return () => {
+            window.removeEventListener('resize', checkMobile);
+            window.removeEventListener('keydown', onKeyPress);
+        };
     }, [controlMode]);
 
     useEffect(() => {
@@ -1589,7 +1638,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 mySeatIndex,
                 opponentsLife,
                 opponentsCounts,
-                opponentsCommanders
+                opponentsCommanders,
+                manaRules: manaRulesState // Use local state for backup
             };
             // Backup state to the current seat index, include userId for matching on reconnect
             socket.emit('backup_state', { room: roomId, seatIndex: mySeatIndex, state, userId });
@@ -2138,6 +2188,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setCurrentTurnPlayerId(data.currentTurnPlayerId);
                 setTurnStartTime(data.turnStartTime);
                 if (data.commanderDamage) setCommanderDamage(data.commanderDamage);
+                if (data.manaRules) setManaRulesState(data.manaRules);
                 if (data.turnOrder) {
                     setTurnOrder(data.turnOrder);
                     setPlayersList(prev => sortPlayers(prev, data.turnOrder));
@@ -2241,6 +2292,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         if (data.opponentsLife) setOpponentsLife(data.opponentsLife);
                         if (data.opponentsCounts) setOpponentsCounts(data.opponentsCounts);
                         if (data.opponentsCommanders) setOpponentsCommanders(data.opponentsCommanders);
+                        if (data.manaRules) {
+                            console.log("Restoring custom mana rules from backup...");
+                            setManaRulesState(data.manaRules);
+                        }
+                        // Restoring mana rules is usually handled by App.tsx initialization, 
+                        // but if we are in a sub-view (Reconnect), we should ensure they are here.
+                        // However, manaRules is a prop in Tabletop. So we can't 'set' it.
+                        // The parent (App.tsx) needs to provide it.
+                        // So the fix is primarily ensuring they ARE in the backup so App.tsx can find them.
 
                         // Remap board objects: old socket id for us -> new socket id
                         const myNewId = socket.id;
@@ -2936,45 +2996,49 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`split 1 ${obj.cardData.name} from stack`);
     };
 
-    const handleManaButtonClick = (source: ManaSource) => {
-        // If single color and not flexible, produce immediately
-        // Note: Global rules might produce flexible mana (multiple options in producedMana)
-        if (source.producedMana.length === 1) {
-            const color = source.producedMana[0];
+    const produceMana = (source: ManaSource, skipRotation: boolean = false) => {
+        const produced = source.producedMana;
+        const flexible = produced.length > 1 && !produced.every(c => c === produced[0]);
+
+        if (!flexible && produced.length > 0) {
             setFloatingMana(prev => {
                 const next = { ...prev };
-                next[color] = (next[color] || 0) + 1;
-                console.log(`Using mana ability: Added {${color}}`);
+                produced.forEach(color => {
+                    next[color] = (next[color] || 0) + 1;
+                });
+                console.log(`Using mana ability: Added ${produced.join(', ')}`);
                 return next;
             });
-            addLog(`added {${color}} to mana pool (via ${source.cardName})`);
+            addLog(`added {${produced.join('}{')}} to mana pool (via ${source.cardName})`);
 
-            // Tap the card (only if abilityType is 'tap')
-            // activated/multi/complex might have different costs or no tap
-            if (source.abilityType === 'tap') {
+            if (!skipRotation && source.abilityType === 'tap') {
                 const obj = boardObjects.find(o => o.id === source.objectId);
                 if (obj) {
-                    const defaultRotation = (playersList.findIndex(p => p.id === obj.controllerId) !== -1 && layout[playersList.findIndex(p => p.id === obj.controllerId)]) ? layout[playersList.findIndex(p => p.id === obj.controllerId)].rot : 0;
+                    const controllerIdx = playersList.findIndex(p => p.id === obj.controllerId);
+                    const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
 
                     if (obj.quantity > 1) {
                         const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                        updateBoardObject(obj.id, { tappedQuantity: newTapped });
+                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true);
                     } else {
                         const isTapped = obj.rotation !== defaultRotation;
                         if (!isTapped) {
                             const newRotation = (defaultRotation + 90) % 360;
-                            updateBoardObject(obj.id, { rotation: newRotation });
+                            updateBoardObject(obj.id, { rotation: newRotation }, true);
                         }
                     }
                 }
             }
-        } else {
-            // Flexible - show choice modal
+        } else if (flexible) {
             setChoosingColorForId(source.objectId);
         }
     };
 
-    const updateBoardObject = (id: string, updates: Partial<BoardObject>) => {
+    const handleManaButtonClick = (source: ManaSource) => {
+        produceMana(source, false);
+    };
+
+    const updateBoardObject = (id: string, updates: Partial<BoardObject>, silent: boolean = false) => {
         setBoardObjects(prev => {
             const movingObj = prev.find(o => o.id === id);
             let nextState = prev;
@@ -3021,13 +3085,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         });
 
                         // Record undo for tap
-                        pushUndo({
-                            type: 'TAP_CARD',
-                            objectId: id,
-                            previousRotation: movingObj.rotation,
-                            previousTappedQuantity: movingObj.tappedQuantity
-                        });
+                        if (!silent) {
+                            pushUndo({
+                                type: 'TAP_CARD',
+                                objectId: id,
+                                previousRotation: movingObj.rotation,
+                                previousTappedQuantity: movingObj.tappedQuantity
+                            });
+                        }
 
+                        // Produce mana automatically on manual tap
+                        if (!silent && manaInfoRef.current) {
+                            const source = manaInfoRef.current.sources.find((s: any) => s.objectId === id && s.abilityType === 'tap');
+                            if (source) {
+                                produceMana(source, true); // true = skip rotation (already happening)
+                            }
+                        }
                     }
                 }
                 changes.push({ id, updates });
@@ -3142,8 +3215,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
             // Handle W/U etc.
         }
-        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors, manaRules);
-    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation, manaRules]);
+        const info = calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors, manaRulesState);
+        manaInfoRef.current = info;
+        return info;
+    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation, manaRulesState]);
 
     // Reset floating mana on turn change
     useEffect(() => {
@@ -3201,16 +3276,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             tapCounts[id] = (tapCounts[id] || 0) + 1;
         });
 
-        Object.entries(tapCounts).forEach(([id, count]) => {
-            const obj = boardObjects.find(o => o.id === id);
-            if (!obj) return;
-
-            if (obj.quantity > 1) {
-                const newTappedQty = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
-                updateBoardObject(id, { tappedQuantity: newTappedQty });
-            } else {
-                updateBoardObject(id, { rotation: tappedRotation });
-            }
+        setBoardObjects(prev => {
+            const next = [...prev];
+            Object.entries(tapCounts).forEach(([id, count]) => {
+                const idx = next.findIndex(o => o.id === id);
+                if (idx !== -1) {
+                    const obj = next[idx];
+                    const updates: Partial<BoardObject> = {};
+                    if (obj.quantity > 1) {
+                        updates.tappedQuantity = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
+                    } else {
+                        updates.rotation = tappedRotation;
+                    }
+                    next[idx] = { ...obj, ...updates };
+                    emitAction('UPDATE_OBJECT', { id, ...updates });
+                }
+            });
+            return next;
         });
 
         // Update floating mana — subtract what was spent and add any excess produced
@@ -3239,7 +3321,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             type: 'AUTO_TAP',
             tappedIds: result.tappedIds,
             previousStates,
-            previousFloatingMana: floatingMana, // Save previous floating mana for undo
+            previousFloatingMana: { ...floatingMana }, // Save copy of previous floating mana
         });
 
         // Visual flash feedback
@@ -3296,19 +3378,32 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 break;
             }
             case 'AUTO_TAP': {
-                // Restore all tapped cards to their previous state
-                action.previousStates.forEach(state => {
-                    updateBoardObject(state.id, {
-                        rotation: state.rotation,
-                        tappedQuantity: state.tappedQuantity
+                // Restore all tapped cards to their previous state in a single update
+                setBoardObjects(prev => {
+                    const next = [...prev];
+                    action.previousStates.forEach(state => {
+                        const idx = next.findIndex(o => o.id === state.id);
+                        if (idx !== -1) {
+                            const updates = {
+                                rotation: state.rotation,
+                                tappedQuantity: state.tappedQuantity
+                            };
+                            next[idx] = { ...next[idx], ...updates };
+                            emitAction('UPDATE_OBJECT', { id: state.id, updates });
+                        }
                     });
+                    return next;
                 });
+
+                if (action.previousFloatingMana) {
+                    setFloatingMana(action.previousFloatingMana);
+                }
                 setAutoTappedIds([]);
                 addLog('undid auto-tap');
                 break;
             }
         }
-    }, [undoHistory, boardObjects]);
+    }, [undoHistory, boardObjects, floatingMana]);
 
     const spawnCounter = () => {
         const myPos = layout[mySeatIndex];
@@ -3673,20 +3768,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
             case 'm': setShowManaCalculator(prev => !prev); break;
-            case 'tab': {
-                e.preventDefault();
-                if (hoveredCardId) {
-                    const obj = boardObjects.find(o => o.id === hoveredCardId);
-                    if (obj) {
-                        handleAutoTap(obj.cardData);
-                        return;
-                    }
-                }
-                if (autoTapEnabled && lastPlayedCard) {
-                    handleAutoTap(lastPlayedCard);
-                }
+            case 'tab':
                 break;
-            }
             case 'z': {
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
@@ -4183,6 +4266,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 isHandVisible={isHandVisible}
                                 onHover={(id) => setHoveredCardId(id)}
                                 manaSource={(manaInfo.sources.find(s => s.objectId === obj.id && s.abilityType !== 'passive') || manaInfo.potentialSources.find(s => s.objectId === obj.id)) as ManaSource}
+                                manaRule={manaRulesState[obj.cardData.scryfallId]}
                                 onManaClick={() => {
                                     const source = manaInfo.sources.find(s => s.objectId === obj.id) || manaInfo.potentialSources.find(s => s.objectId === obj.id);
                                     if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
@@ -4204,8 +4288,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     return (
         <div
             ref={rootRef}
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
             className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col outline-none"
         >

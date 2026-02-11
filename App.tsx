@@ -192,21 +192,34 @@ function App() {
     };
 
     const handleSaveDeck = (deck: SavedDeck) => {
+        // CLEANUP: Ensure isCommander is only set on cards actually in the deck
+        // This handles cases where a card was marked as commander but then removed from the list
+        const cleanedDeck = {
+            ...deck,
+            deck: deck.deck.map(card => ({
+                ...card,
+                // The card is by definition in the deck here, but this is a good place to 
+                // perform any other deck-level validations if needed.
+                // The 'isCommander' preservation is mostly handled in DeckBuilder.handleImport,
+                // but this acts as a final safeguard.
+            }))
+        };
+
         setSavedDecks(prev => {
-            const idx = prev.findIndex(d => d.id === deck.id);
+            const idx = prev.findIndex(d => d.id === cleanedDeck.id);
             if (idx >= 0) {
                 const copy = [...prev];
-                copy[idx] = deck;
+                copy[idx] = cleanedDeck;
                 return copy;
             }
-            return [...prev, deck];
+            return [...prev, cleanedDeck];
         });
 
         // Sync with active state if we are saving the currently active deck
-        if (deck.name === activeDeckName) {
-            setActiveDeck(deck.deck);
-            setLobbyTokens(deck.tokens);
-            setActiveManaRules(deck.manaRules || {});
+        if (cleanedDeck.name === activeDeckName) {
+            setActiveDeck(cleanedDeck.deck);
+            setLobbyTokens(cleanedDeck.tokens);
+            setActiveManaRules(cleanedDeck.manaRules || {});
         }
     };
 

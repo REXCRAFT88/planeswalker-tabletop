@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { BoardObject, CardData, ManaColor } from '../types';
+import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
 import { ManaSource } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
@@ -40,9 +40,10 @@ interface CardProps {
     onHover?: (id: string | null) => void;
     manaSource?: ManaSource;
     onManaClick?: () => void;
+    manaRule?: ManaRule;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -446,9 +447,9 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     )}
 
                     {/* Mana Button Overlay (Top-Left) */}
-                    {manaSource && isControlledByMe && (
+                    {manaSource && isControlledByMe && !object.cardData.typeLine?.toLowerCase().includes('land') && !manaRule?.hideManaButton && (
                         <div
-                            className="absolute top-2 left-2 z-30"
+                            className="absolute top-2 left-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); onManaClick?.(); }}
                             onDoubleClick={(e) => e.stopPropagation()}

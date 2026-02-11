@@ -27,9 +27,14 @@ export interface ManaRule {
   appliesTo?: ('creatures' | 'lands')[];
   appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
 
+  // Global Multipliers (e.g. Virtue of Strength)
+  manaMultiplier?: number; // e.g. 3 for "triples mana produced by basic lands"
+
   // Auto-tap settings
   autoTap: boolean;
   autoTapPriority: number; // decimal allowed
+  // UI settings
+  hideManaButton?: boolean;
 }
 
 export const EMPTY_MANA_RULE: ManaRule = {
@@ -41,8 +46,10 @@ export const EMPTY_MANA_RULE: ManaRule = {
   prodMode: 'standard',
   produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
   persistence: 'untilEndOfTurn',
+  manaMultiplier: 1,
   autoTap: true,
   autoTapPriority: 1,
+  hideManaButton: false,
 };
 
 export enum CardState {

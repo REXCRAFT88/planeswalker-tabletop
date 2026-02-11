@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon } from 'lucide-react';
+import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon, Share2, Clipboard } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 import { parseManaCost } from '../services/mana';
 
@@ -424,15 +424,35 @@ const ManaRuleEditor: React.FC<{
                     </label>
 
                     {(rule.appliesTo && rule.appliesTo.length > 0) && (
-                        <label className="flex items-center gap-2 cursor-pointer ml-6 mt-1">
-                            <input
-                                type="checkbox"
-                                checked={rule.appliesToCondition === 'counters'}
-                                onChange={(e) => onChange({ ...rule, appliesToCondition: e.target.checked ? 'counters' : undefined })}
-                                className="bg-gray-900 border-gray-600 rounded text-purple-500 focus:ring-purple-900 text-xs"
-                            />
-                            <span className="text-xs text-purple-300">Only if they have counters (e.g. Rishkar)</span>
-                        </label>
+                        <div className="ml-6 space-y-2">
+                            <label className="flex items-center gap-2 cursor-pointer mt-1">
+                                <input
+                                    type="checkbox"
+                                    checked={rule.appliesToCondition === 'counters'}
+                                    onChange={(e) => onChange({ ...rule, appliesToCondition: e.target.checked ? 'counters' : undefined })}
+                                    className="bg-gray-900 border-gray-600 rounded text-purple-500 focus:ring-purple-900 text-xs"
+                                />
+                                <span className="text-xs text-purple-300">Only if they have counters (e.g. Rishkar)</span>
+                            </label>
+
+                            <div className="flex items-center gap-3 bg-gray-900/40 p-2 rounded-lg border border-gray-800/50 w-fit">
+                                <span className="text-xs text-gray-400 font-medium">Production Multiplier:</span>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        value={rule.manaMultiplier || 1}
+                                        onChange={(e) => updateRule('manaMultiplier', Math.max(1, parseInt(e.target.value) || 1))}
+                                        className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white text-sm text-center focus:border-blue-500 transition-colors"
+                                        min={1}
+                                        step={1}
+                                    />
+                                    <span className="text-xs text-gray-600 font-bold">×</span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 max-w-[120px] leading-tight">
+                                    Doubles or triples mana produced by results (e.g. Mana Reflection)
+                                </p>
+                            </div>
+                        </div>
                     )}
                 </div>
             </div>
@@ -531,6 +551,25 @@ const ManaRuleEditor: React.FC<{
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* UI Settings */}
+            <div>
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Settings</h4>
+                <label className="flex items-center gap-3 cursor-pointer">
+                    <div
+                        onClick={() => updateRule('hideManaButton', !rule.hideManaButton)}
+                        className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${!rule.hideManaButton ? 'bg-green-600' : 'bg-gray-600'
+                            }`}
+                    >
+                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${!rule.hideManaButton ? 'translate-x-4' : 'translate-x-0.5'
+                            }`} />
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-sm text-gray-300">Show Mana Bubble on Hover</span>
+                        <p className="text-[10px] text-gray-500">Toggle the manual mana production button visibility</p>
+                    </div>
+                </label>
             </div>
         </div>
 
@@ -642,7 +681,40 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                         </div>
                         <div>
                             <h3 className="font-bold text-white text-lg">Mana Rules</h3>
-                            <p className="text-sm text-gray-400">{card.name}</p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-sm text-gray-400">{card.name}</p>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(JSON.stringify(rule, null, 2));
+                                        alert("Rule copied to clipboard!");
+                                    }}
+                                    className="p-1 text-gray-500 hover:text-amber-400 transition-colors"
+                                    title="Export Rule (JSON)"
+                                >
+                                    <Share2 size={14} />
+                                </button>
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const text = await navigator.clipboard.readText();
+                                            const parsed = JSON.parse(text);
+                                            // Basic validation
+                                            if (parsed.trigger && parsed.produced) {
+                                                setRule(parsed);
+                                                alert("Rule imported!");
+                                            } else {
+                                                alert("Invalid rule format");
+                                            }
+                                        } catch (e) {
+                                            alert("Failed to import rule");
+                                        }
+                                    }}
+                                    className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
+                                    title="Import Rule (JSON)"
+                                >
+                                    <Clipboard size={14} />
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-white p-1">
