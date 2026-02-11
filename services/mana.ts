@@ -107,7 +107,7 @@ export const calculateAvailableMana = (
     defaultRotation: number,
     commanderColors?: ManaColor[],
     manaRules?: Record<string, ManaRule>
-): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[]; cmdColors?: ManaColor[] } => {
+): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[]; cmdColors?: ManaColor[]; totalAvailable: number; totalPotential: number } => {
     const pool: ManaPool = { ...EMPTY_POOL };
     const potentialPool: ManaPool = { ...EMPTY_POOL };
     const sources: ManaSource[] = [];
@@ -157,6 +157,7 @@ export const calculateAvailableMana = (
         let produced: ManaColor[];
         let abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive';
         let sourcePriority: number;
+        let manaCountScored = 0;
 
         if (customRule) {
             // --- Custom rule path ---
@@ -191,9 +192,11 @@ export const calculateAvailableMana = (
             produced = [];
             if (customRule.prodMode === 'standard') {
                 const amount = customRule.calcMode === 'set' ? 1 : calcAmount;
+                let standardProducedCount = 0;
                 for (const [color, count] of Object.entries(customRule.produced)) {
                     const total = count * amount;
                     if (total <= 0) continue;
+                    standardProducedCount += total;
 
                     if (color === 'WUBRG' || color === 'CMD') {
                         for (let i = 0; i < total; i++) {
@@ -205,7 +208,8 @@ export const calculateAvailableMana = (
                         }
                     }
                 }
-                // Add alt colors as additional options (for flexible sources)
+                manaCountScored = standardProducedCount;
+
                 // Add alt colors as additional options (for flexible sources)
                 if (customRule.producedAlt) {
                     for (const [color, count] of Object.entries(customRule.producedAlt)) {
@@ -252,9 +256,9 @@ export const calculateAvailableMana = (
                 landColors.forEach(c => {
                     for (let i = 0; i < amount; i++) produced.push(c);
                 });
+                manaCountScored = amount;
+
             } else if (customRule.prodMode === 'chooseColor') {
-                // Choose Color mode: at runtime, player picks a color via modal.
-                // For auto-tap/pool purposes, default to colorless placeholder.
                 // Choose Color mode: at runtime, player picks a color via modal.
                 // We use produced['C'] to store the quantity X
                 const amount = customRule.calcMode === 'set'
@@ -264,6 +268,8 @@ export const calculateAvailableMana = (
                 for (const c of ['W', 'U', 'B', 'R', 'G'] as ManaColor[]) {
                     for (let i = 0; i < amount; i++) produced.push(c);
                 }
+                manaCountScored = amount;
+
             } else if (customRule.prodMode === 'commander') {
                 const amount = customRule.calcMode === 'set'
                     ? (customRule.produced['C'] || 1)
@@ -275,11 +281,15 @@ export const calculateAvailableMana = (
                 } else {
                     for (let i = 0; i < amount; i++) produced.push('C');
                 }
+                manaCountScored = amount;
+
             } else {
                 // Multiplied mode: produce calcAmount of each specified color
+                let producedCount = 0;
                 for (const [color, count] of Object.entries(customRule.produced)) {
                     const total = count * calcAmount;
                     if (total <= 0) continue;
+                    producedCount += total;
 
                     if (color === 'WUBRG') {
                         for (let i = 0; i < total; i++) produced.push('W', 'U', 'B', 'R', 'G');
@@ -291,6 +301,7 @@ export const calculateAvailableMana = (
                         for (let i = 0; i < total; i++) produced.push(color as ManaColor);
                     }
                 }
+                manaCountScored = producedCount;
             }
 
             if (produced.length === 0) return; // No mana production
@@ -323,8 +334,15 @@ export const calculateAvailableMana = (
             }
 
             abilityType = (obj.cardData.manaAbilityType || 'tap') as typeof abilityType;
-
             sourcePriority = getManaPriority(obj.cardData, produced);
+
+            // Default: If flexible (choice), count as 1. If fixed (multiple same color), count as length.
+            const unique = new Set(produced);
+            if (unique.size > 1 || unique.has('WUBRG') || unique.has('CMD')) {
+                manaCountScored = 1;
+            } else {
+                manaCountScored = produced.length;
+            }
         }
 
         // --- Apply Global Rules (Granted Abilities) ---
@@ -370,64 +388,28 @@ export const calculateAvailableMana = (
                     // Append produced colors
                     if (rule.prodMode === 'standard') {
                         const amount = rule.calcMode === 'set' ? 1 : calcAmount;
+                        let ruleProducedCount = 0;
                         for (const [color, count] of Object.entries(rule.produced)) {
+                            ruleProducedCount += count * amount;
                             for (let i = 0; i < count * amount; i++) produced.push(color as ManaColor);
                         }
-                    } else if (rule.prodMode === 'available') {
-                        const landColors = new Set<ManaColor>();
-                        boardObjects.forEach(lo => {
-                            if (lo.type !== 'CARD' || lo.controllerId !== controllerId) return;
-                            const tl = (lo.cardData.typeLine || '').toLowerCase();
-                            if (!tl.includes('land')) return;
-                            if (tl.includes('plains')) landColors.add('W');
-                            if (tl.includes('island')) landColors.add('U');
-                            if (tl.includes('swamp')) landColors.add('B');
-                            if (tl.includes('mountain')) landColors.add('R');
-                            if (tl.includes('forest')) landColors.add('G');
-                            if (lo.cardData.producedMana) lo.cardData.producedMana.forEach(m => {
-                                if (['W', 'U', 'B', 'R', 'G'].includes(m)) landColors.add(m as ManaColor);
-                            });
-                        });
-                        landColors.forEach(c => produced.push(c));
-                    } else if (rule.prodMode === 'chooseColor') {
+
+                        // If we didn't have mana before, we take this count.
+                        // If we already had mana, this is likely an ALTERNATIVE ability.
+                        if (manaCountScored === 0 && ruleProducedCount > 0) {
+                            manaCountScored = ruleProducedCount;
+                        }
+                    } else if (rule.prodMode === 'available' || rule.prodMode === 'chooseColor' || rule.prodMode === 'commander') {
                         ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
+                        if (manaCountScored === 0) manaCountScored = 1;
                     } else {
                         ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
+                        if (manaCountScored === 0) manaCountScored = 1;
                     }
-                }
-            }
-        }
 
-        // Determine ability type for Global Rules (if any applied) which might override default 'tap'
-        // If multiple rules apply, we might need a way to distinguish.
-        // For now, if we have global rules, let's assume valid abilityType is derived from the *last* applied rule or just 'tap' if mixed?
-        // Actually, we need to associate the produced mana with the SOURCE, but `calculateAvailableMana` returns aggregated sources?
-        // Wait, `sources` array entries have `abilityType`.
-        // We aren't pushing to `sources` inside the global rules loop! We are just pushing to `produced` array.
-        // The `sources` array creation happens AFTER this block using `produced`.
-        // We need to determine `abilityType` for the *object* based on the rule that produced the mana.
-        // If Global Rules added mana, we should probably set `abilityType` based on that rule?
-        // Issues: 
-        // 1. `abilityType` is defined earlier (line 277 or 252).
-        // 2. We are augmenting `produced` array.
-        // 3. The `ManaSource` object is created at end of loop using `abilityType`.
-
-        // Fix: Update `abilityType` if global rules found a match and it wasn't already set by a custom rule on item itself.
-        if (globalRules.length > 0) {
-            for (const { rule, sourceId } of globalRules) {
-                if (sourceId === obj.id) continue;
-                const myTypeLine = (obj.cardData.typeLine || '').toLowerCase();
-                let matches = false;
-                if (rule.appliesTo?.includes('creatures') && myTypeLine.includes('creature')) matches = true;
-                if (rule.appliesTo?.includes('lands') && myTypeLine.includes('land')) matches = true;
-                const hasCounters = (obj.counters?.['+1/+1'] || 0) > 0 || (obj.counters?.['counter'] || 0) > 0;
-                if (matches && rule.appliesToCondition === 'counters' && !hasCounters) matches = false;
-
-                if (matches) {
-                    // Found a matching rule. Update abilityType from this rule's trigger.
-                    // Note: If multiple rules apply with different triggers, this might be ambiguous.
-                    // We'll trust the last one or favor 'tap'.
-                    abilityType = rule.trigger === 'tap' ? 'tap' : rule.trigger === 'activated' ? 'activated' : 'tap';
+                    if (abilityType === 'passive') {
+                        abilityType = rule.trigger === 'tap' ? 'tap' : rule.trigger === 'activated' ? 'activated' : 'tap';
+                    }
                 }
             }
         }
@@ -439,7 +421,22 @@ export const calculateAvailableMana = (
         const uniqueColors = new Set(produced);
         const isFlexible = uniqueColors.size > 1 || uniqueColors.has('WUBRG') || uniqueColors.has('CMD');
 
-        const activationCost = customRule ? undefined : obj.cardData.manaActivationCost;
+        let activationCostStr: string | undefined;
+
+        if (customRule) {
+            const parts: string[] = [];
+            // Generic cost
+            if (customRule.genericActivationCost && customRule.genericActivationCost > 0) {
+                parts.push(`{${customRule.genericActivationCost}}`);
+            }
+            // Colored/Colorless costs
+            Object.entries(customRule.activationCost).forEach(([color, count]) => {
+                if (count > 0) parts.push(Array(count).fill(`{${color}}`).join(''));
+            });
+            activationCostStr = parts.join('');
+        } else {
+            activationCostStr = obj.cardData.manaActivationCost;
+        }
 
         const source: ManaSource = {
             objectId: obj.id,
@@ -449,7 +446,8 @@ export const calculateAvailableMana = (
             isFlexible,
             priority: sourcePriority,
             abilityType,
-            activationCost,
+            activationCost: activationCostStr,
+            manaCount: manaCountScored
         };
 
         // Passive sources always contribute to pool
@@ -476,7 +474,11 @@ export const calculateAvailableMana = (
         }
     });
 
-    return { pool, potentialPool, sources, potentialSources, cmdColors: commanderColors };
+    // Sum manaCount instead of counting items, to support Sol Ring (=2) and Flexible (=1) correctly
+    const totalAvailable = sources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
+    const totalPotential = potentialSources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
+
+    return { pool, potentialPool, sources, potentialSources, cmdColors: commanderColors, totalAvailable, totalPotential };
 };
 
 export interface ManaSource {
@@ -488,6 +490,7 @@ export interface ManaSource {
     priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
     abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive'; // How this source produces mana
     activationCost?: string; // Mana cost to activate, if any
+    manaCount?: number; // How much mana this source produces (e.g. Sol Ring = 2)
 }
 
 // --- Basic Land Detection ---
@@ -617,8 +620,18 @@ export const autoTapForCost = (
     // Helpers for Tapping
     const canSatisfy = (produced: ManaColor[], reqColor: ManaColor): boolean => {
         if (produced.includes(reqColor)) return true;
+
+        // WUBRG requirement can be satisfied by any colored mana
+        if (reqColor === 'WUBRG') {
+            return produced.some(p => ['W', 'U', 'B', 'R', 'G', 'WUBRG', 'CMD'].includes(p));
+        }
+
+        // WUBRG production satisfies any specific color requirement
         if (produced.includes('WUBRG') && ['W', 'U', 'B', 'R', 'G'].includes(reqColor)) return true;
+
+        // CMD production satisfies commander colors
         if (produced.includes('CMD') && (commanderColors || []).includes(reqColor)) return true;
+
         return false;
     };
 

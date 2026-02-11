@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
+import { parseManaCost } from '../services/mana';
 
 const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'];
 
@@ -99,7 +100,8 @@ const ManaRuleEditor: React.FC<{
     disabled?: boolean;
     isAlternative?: boolean;
     allSources?: { id: string; name: string; priority: number }[];
-}> = ({ rule, onChange, commanderColors, disabled, isAlternative, allSources }) => {
+    currentCardName?: string; // Passed for highlighting
+}> = ({ rule, onChange, commanderColors, disabled, isAlternative, allSources, currentCardName }) => {
     const [hasAlt, setHasAlt] = useState(!!rule.producedAlt);
 
     const updateRule = <K extends keyof ManaRule>(key: K, value: ManaRule[K]) => {
@@ -162,6 +164,25 @@ const ManaRuleEditor: React.FC<{
                                 onChange={(v) => updateActivationCost(color, v)}
                             />
                         ))}
+                        {/* Generic Cost */}
+                        <div className="flex flex-col items-center gap-1 border-l border-gray-700 pl-3 ml-1">
+                            <button
+                                onClick={() => onChange({ ...rule, genericActivationCost: (rule.genericActivationCost || 0) + 1 })}
+                                className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white text-xs"
+                            >
+                                <Plus size={12} />
+                            </button>
+                            <div className="relative w-9 h-9 flex items-center justify-center bg-gray-400 rounded-full shadow-inner border-2 border-gray-500">
+                                <span className="text-gray-900 font-bold text-lg">{(rule.genericActivationCost || 0)}</span>
+                            </div>
+                            <button
+                                onClick={() => onChange({ ...rule, genericActivationCost: Math.max(0, (rule.genericActivationCost || 0) - 1) })}
+                                className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white text-xs"
+                            >
+                                <Minus size={12} />
+                            </button>
+                            <span className="text-[10px] text-gray-500 font-medium">Generic</span>
+                        </div>
                     </div>
                 </div>
             )}
@@ -222,6 +243,7 @@ const ManaRuleEditor: React.FC<{
                         { value: 'multiplied', label: 'Multiplied', desc: 'Multiplies your existing mana production' },
                         { value: 'available', label: '🌊 Available', desc: 'Produces one mana of any color you have lands for' },
                         { value: 'chooseColor', label: '🎨 Choose Color', desc: 'Player picks a color when triggered' },
+                        { value: 'commander', label: '👑 Commander', desc: 'Produces mana of any color in your commander\'s identity' },
                     ]}
                     selected={rule.prodMode}
                     onChange={(v) => updateRule('prodMode', v)}
@@ -234,64 +256,20 @@ const ManaRuleEditor: React.FC<{
                             {/* Primary production */}
                             <div>
                                 <span className="text-xs text-gray-500 mb-2 block">Produces:</span>
-                                {/* Preset buttons */}
-                                <div className="flex gap-2 mb-2">
-                                    {commanderColors && commanderColors.length > 0 && (
-                                        <button
-                                            onClick={() => {
-                                                const preset: Record<ManaColor, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 };
-                                                commanderColors.forEach(c => { preset[c] = 1; });
-                                                updateRule('produced', preset);
-                                            }}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-purple-500 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition-all"
-                                            title="Set to commander color identity"
-                                        >
-                                            <Crown size={12} className="text-purple-400" />
-                                            Commander Color
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => {
-                                            onChange({
-                                                ...rule,
-                                                produced: { ...rule.produced, WUBRG: (rule.produced.WUBRG || 0) + 1 }
-                                            });
-                                        }}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-amber-500 rounded-lg text-xs font-medium text-gray-300 hover:text-white transition-all"
-                                        title="Add 1 WUBRG (one of each color)"
-                                    >
-                                        <img src="/mana/all.png" alt="WUBRG" className="w-4 h-4 object-contain" />
-                                        WUBRG
-                                    </button>
-                                </div>
-                                {/* Display counters only for Standard mode */}
-                                {rule.prodMode === 'standard' && (
-                                    <div className="flex flex-wrap gap-2 md:gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
-                                        {MANA_COLORS.map(color => (
-                                            <ManaCounter
-                                                key={color}
-                                                color={color}
-                                                value={rule.produced[color]}
-                                                onChange={(v) => updateProduced(color, v)}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
 
-                                {/* Display single Quantity input for Commander/Any Color modes */}
-                                {((rule.prodMode as string) === 'commander' || (rule.prodMode as string) === 'chooseColor') && (
-                                    <div className="flex flex-col items-center gap-2 bg-gray-900/50 rounded-xl p-3">
-                                        <span className="text-xs text-gray-400">Mana Amount</span>
+                                {/* Always show counters for standard mode */}
+                                <div className="flex flex-wrap gap-2 md:gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
+                                    {MANA_COLORS.map(color => (
                                         <ManaCounter
-                                            color="C"
-                                            value={rule.produced['C'] || 1} // Default to 1 if not set
-                                            onChange={(v) => updateProduced('C', Math.max(1, v))} // Min 1
+                                            key={color}
+                                            color={color}
+                                            value={rule.produced[color]}
+                                            onChange={(v) => updateProduced(color, v)}
                                         />
-                                        <span className="text-[10px] text-gray-500">
-                                            {(rule.prodMode as string) === 'commander' ? 'Produces X mana of any commander color' : 'Produces X mana of any color'}
-                                        </span>
-                                    </div>
-                                )}
+                                    ))}
+                                </div>
+
+                                {/* Helper buttons removed - usage of counters preferred */}
                             </div>
 
                             {/* OR alternative */}
@@ -376,15 +354,18 @@ const ManaRuleEditor: React.FC<{
                             </div>
                         </div>
                     ) : (
-                        /* Choose Color mode */
+                        /* Choose Color / Commander mode */
                         <div className="bg-gray-900/50 rounded-xl p-4 border border-purple-800/30">
                             <div className="flex items-center gap-2 mb-2">
                                 <span className="text-lg">🎨</span>
-                                <span className="text-sm font-medium text-purple-300">Choose Color at Runtime</span>
+                                <span className="text-sm font-medium text-purple-300">
+                                    {(rule.prodMode as string) === 'commander' ? 'Commander Identity' : 'Choose Color'}
+                                </span>
                             </div>
                             <p className="text-xs text-gray-400">
-                                When this card's mana ability is triggered, a modal opens allowing the player
-                                to pick one of the 5 mana colors. The chosen color is added to the mana pool.
+                                {(rule.prodMode as string) === 'commander'
+                                    ? "Produces mana of any color in your commander's color identity."
+                                    : "Player picks a color from WUBRG when triggered."}
                             </p>
                             <div className="mt-3 flex items-center gap-3">
                                 <label className="text-sm text-gray-300">Amount of mana:</label>
@@ -398,12 +379,6 @@ const ManaRuleEditor: React.FC<{
                                     className="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-center"
                                     min={1}
                                 />
-                            </div>
-                            <div className="mt-2 flex gap-1">
-                                {['W', 'U', 'B', 'R', 'G'].map(c => (
-                                    <img key={c} src={getIconPath(c)} alt={c} className="w-6 h-6 object-contain opacity-60" />
-                                ))}
-                                <span className="text-[10px] text-gray-500 ml-1 self-center">Player selects one</span>
                             </div>
                         </div>
                     )}
@@ -539,8 +514,12 @@ const ManaRuleEditor: React.FC<{
                                                 return true;
                                             })
                                             .map(s => (
-                                                <div key={s.id} className="text-[10px] flex justify-between py-0.5 border-b border-gray-800/50 last:border-0">
-                                                    <span className={`truncate max-w-[120px] ${Math.abs(s.priority - rule.autoTapPriority) < 0.01 ? 'text-blue-400 font-bold' : 'text-gray-500'}`}>
+                                                <div
+                                                    key={s.id}
+                                                    ref={s.name === currentCardName ? (el) => el?.scrollIntoView({ block: 'center', behavior: 'smooth' }) : undefined}
+                                                    className={`text-[10px] flex justify-between py-0.5 border-b border-gray-800/50 last:border-0 ${s.name === currentCardName ? 'bg-green-900/10' : ''}`}
+                                                >
+                                                    <span className={`truncate max-w-[120px] ${s.name === currentCardName ? 'text-green-400 font-bold' : Math.abs(s.priority - rule.autoTapPriority) < 0.01 ? 'text-blue-400' : 'text-gray-500'}`}>
                                                         {s.name}
                                                     </span>
                                                     <span className="text-gray-600 font-mono">{s.priority.toFixed(1)}</span>
@@ -564,6 +543,7 @@ const ruleSummary = (rule: ManaRule): string => {
     const totalMana = Object.values(rule.produced).reduce((a, b) => a + b, 0);
     if (rule.prodMode === 'available') return `Available mana (${totalMana})`;
     if (rule.prodMode === 'chooseColor') return `Choose color (${totalMana})`;
+    if (rule.prodMode === 'commander') return `Commander color (${totalMana})`;
     if (colors.length === 0) return 'No mana';
     const parts = colors.map(c => `${rule.produced[c]}${c}`);
     let base = parts.join(', ');
@@ -574,7 +554,33 @@ const ruleSummary = (rule: ManaRule): string => {
 export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, commanderColors, allSources, onSave, onClose }) => {
     const [rule, setRule] = useState<ManaRule>(() => {
         if (existingRule) return { ...existingRule };
-        return { ...EMPTY_MANA_RULE };
+
+        // Initialize from card data if possible
+        const startRule = { ...EMPTY_MANA_RULE, produced: { ...EMPTY_MANA_RULE.produced }, activationCost: { ...EMPTY_MANA_RULE.activationCost } };
+
+        // Try to parse activation cost
+        if (card.manaActivationCost) {
+            const parsed = parseManaCost(card.manaActivationCost);
+            parsed.symbols.forEach(s => {
+                if (s.type === 'colored') startRule.activationCost[s.color] = (startRule.activationCost[s.color] || 0) + 1;
+                // Fix: Map generic cost to genericActivationCost
+                if (s.type === 'generic') startRule.genericActivationCost = (startRule.genericActivationCost || 0) + s.count;
+            });
+        }
+
+        // Try to guess default produced mana from card data if oracle text mentions colors
+        // This is a rough heuristic
+        if (!existingRule && card.oracleText) {
+            const lowerText = card.oracleText.toLowerCase();
+            if (lowerText.includes('add {g}')) startRule.produced.G = 1;
+            if (lowerText.includes('add {r}')) startRule.produced.R = 1;
+            if (lowerText.includes('add {u}')) startRule.produced.U = 1;
+            if (lowerText.includes('add {b}')) startRule.produced.B = 1;
+            if (lowerText.includes('add {w}')) startRule.produced.W = 1;
+            if (lowerText.includes('add {c}')) startRule.produced.C = 1;
+        }
+
+        return startRule;
     });
 
     const [showAltEditor, setShowAltEditor] = useState(!!rule.alternativeRule);
@@ -606,7 +612,24 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
     const isDisabled = !!rule.disabled;
 
     return (
-        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+        <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            {/* Inspect Overlay */}
+            {isInspecting && (
+                <div
+                    className="fixed inset-0 z-[11000] bg-black/90 flex items-center justify-center p-8 cursor-zoom-out animate-in fade-in duration-200"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setIsInspecting(false);
+                    }}
+                >
+                    <img
+                        src={card.imageUrl}
+                        className="max-w-full max-h-full object-contain drop-shadow-2xl rounded-2xl"
+                        alt={card.name}
+                    />
+                </div>
+            )}
+
             <div className="bg-gray-800 border border-gray-600 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="p-4 border-b border-gray-700 bg-gray-900 flex items-center justify-between">
@@ -667,6 +690,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                             commanderColors={commanderColors}
                             disabled={isDisabled}
                             allSources={allSources}
+                            currentCardName={card.name}
                         />
                     </div>
 
@@ -704,6 +728,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                             commanderColors={commanderColors}
                                             allSources={allSources}
                                             isAlternative
+                                            currentCardName={card.name}
                                         />
                                     </div>
                                 </div>

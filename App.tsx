@@ -112,20 +112,22 @@ function App() {
         return () => clearInterval(interval);
     }, []);
 
-    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>) => {
+    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>, id?: string) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
         if (manaRules) setActiveManaRules(manaRules);
         if (deckName) setActiveDeckName(deckName);
 
-        if (shouldSave) {
+        // Always save if we have an ID (update) OR if shouldSave is true (new)
+        // If we have an ID, we are updating an existing deck, so we must save regardless of shouldSave flag (which indicates 'new deck')
+        if (shouldSave || id) {
             const newDeck: SavedDeck = {
-                id: crypto.randomUUID(),
+                id: id || crypto.randomUUID(),
                 name: deckName || `Deck ${new Date().toLocaleDateString()}`,
                 deck,
                 tokens,
                 sleeveColor: playerSleeve,
-                createdAt: Date.now(),
+                createdAt: Date.now(), // Update timestamp? Maybe keep original if updating? For now update is fine.
                 manaRules: manaRules || activeManaRules,
             };
             handleSaveDeck(newDeck);
@@ -199,6 +201,13 @@ function App() {
             }
             return [...prev, deck];
         });
+
+        // Sync with active state if we are saving the currently active deck
+        if (deck.name === activeDeckName) {
+            setActiveDeck(deck.deck);
+            setLobbyTokens(deck.tokens);
+            setActiveManaRules(deck.manaRules || {});
+        }
     };
 
     const handleDeleteDeck = (id: string) => {
@@ -233,6 +242,10 @@ function App() {
                     initialTokens={lobbyTokens}
                     initialManaRules={activeManaRules}
                     initialName={activeDeckName}
+                    initialId={(() => {
+                        const match = savedDecks.find(d => d.name === activeDeckName);
+                        return match ? match.id : undefined;
+                    })()}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
                 />

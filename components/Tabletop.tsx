@@ -4924,6 +4924,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         floatingMana={floatingMana}
                         onAddMana={handleAddMana}
                         onRemoveMana={handleRemoveMana}
+                        totalAvailable={manaInfo.totalAvailable}
+                        totalPotential={manaInfo.totalPotential}
                     />
                 )}
 

@@ -7,6 +7,7 @@ export interface ManaRule {
   trigger: 'tap' | 'activated' | 'passive';
   // Activation cost (mana required to activate ability)
   activationCost: Record<ManaColor, number>;
+  genericActivationCost?: number; // Generic mana cost (e.g. {1})
   // How the mana amount is calculated
   calcMode: 'set' | 'counters' | 'creatures' | 'basicLands';
   calcMultiplier: number; // default 1
@@ -34,6 +35,7 @@ export interface ManaRule {
 export const EMPTY_MANA_RULE: ManaRule = {
   trigger: 'tap',
   activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
+  genericActivationCost: 0,
   calcMode: 'set',
   calcMultiplier: 1,
   prodMode: 'standard',

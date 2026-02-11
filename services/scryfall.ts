@@ -313,7 +313,8 @@ export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
             }
             // Generic mana cost
             const genericMatch = costStr.match(/\{(\d+)\}/);
-            if (genericMatch) rule.activationCost.C += parseInt(genericMatch[1]);
+            // Fix: Map generic cost to genericActivationCost, NOT C
+            if (genericMatch) rule.genericActivationCost = parseInt(genericMatch[1]);
         }
     } else if (abilityInfo.manaAbilityType === 'complex') {
         // Complex sources — try to detect "for each" patterns

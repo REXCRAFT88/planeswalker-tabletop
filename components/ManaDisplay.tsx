@@ -8,11 +8,13 @@ interface ManaDisplayProps {
     floatingMana: ManaPool;
     onAddMana: (type: keyof ManaPool) => void;
     onRemoveMana: (type: keyof ManaPool) => void;
+    totalAvailable: number;
+    totalPotential: number;
 }
 
 const MANA_TYPES = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'] as const;
 
-export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, floatingMana, onAddMana, onRemoveMana }) => {
+export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, floatingMana, onAddMana, onRemoveMana, totalAvailable, totalPotential }) => {
     const [showAll, setShowAll] = useState(false);
 
     const hasMana = (type: keyof ManaPool) => (pool[type] || 0) > 0 || (potentialPool[type] || 0) > 0 || (floatingMana[type] || 0) > 0;
@@ -41,11 +43,11 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, f
         }
     };
 
-    // Total mana across all types
-    const totalPool = MANA_TYPES.reduce((sum, t) => sum + (pool[t] || 0), 0);
-    const totalPotential = MANA_TYPES.reduce((sum, t) => sum + (potentialPool[t] || 0), 0);
+    // Total mana provided by props (authoritative)
+    // const totalPool = MANA_TYPES.reduce((sum, t) => sum + (pool[t] || 0), 0);
+    // const totalPotential = MANA_TYPES.reduce((sum, t) => sum + (potentialPool[t] || 0), 0);
     const totalFloating = MANA_TYPES.reduce((sum, t) => sum + (floatingMana[t] || 0), 0);
-    const grandTotal = totalPool + totalFloating;
+    const grandTotal = totalAvailable + totalFloating;
 
     return (
         <div className="absolute right-0 top-1/4 flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
