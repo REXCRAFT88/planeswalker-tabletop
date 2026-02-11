@@ -1,4 +1,4 @@
-import { BoardObject, ManaRule, ManaColor as ManaColorType } from '../types';
+import { BoardObject, ManaRule, ManaColor as ManaColorType, CardData } from '../types';
 
 // --- Mana Symbol Types ---
 export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C'; // White, Blue, Black, Red, Green, Colorless
@@ -229,12 +229,25 @@ export const calculateAvailableMana = (
             } else if (customRule.prodMode === 'chooseColor') {
                 // Choose Color mode: at runtime, player picks a color via modal.
                 // For auto-tap/pool purposes, default to colorless placeholder.
+                // Choose Color mode: at runtime, player picks a color via modal.
+                // We use produced['C'] to store the quantity X
                 const amount = customRule.calcMode === 'set'
-                    ? Math.max(1, Object.values(customRule.produced).reduce((a, b) => a + b, 0))
+                    ? (customRule.produced['C'] || 1)
                     : calcAmount;
                 // Push all 5 colors as potential options (like "any color")
                 for (const c of ['W', 'U', 'B', 'R', 'G'] as ManaColor[]) {
                     for (let i = 0; i < amount; i++) produced.push(c);
+                }
+            } else if (customRule.prodMode === 'commander') {
+                const amount = customRule.calcMode === 'set'
+                    ? (customRule.produced['C'] || 1)
+                    : calcAmount;
+                if (commanderColors && commanderColors.length > 0) {
+                    for (const c of commanderColors) {
+                        for (let i = 0; i < amount; i++) produced.push(c);
+                    }
+                } else {
+                    for (let i = 0; i < amount; i++) produced.push('C');
                 }
             } else {
                 // Multiplied mode: produce calcAmount of each specified color
@@ -277,10 +290,7 @@ export const calculateAvailableMana = (
 
             abilityType = (obj.cardData.manaAbilityType || 'tap') as typeof abilityType;
 
-            const isBasic = isBasicLand(obj.cardData.name);
-            const uniqueColors = new Set(produced);
-            sourcePriority = isBasic ? 0 : (produced.length === 1 ? 1 : (uniqueColors.size > 1 ? 3 : 2));
-            sourcePriority = isBasic ? 0 : (produced.length === 1 ? 1 : (uniqueColors.size > 1 ? 3 : 2));
+            sourcePriority = getManaPriority(obj.cardData, produced);
         }
 
         // --- Apply Global Rules (Granted Abilities) ---
@@ -467,6 +477,20 @@ const BASIC_LAND_COLOR: Record<string, ManaColor> = {
 
 export const getBasicLandColor = (name: string): ManaColor | null => {
     return BASIC_LAND_COLOR[name.toLowerCase()] || null;
+};
+
+// Helper to determine auto-tap priority
+export const getManaPriority = (card: CardData, produced: ManaColor[]): number => {
+    const isBasic = isBasicLand(card.name);
+    const uniqueColors = new Set(produced);
+    // 0 = Basic Land
+    // 1 = Single color producer
+    // 2 = Dual/Tri color (limited options)
+    // 3 = Flexible / Any Color
+    if (isBasic) return 0;
+    if (produced.length <= 1) return 1;
+    if (uniqueColors.size > 1) return 3;
+    return 2;
 };
 
 // --- Auto-Tap Algorithm ---

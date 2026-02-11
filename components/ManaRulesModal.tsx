@@ -24,6 +24,7 @@ interface ManaRulesModalProps {
     card: CardData;
     existingRule?: ManaRule;
     commanderColors?: ManaColor[];
+    allSources?: { id: string; name: string; priority: number }[]; // For priority list
     onSave: (rule: ManaRule | null) => void; // null = reset to default
     onClose: () => void;
 }
@@ -92,7 +93,8 @@ const ManaRuleEditor: React.FC<{
     commanderColors?: ManaColor[];
     disabled?: boolean;
     isAlternative?: boolean;
-}> = ({ rule, onChange, commanderColors, disabled, isAlternative }) => {
+    allSources?: { id: string; name: string; priority: number }[];
+}> = ({ rule, onChange, commanderColors, disabled, isAlternative, allSources }) => {
     const [hasAlt, setHasAlt] = useState(!!rule.producedAlt);
 
     const updateRule = <K extends keyof ManaRule>(key: K, value: ManaRule[K]) => {
@@ -254,16 +256,34 @@ const ManaRuleEditor: React.FC<{
                                         WUBRG
                                     </button>
                                 </div>
-                                <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
-                                    {MANA_COLORS.map(color => (
+                                {/* Display counters only for Standard mode */}
+                                {rule.prodMode === 'standard' && (
+                                    <div className="flex gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
+                                        {MANA_COLORS.map(color => (
+                                            <ManaCounter
+                                                key={color}
+                                                color={color}
+                                                value={rule.produced[color]}
+                                                onChange={(v) => updateProduced(color, v)}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Display single Quantity input for Commander/Any Color modes */}
+                                {((rule.prodMode as string) === 'commander' || (rule.prodMode as string) === 'chooseColor') && (
+                                    <div className="flex flex-col items-center gap-2 bg-gray-900/50 rounded-xl p-3">
+                                        <span className="text-xs text-gray-400">Mana Amount</span>
                                         <ManaCounter
-                                            key={color}
-                                            color={color}
-                                            value={rule.produced[color]}
-                                            onChange={(v) => updateProduced(color, v)}
+                                            color="C"
+                                            value={rule.produced['C'] || 1} // Default to 1 if not set
+                                            onChange={(v) => updateProduced('C', Math.max(1, v))} // Min 1
                                         />
-                                    ))}
-                                </div>
+                                        <span className="text-[10px] text-gray-500">
+                                            {(rule.prodMode as string) === 'commander' ? 'Produces X mana of any commander color' : 'Produces X mana of any color'}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* OR alternative */}
@@ -467,18 +487,58 @@ const ManaRuleEditor: React.FC<{
                 </div>
 
                 <div>
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Auto-Tap Priority</h4>
-                    <input
-                        type="number"
-                        value={rule.autoTapPriority}
-                        onChange={(e) => updateRule('autoTapPriority', parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-center"
-                        step={0.1}
-                    />
-                    <p className="text-[10px] text-gray-500 mt-1">Lower = tapped first</p>
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Auto-Tap Priority</label>
+                            <div className="group relative">
+                                <Info size={12} className="text-gray-500 cursor-help" />
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-black/90 text-[10px] text-gray-300 rounded border border-gray-700 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                                    Lower numbers are tapped first.
+                                    <br />0 = Basic Lands
+                                    <br />1 = Single Color Non-Basics
+                                    <br />2 = Dual Lands
+                                    <br />3 = Flexible / Any Color
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4 items-start">
+                            <div className="flex-1">
+                                <input
+                                    type="number"
+                                    value={rule.autoTapPriority}
+                                    onChange={(e) => updateRule('autoTapPriority', parseFloat(e.target.value) || 0)}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-center"
+                                    step={0.1}
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1 center">Lower = User First</p>
+                            </div>
+
+                            {/* Priority List Display */}
+                            {allSources && allSources.length > 0 && (
+                                <div className="w-48 bg-gray-900/50 rounded-lg border border-gray-700 p-2 max-h-32 overflow-y-auto custom-scrollbar">
+                                    <div className="text-[10px] text-gray-400 mb-1 sticky top-0 bg-[#232836] pb-1 border-b border-gray-700 font-bold flex justify-between">
+                                        <span>Card</span>
+                                        <span>Pri</span>
+                                    </div>
+                                    {allSources
+                                        .sort((a, b) => a.priority - b.priority)
+                                        .map(s => (
+                                            <div key={s.id} className="text-[10px] flex justify-between py-0.5 border-b border-gray-800/50 last:border-0">
+                                                <span className={`truncate max-w-[120px] ${Math.abs(s.priority - rule.autoTapPriority) < 0.01 ? 'text-blue-400 font-bold' : 'text-gray-500'}`}>
+                                                    {s.name}
+                                                </span>
+                                                <span className="text-gray-600 font-mono">{s.priority.toFixed(1)}</span>
+                                            </div>
+                                        ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
+
     );
 };
 
@@ -495,7 +555,7 @@ const ruleSummary = (rule: ManaRule): string => {
     return base;
 };
 
-export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, commanderColors, onSave, onClose }) => {
+export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, commanderColors, allSources, onSave, onClose }) => {
     const [rule, setRule] = useState<ManaRule>(() => {
         if (existingRule) return { ...existingRule };
         return { ...EMPTY_MANA_RULE };
@@ -586,6 +646,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                             onChange={(updated) => setRule(prev => ({ ...prev, ...updated, alternativeRule: prev.alternativeRule, disabled: prev.disabled }))}
                             commanderColors={commanderColors}
                             disabled={isDisabled}
+                            allSources={allSources}
                         />
                     </div>
 
@@ -621,6 +682,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                             rule={rule.alternativeRule || { ...EMPTY_MANA_RULE }}
                                             onChange={(altRule) => setRule(prev => ({ ...prev, alternativeRule: altRule }))}
                                             commanderColors={commanderColors}
+                                            allSources={allSources}
                                             isAlternative
                                         />
                                     </div>

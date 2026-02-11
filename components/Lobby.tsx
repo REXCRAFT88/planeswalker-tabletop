@@ -3,6 +3,8 @@ import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, 
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
+import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
+
 import { connectSocket } from '../services/socket';
 import { SavedDeck } from '../App';
 import { ManaRulesModal } from './ManaRulesModal';
@@ -607,6 +609,34 @@ export const Lobby: React.FC<LobbyProps> = ({
                         })()}
                         onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                         onClose={() => setManaRulesCard(null)}
+                        allSources={editingDeck.deck
+                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land'))
+                            .map(c => {
+                                const rule = editingDeck.manaRules?.[c.scryfallId];
+                                let priority = rule?.autoTapPriority;
+
+                                if (priority === undefined) {
+                                    let produced: ManaColor[] = [];
+                                    if (rule) {
+                                        if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
+                                            Object.entries(rule.produced).forEach(([color, count]) => {
+                                                if (count > 0) produced.push(color as ManaColor);
+                                            });
+                                        } else {
+                                            produced = ['W', 'U'];
+                                        }
+                                    } else {
+                                        produced = parseProducedMana(c.producedMana);
+                                        if (produced.length === 0) {
+                                            const basic = getBasicLandColor(c.name);
+                                            if (basic) produced = [basic];
+                                        }
+                                    }
+                                    priority = getManaPriority(c, produced);
+                                }
+                                return { id: c.id, name: c.name, priority };
+                            })
+                        }
                     />
                 )
             }

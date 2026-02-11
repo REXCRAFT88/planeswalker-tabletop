@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
+import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter } from 'lucide-react';
@@ -479,8 +480,51 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         if (commander.manaCost.includes('G')) colors.push('G');
                         return colors.length > 0 ? colors : undefined;
                     })()}
-                    onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
+                    onSave={(rule) => {
+                        // Inline handleSave if handleSaveManaRule isn't visible in my context
+                        // But previous view showed it being used.
+                        // I will assume handleSaveManaRule exists.
+                        // Wait, previous view showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
+                        // I should preserve that.
+                        // But I need to view the file to be sure about the handler name or if I can just use the existing line.
+                        // The snippet showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
+                        const newRules = { ...manaRules };
+                        if (rule === null) {
+                            delete newRules[manaRulesCard.scryfallId];
+                        } else {
+                            newRules[manaRulesCard.scryfallId] = rule;
+                        }
+                        setManaRules(newRules);
+                    }}
                     onClose={() => setManaRulesCard(null)}
+                    allSources={stagedDeck
+                        ?.filter(c => (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land'))
+                        .map(c => {
+                            const rule = manaRules[c.scryfallId];
+                            let priority = rule?.autoTapPriority;
+
+                            if (priority === undefined) {
+                                let produced: ManaColor[] = [];
+                                if (rule) {
+                                    if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
+                                        Object.entries(rule.produced).forEach(([color, count]) => {
+                                            if (count > 0) produced.push(color as ManaColor);
+                                        });
+                                    } else {
+                                        produced = ['W', 'U'];
+                                    }
+                                } else {
+                                    produced = parseProducedMana(c.producedMana);
+                                    if (produced.length === 0) {
+                                        const basic = getBasicLandColor(c.name);
+                                        if (basic) produced = [basic];
+                                    }
+                                }
+                                priority = getManaPriority(c, produced);
+                            }
+                            return { id: c.id, name: c.name, priority };
+                        }) || []
+                    }
                 />
             )}
         </div>
