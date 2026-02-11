@@ -1,6 +1,8 @@
 export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C';
 
 export interface ManaRule {
+  // Disable mana production from this card entirely
+  disabled?: boolean;
   // Activation trigger
   trigger: 'tap' | 'activated' | 'passive';
   // Activation cost (mana required to activate ability)
@@ -8,11 +10,16 @@ export interface ManaRule {
   // How the mana amount is calculated
   calcMode: 'set' | 'counters' | 'creatures' | 'basicLands';
   calcMultiplier: number; // default 1
+  includeBasePower?: boolean; // when counters mode: add creature's base power to counter count
   // How the mana is produced
-  prodMode: 'standard' | 'multiplied';
+  prodMode: 'standard' | 'multiplied' | 'available' | 'chooseColor';
+  // 'available' = one mana of any color you have lands for
+  // 'chooseColor' = player picks a color at runtime via modal
   produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
   producedAlt?: Record<ManaColor, number>; // "or" choice
   includeNonBasics?: boolean; // for multiplied mode
+  // Alternative rule set (opens modal for player to choose which rule to apply)
+  alternativeRule?: ManaRule;
   // Persistence of produced mana
   persistence: 'permanent' | 'untilNextTurn' | 'untilEndOfTurn';
   // Auto-tap settings

@@ -143,6 +143,9 @@ export const calculateAvailableMana = (
 
         if (customRule) {
             // --- Custom rule path ---
+            // Skip disabled rules entirely
+            if (customRule.disabled) return;
+
             // Calculate the multiplier from calcMode
             let calcAmount = 1;
             switch (customRule.calcMode) {
@@ -150,7 +153,12 @@ export const calculateAvailableMana = (
                     calcAmount = 1;
                     break;
                 case 'counters': {
-                    const counters = obj.counters?.['+1/+1'] || obj.counters?.['counter'] || 0;
+                    let counters = obj.counters?.['+1/+1'] || obj.counters?.['counter'] || 0;
+                    // Include base power if option is enabled
+                    if (customRule.includeBasePower) {
+                        const powerMatch = obj.cardData.power?.match(/^\d+/);
+                        if (powerMatch) counters += parseInt(powerMatch[0]);
+                    }
                     calcAmount = counters * (customRule.calcMultiplier || 1);
                     break;
                 }
@@ -179,6 +187,42 @@ export const calculateAvailableMana = (
                             produced.push(color as ManaColor);
                         }
                     }
+                }
+            } else if (customRule.prodMode === 'available') {
+                // Available mode: produces mana of any color matching your lands
+                const landColors = new Set<ManaColor>();
+                boardObjects.forEach(lo => {
+                    if (lo.type !== 'CARD' || lo.controllerId !== controllerId) return;
+                    const tl = (lo.cardData.typeLine || '').toLowerCase();
+                    if (!tl.includes('land')) return;
+                    if (tl.includes('plains')) landColors.add('W');
+                    if (tl.includes('island')) landColors.add('U');
+                    if (tl.includes('swamp')) landColors.add('B');
+                    if (tl.includes('mountain')) landColors.add('R');
+                    if (tl.includes('forest')) landColors.add('G');
+                    // Check produced_mana for non-basic lands
+                    if (lo.cardData.producedMana) {
+                        lo.cardData.producedMana.forEach(m => {
+                            const uc = m.toUpperCase() as ManaColor;
+                            if (['W', 'U', 'B', 'R', 'G'].includes(uc)) landColors.add(uc);
+                        });
+                    }
+                });
+                const amount = customRule.calcMode === 'set'
+                    ? Math.max(1, Object.values(customRule.produced).reduce((a, b) => a + b, 0))
+                    : calcAmount;
+                landColors.forEach(c => {
+                    for (let i = 0; i < amount; i++) produced.push(c);
+                });
+            } else if (customRule.prodMode === 'chooseColor') {
+                // Choose Color mode: at runtime, player picks a color via modal.
+                // For auto-tap/pool purposes, default to colorless placeholder.
+                const amount = customRule.calcMode === 'set'
+                    ? Math.max(1, Object.values(customRule.produced).reduce((a, b) => a + b, 0))
+                    : calcAmount;
+                // Push all 5 colors as potential options (like "any color")
+                for (const c of ['W', 'U', 'B', 'R', 'G'] as ManaColor[]) {
+                    for (let i = 0; i < amount; i++) produced.push(c);
                 }
             } else {
                 // Multiplied mode: produce calcAmount of each specified color
