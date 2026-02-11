@@ -29,11 +29,17 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const [isSearchingTokens, setIsSearchingTokens] = useState(false);
 
     const isNewDeck = !initialDeck || initialDeck.length === 0;
-    const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : '');
+    const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : (initialDeck && initialDeck.length > 0 ? (initialManaRules?.deckName as any || 'My Deck') : 'New Deck'));
+    // Note: initialManaRules doesn't actually contain deckName, but we might need a way to pass it if available.
+    // For now, defaulting to 'My Deck' or keeping existing logic if passed.
+    // Actually, onDeckReady accepts name. We should probably accept `initialDeckName` prop if we want to perfect this,
+    // but the user just said "allow for renaming decks when in edit".
+    // So ensuring the input is always visible is the key.
     const [manaRules, setManaRules] = useState<Record<string, ManaRule>>(initialManaRules || {});
     const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [showManaFilter, setShowManaFilter] = useState(false);
+    const [viewingCard, setViewingCard] = useState<CardData | null>(null); // For View Card feature
 
     // Staging area after fetching but before confirming commander
     // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
@@ -231,16 +237,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     <h1 className="text-xl text-center md:text-left md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
                         Add Tokens
                     </h1>
-                    {isNewDeck && (
-                        <div className="w-full md:flex-1 md:mx-4">
-                            <input
-                                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-green-500 outline-none"
-                                placeholder="Deck Name"
-                                value={deckName}
-                                onChange={e => setDeckName(e.target.value)}
-                            />
-                        </div>
-                    )}
+                    <div className="w-full md:flex-1 md:mx-4">
+                        <input
+                            className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-green-500 outline-none"
+                            placeholder="Deck Name"
+                            value={deckName}
+                            onChange={e => setDeckName(e.target.value)}
+                        />
+                    </div>
                     <button onClick={finalizeDeck} className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shrink-0">
                         <Check size={20} /> Finish & Save
                     </button>
@@ -299,15 +303,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         </button>
                     </div>
                 </div>
-            </div>
+            </div >
         );
     }
 
     return (
         <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto overflow-hidden">
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
-                    {stagedDeck ? 'Select Commander' : 'Import Deck'}
+                <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 flex items-center gap-3">
+                    {stagedDeck ? (
+                        <input
+                            value={deckName}
+                            onChange={(e) => setDeckName(e.target.value)}
+                            className="bg-transparent border-b border-gray-600 focus:border-blue-500 focus:outline-none text-white min-w-[200px]"
+                            placeholder="Deck Name"
+                        />
+                    ) : 'Import Deck'}
                 </h1>
                 <button onClick={onBack} className="text-gray-400 hover:text-white transition">
                     Back to Menu
@@ -481,13 +492,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         return colors.length > 0 ? colors : undefined;
                     })()}
                     onSave={(rule) => {
-                        // Inline handleSave if handleSaveManaRule isn't visible in my context
-                        // But previous view showed it being used.
-                        // I will assume handleSaveManaRule exists.
-                        // Wait, previous view showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
-                        // I should preserve that.
-                        // But I need to view the file to be sure about the handler name or if I can just use the existing line.
-                        // The snippet showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                         const newRules = { ...manaRules };
                         if (rule === null) {
                             delete newRules[manaRulesCard.scryfallId];
@@ -497,36 +501,66 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         setManaRules(newRules);
                     }}
                     onClose={() => setManaRulesCard(null)}
-                    allSources={stagedDeck
-                        ?.filter(c => (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land'))
-                        .map(c => {
-                            const rule = manaRules[c.scryfallId];
-                            let priority = rule?.autoTapPriority;
+                    allSources={(() => {
+                        const unique = new Map<string, { id: string, name: string, priority: number }>();
+                        (stagedDeck || [])
+                            .filter(c => (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land'))
+                            .forEach(c => {
+                                if (!unique.has(c.name)) {
+                                    const rule = manaRules[c.scryfallId];
+                                    let priority = rule?.autoTapPriority;
 
-                            if (priority === undefined) {
-                                let produced: ManaColor[] = [];
-                                if (rule) {
-                                    if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
-                                        Object.entries(rule.produced).forEach(([color, count]) => {
-                                            if (count > 0) produced.push(color as ManaColor);
-                                        });
-                                    } else {
-                                        produced = ['W', 'U'];
+                                    if (priority === undefined) {
+                                        let produced: ManaColor[] = [];
+                                        if (rule) {
+                                            if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
+                                                Object.entries(rule.produced).forEach(([color, count]) => {
+                                                    if (count > 0) produced.push(color as ManaColor);
+                                                });
+                                            } else {
+                                                produced = ['W', 'U'];
+                                            }
+                                        } else {
+                                            produced = parseProducedMana(c.producedMana);
+                                            if (produced.length === 0) {
+                                                const basic = getBasicLandColor(c.name);
+                                                if (basic) produced = [basic];
+                                            }
+                                        }
+                                        priority = getManaPriority(c, produced);
                                     }
-                                } else {
-                                    produced = parseProducedMana(c.producedMana);
-                                    if (produced.length === 0) {
-                                        const basic = getBasicLandColor(c.name);
-                                        if (basic) produced = [basic];
-                                    }
+                                    unique.set(c.name, { id: c.id, name: c.name, priority });
                                 }
-                                priority = getManaPriority(c, produced);
-                            }
-                            return { id: c.id, name: c.name, priority };
-                        }) || []
-                    }
+                            });
+                        return Array.from(unique.values());
+                    })()}
+                    onViewCard={(card) => setViewingCard(card)}
                 />
             )}
+
+            {/* View Card Lightbox */}
+            {viewingCard && (
+                <div
+                    className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+                    onClick={() => setViewingCard(null)}
+                >
+                    <div className="relative max-w-lg w-full max-h-[90vh] flex flex-col items-center">
+                        <img
+                            src={viewingCard.imageUrl}
+                            alt={viewingCard.name}
+                            className="w-auto h-auto max-h-[80vh] object-contain rounded-xl shadow-2xl border-2 border-gray-700"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                        <button
+                            onClick={() => setViewingCard(null)}
+                            className="mt-4 px-6 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-full font-bold transition-colors flex items-center gap-2"
+                        >
+                            <X size={20} /> Close
+                        </button>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };

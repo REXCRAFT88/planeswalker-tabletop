@@ -1,7 +1,7 @@
 import { BoardObject, ManaRule, ManaColor as ManaColorType, CardData } from '../types';
 
 // --- Mana Symbol Types ---
-export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C'; // White, Blue, Black, Red, Green, Colorless
+export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'CMD' | 'ALL'; // White, Blue, Black, Red, Green, Colorless, Commander, All(WUBRG)
 export type ManaSymbol = {
     type: 'colored';
     color: ManaColor;
@@ -22,6 +22,8 @@ export interface ManaPool {
     R: number;
     G: number;
     C: number; // True colorless (from Wastes, Sol Ring, etc.)
+    CMD?: number; // Commander mana (any color in identity)
+    ALL?: number; // WUBRG mana (any color)
 }
 
 export interface ManaCost {
@@ -41,6 +43,8 @@ export const MANA_DISPLAY: Record<ManaColor, { symbol: string; color: string; bg
     R: { symbol: '🔥', color: '#D32029', bg: '#F9AA8F' },
     G: { symbol: '🌲', color: '#00733E', bg: '#9BD3AE' },
     C: { symbol: '◇', color: '#CBC2BF', bg: '#CBC2BF' },
+    CMD: { symbol: '👑', color: '#D4AF37', bg: '#F9E4B7' }, // Gold for Commander
+    ALL: { symbol: '🌈', color: '#FFFFFF', bg: '#E0E0E0' }, // Rainbow/White for All
 };
 
 // --- Mana Cost Parsing ---
@@ -186,7 +190,31 @@ export const calculateAvailableMana = (
             produced = [];
             if (customRule.prodMode === 'standard') {
                 const amount = customRule.calcMode === 'set' ? 1 : calcAmount;
+
+                // --- CMD and ALL Handling ---
+                if (customRule.produced['CMD'] && customRule.produced['CMD'] > 0) {
+                    const count = customRule.produced['CMD'];
+                    if (commanderColors && commanderColors.length > 0) {
+                        const total = count * amount;
+                        for (let i = 0; i < total; i++) {
+                            commanderColors.forEach(c => produced.push(c));
+                        }
+                    } else {
+                        const total = count * amount;
+                        for (let i = 0; i < total; i++) produced.push('C');
+                    }
+                }
+                if (customRule.produced['ALL'] && customRule.produced['ALL'] > 0) {
+                    const count = customRule.produced['ALL'];
+                    const total = count * amount;
+                    for (let i = 0; i < total; i++) {
+                        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
+                    }
+                }
+
+                // Standard Colors
                 for (const [color, count] of Object.entries(customRule.produced)) {
+                    if (color === 'CMD' || color === 'ALL') continue;
                     const total = count * amount;
                     for (let i = 0; i < total; i++) {
                         produced.push(color as ManaColor);
@@ -228,8 +256,6 @@ export const calculateAvailableMana = (
                 });
             } else if (customRule.prodMode === 'chooseColor') {
                 // Choose Color mode: at runtime, player picks a color via modal.
-                // For auto-tap/pool purposes, default to colorless placeholder.
-                // Choose Color mode: at runtime, player picks a color via modal.
                 // We use produced['C'] to store the quantity X
                 const amount = customRule.calcMode === 'set'
                     ? (customRule.produced['C'] || 1)
@@ -252,6 +278,7 @@ export const calculateAvailableMana = (
             } else {
                 // Multiplied mode: produce calcAmount of each specified color
                 for (const [color, count] of Object.entries(customRule.produced)) {
+                    if (color === 'CMD' || color === 'ALL') continue;
                     const total = count * calcAmount;
                     for (let i = 0; i < total; i++) {
                         produced.push(color as ManaColor);

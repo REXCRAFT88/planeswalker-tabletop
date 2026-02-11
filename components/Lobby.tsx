@@ -53,6 +53,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [tokenImportError, setTokenImportError] = useState<string | null>(null);
     const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+    const [viewingCard, setViewingCard] = useState<CardData | null>(null); // For View Card feature
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Auto-join if session exists
@@ -609,37 +610,66 @@ export const Lobby: React.FC<LobbyProps> = ({
                         })()}
                         onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                         onClose={() => setManaRulesCard(null)}
-                        allSources={editingDeck.deck
-                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land'))
-                            .map(c => {
-                                const rule = editingDeck.manaRules?.[c.scryfallId];
-                                let priority = rule?.autoTapPriority;
+                        allSources={(() => {
+                            const unique = new Map<string, { id: string, name: string, priority: number }>();
+                            editingDeck.deck
+                                .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land'))
+                                .forEach(c => {
+                                    if (!unique.has(c.name)) {
+                                        const rule = editingDeck.manaRules?.[c.scryfallId];
+                                        let priority = rule?.autoTapPriority;
 
-                                if (priority === undefined) {
-                                    let produced: ManaColor[] = [];
-                                    if (rule) {
-                                        if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
-                                            Object.entries(rule.produced).forEach(([color, count]) => {
-                                                if (count > 0) produced.push(color as ManaColor);
-                                            });
-                                        } else {
-                                            produced = ['W', 'U'];
+                                        if (priority === undefined) {
+                                            let produced: ManaColor[] = [];
+                                            if (rule) {
+                                                if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
+                                                    Object.entries(rule.produced).forEach(([color, count]) => {
+                                                        if (count > 0) produced.push(color as ManaColor);
+                                                    });
+                                                } else {
+                                                    produced = ['W', 'U'];
+                                                }
+                                            } else {
+                                                produced = parseProducedMana(c.producedMana);
+                                                if (produced.length === 0) {
+                                                    const basic = getBasicLandColor(c.name);
+                                                    if (basic) produced = [basic];
+                                                }
+                                            }
+                                            priority = getManaPriority(c, produced);
                                         }
-                                    } else {
-                                        produced = parseProducedMana(c.producedMana);
-                                        if (produced.length === 0) {
-                                            const basic = getBasicLandColor(c.name);
-                                            if (basic) produced = [basic];
-                                        }
+                                        unique.set(c.name, { id: c.id, name: c.name, priority });
                                     }
-                                    priority = getManaPriority(c, produced);
-                                }
-                                return { id: c.id, name: c.name, priority };
-                            })
-                        }
+                                });
+                            return Array.from(unique.values());
+                        })()}
+                        onViewCard={(card) => setViewingCard(card)}
                     />
                 )
             }
+
+            {/* View Card Lightbox */}
+            {viewingCard && (
+                <div
+                    className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+                    onClick={() => setViewingCard(null)}
+                >
+                    <div className="relative max-w-lg w-full max-h-[90vh] flex flex-col items-center">
+                        <img
+                            src={viewingCard.imageUrl}
+                            alt={viewingCard.name}
+                            className="w-auto h-auto max-h-[80vh] object-contain rounded-xl shadow-2xl border-2 border-gray-700"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                        <button
+                            onClick={() => setViewingCard(null)}
+                            className="mt-4 px-6 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-full font-bold transition-colors flex items-center gap-2"
+                        >
+                            <X size={20} /> Close
+                        </button>
+                    </div>
+                </div>
+            )}
         </>
     );
 };
