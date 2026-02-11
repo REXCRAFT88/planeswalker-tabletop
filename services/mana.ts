@@ -298,13 +298,15 @@ export const calculateAvailableMana = (
         }
 
         // Only simple 'tap' sources count as readily available
-        if (abilityType === 'tap') {
+        // Creatures/artifacts with custom tap rules go to potential (user taps deliberately)
+        const isCreatureOrArtifact = customRule && !obj.cardData.typeLine?.toLowerCase().includes('land');
+        if (abilityType === 'tap' && !isCreatureOrArtifact) {
             for (let i = 0; i < untappedCount; i++) {
                 sources.push(source);
                 produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
             }
         } else {
-            // activated, multi, complex — goes to potential pool
+            // activated, multi, complex, or creature/artifact tap — goes to potential pool
             for (let i = 0; i < untappedCount; i++) {
                 potentialSources.push(source);
                 produced.forEach(c => { potentialPool[c] = (potentialPool[c] || 0) + 1; });

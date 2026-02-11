@@ -209,6 +209,20 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         })
         : [];
 
+    // Group cards by scryfallId for compact display
+    const groupedDeck = (() => {
+        const map = new Map<string, { card: CardData; count: number }>();
+        for (const card of filteredDeck) {
+            const existing = map.get(card.scryfallId);
+            if (existing) {
+                existing.count++;
+            } else {
+                map.set(card.scryfallId, { card, count: 1 });
+            }
+        }
+        return Array.from(map.values());
+    })();
+
     if (step === 'TOKENS') {
         return (
             <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto overflow-y-auto">
@@ -391,9 +405,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-4">
-                            {filteredDeck.map(card => (
+                            {groupedDeck.map(({ card, count }) => (
                                 <div
-                                    key={card.id}
+                                    key={card.scryfallId}
                                     onClick={() => setCommander(card.id)}
                                     onMouseEnter={() => setHoveredCardId(card.id)}
                                     onMouseLeave={() => setHoveredCardId(null)}
@@ -405,10 +419,22 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                             <Crown size={20} fill="black" />
                                         </div>
                                     )}
+                                    {/* Count badge */}
+                                    {count > 1 && (
+                                        <div className="absolute bottom-8 left-1 bg-gray-900/90 text-white text-[11px] font-bold px-1.5 py-0.5 rounded shadow-lg border border-gray-600">
+                                            ×{count}
+                                        </div>
+                                    )}
                                     {/* Mana rules indicator */}
                                     {manaRules[card.scryfallId] && (
                                         <div className="absolute top-2 left-2 bg-purple-600 text-white p-1 rounded-full shadow-lg" title="Custom mana rules set">
                                             <Zap size={12} />
+                                        </div>
+                                    )}
+                                    {/* Disabled indicator */}
+                                    {manaRules[card.scryfallId]?.disabled && (
+                                        <div className="absolute inset-0 bg-red-900/30 rounded-md flex items-center justify-center">
+                                            <span className="text-red-400 text-[10px] font-bold bg-black/60 px-2 py-0.5 rounded">DISABLED</span>
                                         </div>
                                     )}
                                     {/* Hover overlay with Set Mana Rules button */}
@@ -427,7 +453,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                     </div>
                                 </div>
                             ))}
-                            {filteredDeck.length === 0 && (
+                            {groupedDeck.length === 0 && (
                                 <div className="col-span-full text-center text-gray-500 py-12">
                                     No cards found matching "{searchQuery}"
                                 </div>

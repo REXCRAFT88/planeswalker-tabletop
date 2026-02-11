@@ -41,8 +41,28 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, f
         }
     };
 
+    // Total mana across all types
+    const totalPool = MANA_TYPES.reduce((sum, t) => sum + (pool[t] || 0), 0);
+    const totalPotential = MANA_TYPES.reduce((sum, t) => sum + (potentialPool[t] || 0), 0);
+    const totalFloating = MANA_TYPES.reduce((sum, t) => sum + (floatingMana[t] || 0), 0);
+    const grandTotal = totalPool + totalFloating;
+
     return (
         <div className="absolute right-0 top-1/4 flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
+            {/* Total Mana Header */}
+            <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1">
+                <img src="/mana/all.png" alt="Total" className="w-5 h-5 object-contain opacity-70" />
+                <div className="flex flex-col items-center">
+                    <span className={`font-bold text-xl leading-none drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] ${totalFloating > 0 ? 'text-amber-400' : 'text-white'
+                        }`}>
+                        {grandTotal}
+                    </span>
+                    {totalPotential > 0 && (
+                        <span className="text-[9px] text-cyan-400 font-mono leading-none">+{totalPotential}</span>
+                    )}
+                </div>
+            </div>
+
             {MANA_TYPES.map(type => {
                 if (!showAll && !hasMana(type)) return null;
                 const available = pool[type] || 0; // Tappable
@@ -75,7 +95,7 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, f
                             {/* Breakdown: Floating / Potential */}
                             <div className="flex gap-1 text-[9px] font-mono leading-none">
                                 {floating > 0 && <span className="text-amber-400" title="Floating Mana">{floating}</span>}
-                                {potential > 0 && <span className="text-gray-400" title="Potential Tappable">({potential})</span>}
+                                {potential > 0 && <span className="text-cyan-400" title="Potential (creatures/artifacts)">{`+${potential}`}</span>}
                             </div>
                         </div>
 
