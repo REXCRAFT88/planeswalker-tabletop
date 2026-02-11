@@ -1,7 +1,7 @@
 import { BoardObject, ManaRule, ManaColor as ManaColorType, CardData } from '../types';
 
 // --- Mana Symbol Types ---
-export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'CMD' | 'ALL'; // White, Blue, Black, Red, Green, Colorless, Commander, All(WUBRG)
+export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'WUBRG' | 'CMD'; // White, Blue, Black, Red, Green, Colorless, All, Commander
 export type ManaSymbol = {
     type: 'colored';
     color: ManaColor;
@@ -21,9 +21,9 @@ export interface ManaPool {
     B: number;
     R: number;
     G: number;
-    C: number; // True colorless (from Wastes, Sol Ring, etc.)
-    CMD?: number; // Commander mana (any color in identity)
-    ALL?: number; // WUBRG mana (any color)
+    C: number;
+    WUBRG: number; // Any color
+    CMD: number; // Any commander color
 }
 
 export interface ManaCost {
@@ -32,9 +32,10 @@ export interface ManaCost {
     hasX: boolean;
 }
 
-export const EMPTY_POOL: ManaPool = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
+export const EMPTY_POOL: ManaPool = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 };
 
-export const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
+export const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'];
+export const BASE_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
 
 export const MANA_DISPLAY: Record<ManaColor, { symbol: string; color: string; bg: string }> = {
     W: { symbol: '☀', color: '#FFF9E6', bg: '#F9E4B7' },
@@ -43,8 +44,8 @@ export const MANA_DISPLAY: Record<ManaColor, { symbol: string; color: string; bg
     R: { symbol: '🔥', color: '#D32029', bg: '#F9AA8F' },
     G: { symbol: '🌲', color: '#00733E', bg: '#9BD3AE' },
     C: { symbol: '◇', color: '#CBC2BF', bg: '#CBC2BF' },
-    CMD: { symbol: '👑', color: '#D4AF37', bg: '#F9E4B7' }, // Gold for Commander
-    ALL: { symbol: '🌈', color: '#FFFFFF', bg: '#E0E0E0' }, // Rainbow/White for All
+    WUBRG: { symbol: '🌈', color: '#FFFFFF', bg: '#FFFFFF' },
+    CMD: { symbol: '👑', color: '#FFD700', bg: '#B8860B' },
 };
 
 // --- Mana Cost Parsing ---
@@ -106,7 +107,7 @@ export const calculateAvailableMana = (
     defaultRotation: number,
     commanderColors?: ManaColor[],
     manaRules?: Record<string, ManaRule>
-): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[] } => {
+): { pool: ManaPool; potentialPool: ManaPool; sources: ManaSource[]; potentialSources: ManaSource[]; cmdColors?: ManaColor[] } => {
     const pool: ManaPool = { ...EMPTY_POOL };
     const potentialPool: ManaPool = { ...EMPTY_POOL };
     const sources: ManaSource[] = [];
@@ -190,41 +191,38 @@ export const calculateAvailableMana = (
             produced = [];
             if (customRule.prodMode === 'standard') {
                 const amount = customRule.calcMode === 'set' ? 1 : calcAmount;
+                for (const [color, count] of Object.entries(customRule.produced)) {
+                    const total = count * amount;
+                    if (total <= 0) continue;
 
-                // --- CMD and ALL Handling ---
-                if (customRule.produced['CMD'] && customRule.produced['CMD'] > 0) {
-                    const count = customRule.produced['CMD'];
-                    if (commanderColors && commanderColors.length > 0) {
-                        const total = count * amount;
+                    if (color === 'WUBRG' || color === 'CMD') {
                         for (let i = 0; i < total; i++) {
-                            commanderColors.forEach(c => produced.push(c));
+                            produced.push(color);
                         }
                     } else {
-                        const total = count * amount;
-                        for (let i = 0; i < total; i++) produced.push('C');
-                    }
-                }
-                if (customRule.produced['ALL'] && customRule.produced['ALL'] > 0) {
-                    const count = customRule.produced['ALL'];
-                    const total = count * amount;
-                    for (let i = 0; i < total; i++) {
-                        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
-                    }
-                }
-
-                // Standard Colors
-                for (const [color, count] of Object.entries(customRule.produced)) {
-                    if (color === 'CMD' || color === 'ALL') continue;
-                    const total = count * amount;
-                    for (let i = 0; i < total; i++) {
-                        produced.push(color as ManaColor);
+                        for (let i = 0; i < total; i++) {
+                            produced.push(color as ManaColor);
+                        }
                     }
                 }
                 // Add alt colors as additional options (for flexible sources)
+                // Add alt colors as additional options (for flexible sources)
                 if (customRule.producedAlt) {
                     for (const [color, count] of Object.entries(customRule.producedAlt)) {
-                        if (count > 0 && !produced.includes(color as ManaColor)) {
-                            produced.push(color as ManaColor);
+                        if (count > 0) {
+                            if (color === 'WUBRG') {
+                                ['W', 'U', 'B', 'R', 'G'].forEach(c => {
+                                    if (!produced.includes(c as ManaColor)) produced.push(c as ManaColor);
+                                });
+                            } else if (color === 'CMD') {
+                                if (commanderColors) {
+                                    commanderColors.forEach(c => {
+                                        if (!produced.includes(c)) produced.push(c);
+                                    });
+                                }
+                            } else {
+                                if (!produced.includes(color as ManaColor)) produced.push(color as ManaColor);
+                            }
                         }
                     }
                 }
@@ -256,6 +254,8 @@ export const calculateAvailableMana = (
                 });
             } else if (customRule.prodMode === 'chooseColor') {
                 // Choose Color mode: at runtime, player picks a color via modal.
+                // For auto-tap/pool purposes, default to colorless placeholder.
+                // Choose Color mode: at runtime, player picks a color via modal.
                 // We use produced['C'] to store the quantity X
                 const amount = customRule.calcMode === 'set'
                     ? (customRule.produced['C'] || 1)
@@ -278,10 +278,17 @@ export const calculateAvailableMana = (
             } else {
                 // Multiplied mode: produce calcAmount of each specified color
                 for (const [color, count] of Object.entries(customRule.produced)) {
-                    if (color === 'CMD' || color === 'ALL') continue;
                     const total = count * calcAmount;
-                    for (let i = 0; i < total; i++) {
-                        produced.push(color as ManaColor);
+                    if (total <= 0) continue;
+
+                    if (color === 'WUBRG') {
+                        for (let i = 0; i < total; i++) produced.push('W', 'U', 'B', 'R', 'G');
+                    } else if (color === 'CMD') {
+                        if (commanderColors) {
+                            for (let i = 0; i < total; i++) produced.push(...commanderColors);
+                        }
+                    } else {
+                        for (let i = 0; i < total; i++) produced.push(color as ManaColor);
                     }
                 }
             }
@@ -425,13 +432,12 @@ export const calculateAvailableMana = (
             }
         }
 
-        // Check availability based on stacking
         const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
         if (untappedCount === 0 && (!customRule || customRule.trigger !== 'passive')) return;
 
         const isBasic = isBasicLand(obj.cardData.name);
         const uniqueColors = new Set(produced);
-        const isFlexible = uniqueColors.size > 1;
+        const isFlexible = uniqueColors.size > 1 || uniqueColors.has('WUBRG') || uniqueColors.has('CMD');
 
         const activationCost = customRule ? undefined : obj.cardData.manaActivationCost;
 
@@ -470,7 +476,7 @@ export const calculateAvailableMana = (
         }
     });
 
-    return { pool, potentialPool, sources, potentialSources };
+    return { pool, potentialPool, sources, potentialSources, cmdColors: commanderColors };
 };
 
 export interface ManaSource {
@@ -526,7 +532,8 @@ export const autoTapForCost = (
     cost: ManaCost,
     sources: ManaSource[],
     initialFloatingMana: ManaPool = { ...EMPTY_POOL },
-    xValue: number = 0
+    xValue: number = 0,
+    commanderColors?: ManaColor[]
 ): {
     tappedIds: string[];
     success: boolean;
@@ -587,7 +594,7 @@ export const autoTapForCost = (
                 paid = true;
             } else {
                 // Pay with any available floating
-                const available = MANA_COLORS.find(c => (currentFloating[c] || 0) > 0);
+                const available = BASE_COLORS.find(c => (currentFloating[c] || 0) > 0);
                 if (available) {
                     payWithFloating(available, 1);
                     paid = true;
@@ -608,8 +615,15 @@ export const autoTapForCost = (
 
     // Helpers for Tapping
     // Helpers for Tapping
+    const canSatisfy = (produced: ManaColor[], reqColor: ManaColor): boolean => {
+        if (produced.includes(reqColor)) return true;
+        if (produced.includes('WUBRG') && ['W', 'U', 'B', 'R', 'G'].includes(reqColor)) return true;
+        if (produced.includes('CMD') && (commanderColors || []).includes(reqColor)) return true;
+        return false;
+    };
+
     const processTap = (reqColor: ManaColor): boolean => {
-        const sourceIdx = availableSources.findIndex(s => s.producedMana.includes(reqColor));
+        const sourceIdx = availableSources.findIndex(s => canSatisfy(s.producedMana, reqColor));
         if (sourceIdx === -1) return false;
 
         const source = availableSources[sourceIdx];
@@ -623,7 +637,7 @@ export const autoTapForCost = (
         availableSources.splice(sourceIdx, 1);
 
         const unique = new Set(source.producedMana);
-        if (unique.size === 1) {
+        if (unique.size === 1 && !unique.has('WUBRG') && !unique.has('CMD')) {
             // Fixed producer (e.g. Land or Sol Ring)
             const color = source.producedMana[0] as ManaColor;
             const count = source.producedMana.length;
@@ -678,7 +692,7 @@ export const autoTapForCost = (
     // Tap for Generic
     for (const req of genReqs) {
         // Try paying with floating
-        const anyFloat = MANA_COLORS.find(c => (currentFloating[c] || 0) > 0);
+        const anyFloat = BASE_COLORS.find(c => (currentFloating[c] || 0) > 0);
         if (anyFloat) {
             payWithFloating(anyFloat, 1);
             continue;
@@ -744,7 +758,7 @@ export const subtractFromPool = (pool: ManaPool, cost: ManaCost): ManaPool | nul
             }
             // Pay remaining from most abundant color
             while (remaining > 0) {
-                const maxColor = MANA_COLORS.reduce((best, c) =>
+                const maxColor = BASE_COLORS.reduce((best, c) =>
                     newPool[c] > newPool[best] ? c : best, 'W' as ManaColor);
                 if (newPool[maxColor] <= 0) return null;
                 newPool[maxColor]--;
@@ -758,7 +772,7 @@ export const subtractFromPool = (pool: ManaPool, cost: ManaCost): ManaPool | nul
 
 // Calculate total mana in pool
 export const poolTotal = (pool: ManaPool): number => {
-    return MANA_COLORS.reduce((sum, c) => sum + pool[c], 0);
+    return MANA_COLORS.reduce((sum, c) => sum + (pool[c] || 0), 0);
 };
 
 // --- Undo System ---

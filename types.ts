@@ -1,4 +1,4 @@
-export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'CMD' | 'ALL';
+export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'WUBRG' | 'CMD';
 
 export interface ManaRule {
   // Disable mana production from this card entirely
@@ -33,11 +33,11 @@ export interface ManaRule {
 
 export const EMPTY_MANA_RULE: ManaRule = {
   trigger: 'tap',
-  activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, CMD: 0, ALL: 0 },
+  activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
   calcMode: 'set',
   calcMultiplier: 1,
   prodMode: 'standard',
-  produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, CMD: 0, ALL: 0 },
+  produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
   persistence: 'untilEndOfTurn',
   autoTap: true,
   autoTapPriority: 1,

@@ -276,7 +276,7 @@ const detectManaAbilityType = (data: any): { manaAbilityType?: 'tap' | 'activate
 // Returns null if the card doesn't produce mana or is a basic land (no rule needed).
 import { ManaRule, ManaColor as ManaColorType, EMPTY_MANA_RULE } from '../types';
 
-const ZERO_POOL: Record<ManaColorType, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
+const ZERO_POOL: Record<ManaColorType, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 };
 const COLOR_MAP: Record<string, ManaColorType> = { w: 'W', u: 'U', b: 'B', r: 'R', g: 'G', c: 'C' };
 
 export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
@@ -360,12 +360,12 @@ export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
     // "Add one mana of any color" — mark as flexible (W:1 as default, with alt showing all colors)
     if (lowerText.includes('one mana of any color') || lowerText.includes('mana of any type') || lowerText.includes('mana of any one color')) {
         // Set all to 1 so user sees full flexibility
-        rule.produced = { W: 1, U: 1, B: 1, R: 1, G: 1, C: 0 };
+        rule.produced = { W: 1, U: 1, B: 1, R: 1, G: 1, C: 0, WUBRG: 0, CMD: 0 };
     }
 
     // "Add {C}{C}" (Sol Ring pattern) — check for multiple of same color
     if (card.name === 'Sol Ring') {
-        rule.produced = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 2 };
+        rule.produced = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 2, WUBRG: 0, CMD: 0 };
     }
 
     // Non-basic lands that tap for one color (no oracle text for basic land types)

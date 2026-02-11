@@ -3180,7 +3180,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         // 1. Try to pay with Floating Mana first
-        const result = autoTapForCost(cost, manaInfo.sources, floatingMana);
+        const result = autoTapForCost(cost, manaInfo.sources, floatingMana, 0, manaInfo.cmdColors);
 
         if (!result.success) {
             addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);

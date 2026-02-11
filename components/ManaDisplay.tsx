@@ -10,7 +10,7 @@ interface ManaDisplayProps {
     onRemoveMana: (type: keyof ManaPool) => void;
 }
 
-const MANA_TYPES = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
+const MANA_TYPES = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'] as const;
 
 export const ManaDisplay: React.FC<ManaDisplayProps> = ({ pool, potentialPool, floatingMana, onAddMana, onRemoveMana }) => {
     const [showAll, setShowAll] = useState(false);

@@ -84,6 +84,13 @@ function App() {
         }
         return {};
     });
+    const [activeDeckName, setActiveDeckName] = useState<string>(() => {
+        if (savedDecks.length > 0) {
+            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return sorted[0].name;
+        }
+        return 'New Deck';
+    });
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -109,6 +116,7 @@ function App() {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
         if (manaRules) setActiveManaRules(manaRules);
+        if (deckName) setActiveDeckName(deckName);
 
         if (shouldSave) {
             const newDeck: SavedDeck = {
@@ -224,6 +232,7 @@ function App() {
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
                     initialManaRules={activeManaRules}
+                    initialName={activeDeckName}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
                 />
