@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { BoardObject, CardData } from '../types';
+import { BoardObject, CardData, ManaColor } from '../types';
+import { ManaSource } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -37,9 +38,11 @@ interface CardProps {
     defaultRotation?: number;
     isHandVisible?: boolean;
     onHover?: (id: string | null) => void;
+    manaSource?: ManaSource;
+    onManaClick?: () => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -442,6 +445,32 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         </div>
                     )}
 
+                    {/* Mana Button Overlay (Top-Left) */}
+                    {manaSource && isControlledByMe && (
+                        <div
+                            className="absolute top-2 left-2 z-30"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); onManaClick?.(); }}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                            <button className="w-8 h-8 rounded-full bg-gray-900/90 border-2 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform group">
+                                {manaSource.producedMana.length === 1 ? (
+                                    <img
+                                        src={`/mana/${manaSource.producedMana[0] === 'W' ? 'white' :
+                                            manaSource.producedMana[0] === 'U' ? 'blue' :
+                                                manaSource.producedMana[0] === 'B' ? 'black' :
+                                                    manaSource.producedMana[0] === 'R' ? 'red' :
+                                                        manaSource.producedMana[0] === 'G' ? 'green' : 'colorless'
+                                            }.png`}
+                                        className="w-5 h-5 object-contain drop-shadow-md"
+                                    />
+                                ) : (
+                                    <img src="/mana/all.png" className="w-5 h-5 object-contain drop-shadow-md" />
+                                )}
+                            </button>
+                        </div>
+                    )}
+
                     {/* Hover Actions */}
                     <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
 
@@ -529,7 +558,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 
     return cardContent;

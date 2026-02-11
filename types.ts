@@ -22,6 +22,10 @@ export interface ManaRule {
   alternativeRule?: ManaRule;
   // Persistence of produced mana
   persistence: 'permanent' | 'untilNextTurn' | 'untilEndOfTurn';
+  // Global application (e.g. "All Creatures have...")
+  appliesTo?: ('creatures' | 'lands')[];
+  appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
+
   // Auto-tap settings
   autoTap: boolean;
   autoTapPriority: number; // decimal allowed

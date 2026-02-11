@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2 } from 'lucide-react';
+import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 
 const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
@@ -382,6 +382,58 @@ const ManaRuleEditor: React.FC<{
                 </div>
             </div>
 
+            {/* Global Application */}
+            <div>
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Global Application</h4>
+                <div className="flex flex-col gap-2 mb-4">
+                    <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('creatures') ? 'border-blue-500 bg-blue-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
+                        <input
+                            type="checkbox"
+                            checked={rule.appliesTo?.includes('creatures') || false}
+                            onChange={(e) => {
+                                const current = rule.appliesTo || [];
+                                const next = e.target.checked
+                                    ? [...current, 'creatures']
+                                    : current.filter(t => t !== 'creatures');
+                                onChange({ ...rule, appliesTo: next as any });
+                            }}
+                            className="bg-gray-900 border-gray-600 rounded text-blue-500 focus:ring-blue-900"
+                        />
+                        <Users size={16} className="text-blue-400" />
+                        <span className="text-sm text-gray-300">Applies to All Creatures</span>
+                    </label>
+
+                    <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('lands') ? 'border-amber-500 bg-amber-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
+                        <input
+                            type="checkbox"
+                            checked={rule.appliesTo?.includes('lands') || false}
+                            onChange={(e) => {
+                                const current = rule.appliesTo || [];
+                                const next = e.target.checked
+                                    ? [...current, 'lands']
+                                    : current.filter(t => t !== 'lands');
+                                onChange({ ...rule, appliesTo: next as any });
+                            }}
+                            className="bg-gray-900 border-gray-600 rounded text-amber-500 focus:ring-amber-900"
+                        />
+                        <MapIcon size={16} className="text-amber-400" />
+                        <span className="text-sm text-gray-300">Applies to All Lands</span>
+                    </label>
+
+                    {(rule.appliesTo && rule.appliesTo.length > 0) && (
+                        <label className="flex items-center gap-2 cursor-pointer ml-6 mt-1">
+                            <input
+                                type="checkbox"
+                                checked={rule.appliesToCondition === 'counters'}
+                                onChange={(e) => onChange({ ...rule, appliesToCondition: e.target.checked ? 'counters' : undefined })}
+                                className="bg-gray-900 border-gray-600 rounded text-purple-500 focus:ring-purple-900 text-xs"
+                            />
+                            <span className="text-xs text-purple-300">Only if they have counters (e.g. Rishkar)</span>
+                        </label>
+                    )}
+                </div>
+            </div>
+
             {/* Persistence */}
             <div>
                 <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Persistence</h4>
@@ -500,8 +552,8 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
 
                     {/* Disable Toggle */}
                     <div className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${isDisabled
-                            ? 'bg-red-900/30 border-red-700/50'
-                            : 'bg-gray-900/50 border-gray-700'
+                        ? 'bg-red-900/30 border-red-700/50'
+                        : 'bg-gray-900/50 border-gray-700'
                         }`}>
                         <div className="flex items-center gap-3">
                             <Ban size={16} className={isDisabled ? 'text-red-400' : 'text-gray-500'} />

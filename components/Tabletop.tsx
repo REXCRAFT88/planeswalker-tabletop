@@ -850,6 +850,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+    const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
     const [showManaCalculator, setShowManaCalculator] = useState(true);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
@@ -2935,6 +2936,44 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`split 1 ${obj.cardData.name} from stack`);
     };
 
+    const handleManaButtonClick = (source: ManaSource) => {
+        // If single color and not flexible, produce immediately
+        // Note: Global rules might produce flexible mana (multiple options in producedMana)
+        if (source.producedMana.length === 1) {
+            const color = source.producedMana[0];
+            setFloatingMana(prev => {
+                const next = { ...prev };
+                next[color] = (next[color] || 0) + 1;
+                console.log(`Using mana ability: Added {${color}}`);
+                return next;
+            });
+            addLog(`added {${color}} to mana pool (via ${source.cardName})`);
+
+            // Tap the card (only if abilityType is 'tap')
+            // activated/multi/complex might have different costs or no tap
+            if (source.abilityType === 'tap') {
+                const obj = boardObjects.find(o => o.id === source.objectId);
+                if (obj) {
+                    const defaultRotation = (playersList.findIndex(p => p.id === obj.controllerId) !== -1 && layout[playersList.findIndex(p => p.id === obj.controllerId)]) ? layout[playersList.findIndex(p => p.id === obj.controllerId)].rot : 0;
+
+                    if (obj.quantity > 1) {
+                        const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
+                        updateBoardObject(obj.id, { tappedQuantity: newTapped });
+                    } else {
+                        const isTapped = obj.rotation !== defaultRotation;
+                        if (!isTapped) {
+                            const newRotation = (defaultRotation + 90) % 360;
+                            updateBoardObject(obj.id, { rotation: newRotation });
+                        }
+                    }
+                }
+            }
+        } else {
+            // Flexible - show choice modal
+            setChoosingColorForId(source.objectId);
+        }
+    };
+
     const updateBoardObject = (id: string, updates: Partial<BoardObject>) => {
         setBoardObjects(prev => {
             const movingObj = prev.find(o => o.id === id);
@@ -4143,6 +4182,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 defaultRotation={defaultRotation}
                                 isHandVisible={isHandVisible}
                                 onHover={(id) => setHoveredCardId(id)}
+                                manaSource={(manaInfo.sources.find(s => s.objectId === obj.id && s.abilityType !== 'passive') || manaInfo.potentialSources.find(s => s.objectId === obj.id)) as ManaSource}
+                                onManaClick={() => {
+                                    const source = manaInfo.sources.find(s => s.objectId === obj.id) || manaInfo.potentialSources.find(s => s.objectId === obj.id);
+                                    if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
+                                }}
                             />
                         </div>
                     );
@@ -4398,6 +4442,72 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </button>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Color Choice Modal (Runtime) */}
+            {choosingColorForId && (
+                <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6">
+                        <h3 className="text-xl font-bold text-white">Choose Color</h3>
+                        <div className="flex gap-4">
+                            {MANA_COLORS.filter(c => c !== 'C').map(color => (
+                                <button
+                                    key={color}
+                                    onClick={() => {
+                                        setFloatingMana(prev => {
+                                            const next = { ...prev };
+                                            next[color] = (next[color] || 0) + 1;
+                                            return next;
+                                        });
+                                        addLog(`added {${color}} to mana pool`);
+
+                                        // Tap the card (only if abilityType is 'tap')
+                                        // We need the source info here to know abilityType. 
+                                        // Problem: 'choosingColorForId' only stores ID.
+                                        // We need to re-find the source or store source in state.
+                                        // Workaround: Re-find source from manaInfo.
+                                        const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) || manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
+
+                                        if (source && source.abilityType === 'tap' && choosingColorForId) {
+                                            const obj = boardObjects.find(o => o.id === choosingColorForId);
+                                            if (obj) {
+                                                const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
+                                                    ? mySeatIndex
+                                                    : playersList.findIndex(p => p.id === obj.controllerId);
+                                                const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
+
+                                                if (obj.quantity > 1) {
+                                                    const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
+                                                    updateBoardObject(obj.id, { tappedQuantity: newTapped });
+                                                } else {
+                                                    const isTapped = obj.rotation !== defaultRotation;
+                                                    if (!isTapped) {
+                                                        const newRotation = (defaultRotation + 90) % 360;
+                                                        updateBoardObject(obj.id, { rotation: newRotation });
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        setChoosingColorForId(null);
+                                    }}
+                                    className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
+                                >
+                                    <img src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : 'green'
+                                        }.png`} className="w-full h-full object-contain" />
+                                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
+                                        {color}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setChoosingColorForId(null)}
+                            className="text-sm text-gray-400 hover:text-white underline mt-2"
+                        >
+                            Cancel
+                        </button>
+                    </div>
                 </div>
             )}
 

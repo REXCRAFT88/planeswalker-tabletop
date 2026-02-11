@@ -108,6 +108,18 @@ export const calculateAvailableMana = (
     const sources: ManaSource[] = [];
     const potentialSources: ManaSource[] = [];
 
+    // 1. Scan for Global Rules (Applies To All ...)
+    const globalRules: { rule: ManaRule, sourceId: string }[] = [];
+    if (manaRules) {
+        boardObjects.forEach(obj => {
+            if (obj.controllerId !== controllerId || obj.type !== 'CARD') return;
+            const rule = manaRules[obj.cardData.scryfallId];
+            if (rule && rule.appliesTo && rule.appliesTo.length > 0 && !rule.disabled) {
+                globalRules.push({ rule, sourceId: obj.id });
+            }
+        });
+    }
+
     // Pre-compute board counts for custom rule calcModes
     let creatureCount = -1; // lazy
     let basicLandCount = -1; // lazy
@@ -138,7 +150,7 @@ export const calculateAvailableMana = (
         const customRule = manaRules?.[obj.cardData.scryfallId];
 
         let produced: ManaColor[];
-        let abilityType: 'tap' | 'activated' | 'multi' | 'complex';
+        let abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive';
         let sourcePriority: number;
 
         if (customRule) {
@@ -238,7 +250,8 @@ export const calculateAvailableMana = (
 
             // Map trigger to abilityType
             abilityType = customRule.trigger === 'tap' ? 'tap' :
-                customRule.trigger === 'activated' ? 'activated' : 'tap'; // passive treated as tap for pool
+                customRule.trigger === 'activated' ? 'activated' :
+                    customRule.trigger === 'passive' ? 'passive' : 'tap';
 
             // Use custom priority if auto-tap enabled
             sourcePriority = customRule.autoTap ? customRule.autoTapPriority : 999;
@@ -267,6 +280,112 @@ export const calculateAvailableMana = (
             const isBasic = isBasicLand(obj.cardData.name);
             const uniqueColors = new Set(produced);
             sourcePriority = isBasic ? 0 : (produced.length === 1 ? 1 : (uniqueColors.size > 1 ? 3 : 2));
+            sourcePriority = isBasic ? 0 : (produced.length === 1 ? 1 : (uniqueColors.size > 1 ? 3 : 2));
+        }
+
+        // --- Apply Global Rules (Granted Abilities) ---
+        // Check if this object matches any global rule criteria
+        if (globalRules.length > 0) {
+            const myTypeLine = (obj.cardData.typeLine || '').toLowerCase();
+            const hasCounters = (obj.counters?.['+1/+1'] || 0) > 0 || (obj.counters?.['counter'] || 0) > 0;
+            const myId = obj.id;
+
+            for (const { rule, sourceId } of globalRules) {
+                // Don't apply to self via this mechanism (own rule handled above)
+                // Actually, if own rule existed, we used it. If not, we used default.
+                // Global rule is ADDITIVE.
+                if (sourceId === myId) continue;
+
+                // Check Criteria
+                let matches = false;
+                if (rule.appliesTo?.includes('creatures') && myTypeLine.includes('creature')) matches = true;
+                if (rule.appliesTo?.includes('lands') && myTypeLine.includes('land')) matches = true;
+
+                // Check Condition (e.g. Rishkar requires counters)
+                if (matches && rule.appliesToCondition === 'counters' && !hasCounters) matches = false;
+
+                if (matches) {
+                    // Logic duplication from Custom Rule path (simplified)
+                    // We need to calculate production for THIS rule on THIS object
+                    let calcAmount = 1;
+                    switch (rule.calcMode) {
+                        case 'set': calcAmount = 1; break;
+                        case 'counters': {
+                            let c = obj.counters?.['+1/+1'] || obj.counters?.['counter'] || 0;
+                            if (rule.includeBasePower) {
+                                const pm = obj.cardData.power?.match(/^\d+/);
+                                if (pm) c += parseInt(pm[0]);
+                            }
+                            calcAmount = c * (rule.calcMultiplier || 1);
+                            break;
+                        }
+                        case 'creatures': calcAmount = getCreatureCount() * (rule.calcMultiplier || 1); break;
+                        case 'basicLands': calcAmount = getBasicLandCount() * (rule.calcMultiplier || 1); break;
+                    }
+
+                    // Append produced colors
+                    if (rule.prodMode === 'standard') {
+                        const amount = rule.calcMode === 'set' ? 1 : calcAmount;
+                        for (const [color, count] of Object.entries(rule.produced)) {
+                            for (let i = 0; i < count * amount; i++) produced.push(color as ManaColor);
+                        }
+                    } else if (rule.prodMode === 'available') {
+                        const landColors = new Set<ManaColor>();
+                        boardObjects.forEach(lo => {
+                            if (lo.type !== 'CARD' || lo.controllerId !== controllerId) return;
+                            const tl = (lo.cardData.typeLine || '').toLowerCase();
+                            if (!tl.includes('land')) return;
+                            if (tl.includes('plains')) landColors.add('W');
+                            if (tl.includes('island')) landColors.add('U');
+                            if (tl.includes('swamp')) landColors.add('B');
+                            if (tl.includes('mountain')) landColors.add('R');
+                            if (tl.includes('forest')) landColors.add('G');
+                            if (lo.cardData.producedMana) lo.cardData.producedMana.forEach(m => {
+                                if (['W', 'U', 'B', 'R', 'G'].includes(m)) landColors.add(m as ManaColor);
+                            });
+                        });
+                        landColors.forEach(c => produced.push(c));
+                    } else if (rule.prodMode === 'chooseColor') {
+                        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
+                    } else {
+                        ['W', 'U', 'B', 'R', 'G'].forEach(c => produced.push(c as ManaColor));
+                    }
+                }
+            }
+        }
+
+        // Determine ability type for Global Rules (if any applied) which might override default 'tap'
+        // If multiple rules apply, we might need a way to distinguish.
+        // For now, if we have global rules, let's assume valid abilityType is derived from the *last* applied rule or just 'tap' if mixed?
+        // Actually, we need to associate the produced mana with the SOURCE, but `calculateAvailableMana` returns aggregated sources?
+        // Wait, `sources` array entries have `abilityType`.
+        // We aren't pushing to `sources` inside the global rules loop! We are just pushing to `produced` array.
+        // The `sources` array creation happens AFTER this block using `produced`.
+        // We need to determine `abilityType` for the *object* based on the rule that produced the mana.
+        // If Global Rules added mana, we should probably set `abilityType` based on that rule?
+        // Issues: 
+        // 1. `abilityType` is defined earlier (line 277 or 252).
+        // 2. We are augmenting `produced` array.
+        // 3. The `ManaSource` object is created at end of loop using `abilityType`.
+
+        // Fix: Update `abilityType` if global rules found a match and it wasn't already set by a custom rule on item itself.
+        if (globalRules.length > 0) {
+            for (const { rule, sourceId } of globalRules) {
+                if (sourceId === obj.id) continue;
+                const myTypeLine = (obj.cardData.typeLine || '').toLowerCase();
+                let matches = false;
+                if (rule.appliesTo?.includes('creatures') && myTypeLine.includes('creature')) matches = true;
+                if (rule.appliesTo?.includes('lands') && myTypeLine.includes('land')) matches = true;
+                const hasCounters = (obj.counters?.['+1/+1'] || 0) > 0 || (obj.counters?.['counter'] || 0) > 0;
+                if (matches && rule.appliesToCondition === 'counters' && !hasCounters) matches = false;
+
+                if (matches) {
+                    // Found a matching rule. Update abilityType from this rule's trigger.
+                    // Note: If multiple rules apply with different triggers, this might be ambiguous.
+                    // We'll trust the last one or favor 'tap'.
+                    abilityType = rule.trigger === 'tap' ? 'tap' : rule.trigger === 'activated' ? 'activated' : 'tap';
+                }
+            }
         }
 
         // Check availability based on stacking
@@ -324,7 +443,7 @@ export interface ManaSource {
     isBasic: boolean;
     isFlexible: boolean; // Can produce 3+ colors
     priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
-    abilityType: 'tap' | 'activated' | 'multi' | 'complex'; // How this source produces mana
+    abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive'; // How this source produces mana
     activationCost?: string; // Mana cost to activate, if any
 }
 
@@ -443,7 +562,11 @@ export const autoTapForCost = (
         if (sourceIdx === -1) return false;
 
         const source = availableSources[sourceIdx];
-        tappedIds.push(source.objectId);
+
+        // Passive check: Don't add to tappedIds if passive
+        if (source.abilityType !== 'passive') {
+            tappedIds.push(source.objectId);
+        }
 
         // Remove from availableSources to prevent reuse of this specific instance
         availableSources.splice(sourceIdx, 1);
