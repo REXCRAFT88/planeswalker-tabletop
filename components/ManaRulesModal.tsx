@@ -101,7 +101,8 @@ const ManaRuleEditor: React.FC<{
     isAlternative?: boolean;
     allSources?: { id: string; name: string; priority: number }[];
     currentCardName?: string; // Passed for highlighting
-}> = ({ rule, onChange, commanderColors, disabled, isAlternative, allSources, currentCardName }) => {
+    card: CardData; // Card being edited
+}> = ({ rule, onChange, commanderColors, disabled, isAlternative, allSources, currentCardName, card }) => {
     const [hasAlt, setHasAlt] = useState(!!rule.producedAlt);
 
     const updateRule = <K extends keyof ManaRule>(key: K, value: ManaRule[K]) => {
@@ -240,6 +241,7 @@ const ManaRuleEditor: React.FC<{
                 <RadioGroup
                     options={[
                         { value: 'standard', label: 'Standard', desc: 'Produces specific mana types' },
+                        { value: 'sameAsCard', label: '🎴 Same as Card', desc: 'Produces colors this card produces by default' },
                         { value: 'multiplied', label: 'Multiplied', desc: 'Multiplies your existing mana production' },
                         { value: 'available', label: '🌊 Available', desc: 'Produces one mana of any color you have lands for' },
                         { value: 'chooseColor', label: '🎨 Choose Color', desc: 'Player picks a color when triggered' },
@@ -327,6 +329,46 @@ const ManaRuleEditor: React.FC<{
                                 />
                                 <span className="text-sm text-gray-300">Include non-basic lands in calculation</span>
                             </label>
+                        </div>
+                    ) : rule.prodMode === 'sameAsCard' ? (
+                        /* Same as Card mode */
+                        <div className="bg-gray-900/50 rounded-xl p-4 border border-green-800/30">
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="text-lg">🎴</span>
+                                <span className="text-sm font-medium text-green-300">Same as Card</span>
+                            </div>
+                            <p className="text-xs text-gray-400">
+                                Produces the same mana colors this card produces by default (from Scryfall data).
+                                Uses the card's intrinsic mana production abilities without custom overrides.
+                            </p>
+                            <div className="mt-3 flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-gray-500">Card produces:</span>
+                                {card.producedMana && card.producedMana.length > 0 ? (
+                                    <div className="flex gap-1">
+                                        {card.producedMana.map((color, idx) => (
+                                            <img
+                                                key={idx}
+                                                src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : color === 'G' ? 'green' : 'colorless'}.png`}
+                                                className="w-6 h-6 object-contain"
+                                                alt={color}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <span className="text-xs text-amber-400">No default mana production detected</span>
+                                )}
+                            </div>
+                            <div className="mt-3 flex items-center gap-3">
+                                <label className="text-sm text-gray-300">Multiplier:</label>
+                                <input
+                                    type="number"
+                                    value={rule.calcMultiplier || 1}
+                                    onChange={(e) => updateRule('calcMultiplier', Math.max(1, parseInt(e.target.value) || 1))}
+                                    className="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-center"
+                                    min={1}
+                                />
+                                <span className="text-xs text-gray-500">× each color</span>
+                            </div>
                         </div>
                     ) : rule.prodMode === 'available' ? (
                         /* Available Mana mode */
@@ -730,6 +772,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                             disabled={isDisabled}
                             allSources={allSources}
                             currentCardName={card.name}
+                            card={card}
                         />
                     </div>
 
@@ -768,6 +811,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                             allSources={allSources}
                                             isAlternative
                                             currentCardName={card.name}
+                                            card={card}
                                         />
                                     </div>
                                 </div>

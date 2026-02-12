@@ -889,9 +889,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
-        return localStorage.getItem('planeswalker_auto_tap') === 'true';
-    });
+    const [autoTapEnabled, setAutoTapEnabled] = useState(false); // Disabled by default
     const [floatingMana, setFloatingMana] = useState<ManaPool>({ ...EMPTY_POOL });
     const [lastPlayedCard, setLastPlayedCard] = useState<CardData | null>(null);
     const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
@@ -5019,13 +5017,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 {/* Mana Display */}
                 {(gamePhase === 'PLAYING' && showManaCalculator) && (
                     <ManaDisplay
-                        pool={manaInfo.pool}
-                        potentialPool={manaInfo.potentialPool}
+                        manaInfo={manaInfo}
                         floatingMana={floatingMana}
                         onAddMana={handleAddMana}
                         onRemoveMana={handleRemoveMana}
-                        totalAvailable={manaInfo.totalAvailable}
-                        totalPotential={manaInfo.totalPotential}
                     />
                 )}
 

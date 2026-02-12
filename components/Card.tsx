@@ -53,18 +53,22 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const [isOverHand, setIsOverHand] = useState(false);
     const lastTapRef = useRef(0);
 
-    // Debug logging for mana source
+    // Debug logging for mana source - only log once per card when it first mounts or when button visibility changes
+    const loggedCardId = useRef<string | null>(null);
     useEffect(() => {
-        if (manaSource && isControlledByMe) {
+        // Only log once per card ID to avoid spam
+        if (manaSource && isControlledByMe && loggedCardId.current !== object.id) {
+            loggedCardId.current = object.id;
             console.log(`[Card] ${object.cardData.name} manaSource:`, {
                 abilityType: manaSource.abilityType,
                 hideManaButton: manaSource.hideManaButton,
                 producedMana: manaSource.producedMana,
                 hasRule: !!manaRule,
-                ruleTrigger: manaRule?.trigger
+                ruleTrigger: manaRule?.trigger,
+                isLand: object.cardData.isLand
             });
         }
-    }, [manaSource, manaRule, isControlledByMe, object.cardData.name]);
+    }, [object.id]); // Only re-run if card ID changes
 
     // Handle immediate drag from hand/zones
     React.useEffect(() => {
@@ -427,9 +431,12 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         !isPassive &&
         !effectiveHideButton;
 
-    // Log for debugging
+    // Log for debugging - only log once per card ID when visibility changes
+    const loggedButtonId = useRef<string | null>(null);
     useEffect(() => {
-        if (manaSource && isControlledByMe) {
+        // Only log when button visibility actually changes for a card
+        if (manaSource && isControlledByMe && loggedButtonId.current !== object.id) {
+            loggedButtonId.current = object.id;
             console.log(`[Card] ${object.cardData.name} shouldShowManaButton: ${shouldShowManaButton}`, {
                 hasSource: !!manaSource,
                 isControlledByMe,
@@ -440,7 +447,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                 trigger: manaRule?.trigger
             });
         }
-    }, [shouldShowManaButton, object.cardData.name]);
+    }, [object.id]); // Only re-run if card ID changes
 
     // Get the primary mana color for display
     const getPrimaryManaIcon = () => {
