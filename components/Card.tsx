@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
 import { ManaSource } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
@@ -52,6 +52,19 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const [hasMoved, setHasMoved] = useState(false);
     const [isOverHand, setIsOverHand] = useState(false);
     const lastTapRef = useRef(0);
+
+    // Debug logging for mana source
+    useEffect(() => {
+        if (manaSource && isControlledByMe) {
+            console.log(`[Card] ${object.cardData.name} manaSource:`, {
+                abilityType: manaSource.abilityType,
+                hideManaButton: manaSource.hideManaButton,
+                producedMana: manaSource.producedMana,
+                hasRule: !!manaRule,
+                ruleTrigger: manaRule?.trigger
+            });
+        }
+    }, [manaSource, manaRule, isControlledByMe, object.cardData.name]);
 
     // Handle immediate drag from hand/zones
     React.useEffect(() => {
@@ -389,13 +402,45 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const vy = viewY || 0;
 
     // Determine if mana button should be shown
-    // Only show for non-land cards with mana abilities that require manual activation (trigger='activated')
-    // Lands use tap-to-mana, not the button
+    // Show button when:
+    // 1. Card has a mana source (produces mana)
+    // 2. Card is controlled by me
+    // 3. NOT passive (passive auto-adds mana)
+    // 4. hideManaButton is FALSE (user wants to see the button)
+    // 5. NOT a land (lands produce mana on tap automatically, no button needed)
+    // 
+    // When button is hidden but card has tap ability:
+    // - The card still produces mana when tapped via tap-to-mana detection in Tabletop
+
+    const isPassive = manaSource?.abilityType === 'passive' || manaRule?.trigger === 'passive';
+    const isLand = object.cardData.isLand;
+
+    // For lands without custom rules, default to hiding the button
+    const effectiveHideButton = manaSource?.hideManaButton ?? (isLand && !manaRule);
+
+    // Show mana button if:
+    // - Has mana source AND controlled by me AND not passive
+    // - AND hideManaButton is false (user wants to see it)
+    // - Button always shows on hover only (never always visible)
     const shouldShowManaButton = manaSource &&
         isControlledByMe &&
-        manaSource.abilityType !== 'passive' &&
-        !manaSource.hideManaButton &&
-        (manaRule?.trigger === 'activated' || (!manaRule && !object.cardData.isLand));
+        !isPassive &&
+        !effectiveHideButton;
+
+    // Log for debugging
+    useEffect(() => {
+        if (manaSource && isControlledByMe) {
+            console.log(`[Card] ${object.cardData.name} shouldShowManaButton: ${shouldShowManaButton}`, {
+                hasSource: !!manaSource,
+                isControlledByMe,
+                isPassive,
+                hideManaButton: manaSource.hideManaButton,
+                isLand,
+                effectiveHideButton,
+                trigger: manaRule?.trigger
+            });
+        }
+    }, [shouldShowManaButton, object.cardData.name]);
 
     // Get the primary mana color for display
     const getPrimaryManaIcon = () => {
@@ -440,6 +485,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             onClick={() => !isMobile && setShowOverlay(false)} // Tap to close overlay if open (desktop only)
             onMouseEnter={() => onHover && onHover(object.id)}
             onMouseLeave={() => onHover && onHover(null)}
+            data-object-id={object.id}
         >
             {/* Stack Layers (Behind) */}
             {isStack && (
@@ -477,17 +523,27 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         </div>
                     )}
 
-                    {/* Mana Button Overlay (Top-Left) - Only on hover for activated abilities */}
+                    {/* Mana Button Overlay (Top-Left) - Shows on hover only */}
                     {shouldShowManaButton && (
                         <div
-                            className="absolute top-2 left-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="absolute top-2 left-2 z-30 transition-opacity opacity-0 group-hover:opacity-100"
                             onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); onManaClick?.(); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                console.log(`[Card] Mana button clicked for ${object.cardData.name}`);
+                                onManaClick?.();
+                            }}
                             onDoubleClick={(e) => e.stopPropagation()}
                         >
                             <button className="w-8 h-8 rounded-full bg-gray-900/90 border-2 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform">
                                 <img src={getPrimaryManaIcon()} className="w-5 h-5 object-contain drop-shadow-md" alt="Mana" />
                             </button>
+                            {/* Mana count indicator */}
+                            {manaSource.manaCount && manaSource.manaCount > 1 && (
+                                <span className="absolute -bottom-1 -right-1 bg-amber-500 text-black text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                                    {manaSource.manaCount}
+                                </span>
+                            )}
                         </div>
                     )}
 

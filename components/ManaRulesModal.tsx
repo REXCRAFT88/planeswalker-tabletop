@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon, Share2, Clipboard } from 'lucide-react';
+import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 import { parseManaCost } from '../services/mana';
 
@@ -681,40 +681,7 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                         </div>
                         <div>
                             <h3 className="font-bold text-white text-lg">Mana Rules</h3>
-                            <div className="flex items-center gap-2">
-                                <p className="text-sm text-gray-400">{card.name}</p>
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(JSON.stringify(rule, null, 2));
-                                        alert("Rule copied to clipboard!");
-                                    }}
-                                    className="p-1 text-gray-500 hover:text-amber-400 transition-colors"
-                                    title="Export Rule (JSON)"
-                                >
-                                    <Share2 size={14} />
-                                </button>
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            const text = await navigator.clipboard.readText();
-                                            const parsed = JSON.parse(text);
-                                            // Basic validation
-                                            if (parsed.trigger && parsed.produced) {
-                                                setRule(parsed);
-                                                alert("Rule imported!");
-                                            } else {
-                                                alert("Invalid rule format");
-                                            }
-                                        } catch (e) {
-                                            alert("Failed to import rule");
-                                        }
-                                    }}
-                                    className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
-                                    title="Import Rule (JSON)"
-                                >
-                                    <Clipboard size={14} />
-                                </button>
-                            </div>
+                            <p className="text-sm text-gray-400">{card.name}</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-white p-1">
