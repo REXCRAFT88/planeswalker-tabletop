@@ -447,7 +447,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     )}
 
                     {/* Mana Button Overlay (Top-Left) */}
-                    {manaSource && isControlledByMe && !object.cardData.typeLine?.toLowerCase().includes('land') && !manaRule?.hideManaButton && (
+                    {manaSource && isControlledByMe && !object.cardData.isLand && manaRule?.hideManaButton === false && (
                         <div
                             className="absolute top-2 left-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
                             onPointerDown={(e) => e.stopPropagation()}

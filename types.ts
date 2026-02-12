@@ -45,11 +45,11 @@ export const EMPTY_MANA_RULE: ManaRule = {
   calcMultiplier: 1,
   prodMode: 'standard',
   produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  persistence: 'untilEndOfTurn',
+  persistence: 'permanent',
   manaMultiplier: 1,
   autoTap: true,
   autoTapPriority: 1,
-  hideManaButton: false,
+  hideManaButton: true,
 };
 
 export enum CardState {

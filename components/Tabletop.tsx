@@ -2999,17 +2999,39 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const produceMana = (source: ManaSource, skipRotation: boolean = false) => {
         const produced = source.producedMana;
         const flexible = produced.length > 1 && !produced.every(c => c === produced[0]);
+        const manaCount = source.manaCount || 1;
 
-        if (!flexible && produced.length > 0) {
+        // Check if this source has an alternative rule - show modal to pick
+        if (source.alternativeRule) {
+            setChoosingRuleForId(source.objectId);
+            return;
+        }
+
+        // Check if this source requires a color choice (flexible mana)
+        // This includes WUBRG/CMD in the produced array, or actual multiple color options
+        const hasWUBRG = produced.includes('WUBRG');
+        const hasCMD = produced.includes('CMD');
+        const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD');
+        const needsColorChoice = hasWUBRG || hasCMD || (flexible && actualColorOptions.length > 1);
+
+        if (!needsColorChoice && produced.length > 0) {
+            // Fixed mana production - add directly to pool
             setFloatingMana(prev => {
                 const next = { ...prev };
-                produced.forEach(color => {
-                    next[color] = (next[color] || 0) + 1;
-                });
-                console.log(`Using mana ability: Added ${produced.join(', ')}`);
+                const uniqueColors = [...new Set(produced.filter(c => c !== 'WUBRG' && c !== 'CMD'))];
+
+                if (uniqueColors.length === 0) {
+                    // Edge case: only WUBRG/CMD without other colors, treat as flexible
+                    next['WUBRG'] = (next['WUBRG'] || 0) + manaCount;
+                } else {
+                    uniqueColors.forEach(color => {
+                        next[color] = (next[color] || 0) + manaCount;
+                    });
+                }
+                console.log(`Using mana ability: Added ${manaCount > 1 ? manaCount : ''}{${uniqueColors.join('}{')}} to mana pool (via ${source.cardName})`);
                 return next;
             });
-            addLog(`added {${produced.join('}{')}} to mana pool (via ${source.cardName})`);
+            addLog(`added ${manaCount > 1 ? manaCount : ''}{${[...new Set(produced.filter(c => c !== 'WUBRG' && c !== 'CMD'))].join('}{')}} to mana pool (via ${source.cardName})`);
 
             if (!skipRotation && source.abilityType === 'tap') {
                 const obj = boardObjects.find(o => o.id === source.objectId);
@@ -3029,7 +3051,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     }
                 }
             }
-        } else if (flexible) {
+        } else if (needsColorChoice) {
+            // Flexible mana - show color picker
             setChoosingColorForId(source.objectId);
         }
     };
@@ -3038,13 +3061,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         produceMana(source, false);
     };
 
+    const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
+
     const updateBoardObject = (id: string, updates: Partial<BoardObject>, silent: boolean = false) => {
         setBoardObjects(prev => {
             const movingObj = prev.find(o => o.id === id);
+            if (!movingObj) return prev;
+
             let nextState = prev;
             const changes: { id: string, updates: Partial<BoardObject> }[] = [];
 
-            if (movingObj && movingObj.type === 'CARD' && updates.x !== undefined && updates.y !== undefined) {
+            if (movingObj.type === 'CARD' && updates.x !== undefined && updates.y !== undefined) {
                 const dx = updates.x - movingObj.x;
                 const dy = updates.y - movingObj.y;
                 if (dx !== 0 || dy !== 0) {
@@ -3065,51 +3092,33 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         }
                         return obj;
                     });
-                } else {
-                    changes.push({ id, updates });
-                    nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
                 }
             } else {
-                // Check for Tapping
-                const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
-                if (movingObj && movingObj.controllerId === myId) {
-                    const isTap = (updates.rotation === 90 && movingObj.rotation === 0) ||
-                        (updates.tappedQuantity !== undefined && updates.tappedQuantity > movingObj.tappedQuantity);
-                    if (isTap) {
-                        const cardName = movingObj.cardData.name;
-                        updateMyStats({
-                            tappedCounts: {
-                                ...gameStats[myId]?.tappedCounts,
-                                [cardName]: (gameStats[myId]?.tappedCounts?.[cardName] || 0) + 1
-                            }
-                        });
+                changes.push({ id, updates });
+                nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
 
-                        // Record undo for tap
-                        if (!silent) {
-                            pushUndo({
-                                type: 'TAP_CARD',
-                                objectId: id,
-                                previousRotation: movingObj.rotation,
-                                previousTappedQuantity: movingObj.tappedQuantity
-                            });
-                        }
+                // --- Tap-to-Mana Detection ---
+                if (!silent && isLocal) {
+                    const defaultRot = 0; // Simplified, could be layout[idx].rot
+                    const wasTapped = movingObj.rotation !== defaultRot || movingObj.tappedQuantity === movingObj.quantity;
+                    const isNowTapped = (updates.rotation !== undefined ? updates.rotation !== defaultRot : wasTapped) ||
+                        (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
 
-                        // Produce mana automatically on manual tap
-                        if (!silent && manaInfoRef.current) {
-                            const source = manaInfoRef.current.sources.find((s: any) => s.objectId === id && s.abilityType === 'tap');
-                            if (source) {
-                                produceMana(source, true); // true = skip rotation (already happening)
-                            }
+                    if (!wasTapped && isNowTapped) {
+                        const source = manaInfo.sources.find(s => s.objectId === id) || manaInfo.potentialSources.find(s => s.objectId === id);
+                        if (source && source.abilityType === 'tap') {
+                            setTimeout(() => produceMana(source, true), 50);
                         }
                     }
                 }
-                changes.push({ id, updates });
-                nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
             }
 
-            changes.forEach(change => {
-                emitAction('UPDATE_OBJECT', change);
-            });
+            if (!silent) {
+                changes.forEach(change => {
+                    emitAction('UPDATE_OBJECT', change);
+                });
+            }
+
             return nextState;
         });
     };
@@ -4533,55 +4542,64 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6">
                         <h3 className="text-xl font-bold text-white">Choose Color</h3>
                         <div className="flex gap-4">
-                            {MANA_COLORS.filter(c => c !== 'C').map(color => (
-                                <button
-                                    key={color}
-                                    onClick={() => {
-                                        setFloatingMana(prev => {
-                                            const next = { ...prev };
-                                            next[color] = (next[color] || 0) + 1;
-                                            return next;
-                                        });
-                                        addLog(`added {${color}} to mana pool`);
+                            {(() => {
+                                const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) || manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
+                                if (!source) return null;
 
-                                        // Tap the card (only if abilityType is 'tap')
-                                        // We need the source info here to know abilityType. 
-                                        // Problem: 'choosingColorForId' only stores ID.
-                                        // We need to re-find the source or store source in state.
-                                        // Workaround: Re-find source from manaInfo.
-                                        const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) || manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
+                                const colors = new Set<ManaColor>();
+                                source.producedMana.forEach(c => {
+                                    if (c === 'WUBRG') {
+                                        ['W', 'U', 'B', 'R', 'G'].forEach(color => colors.add(color as ManaColor));
+                                    } else if (c === 'CMD') {
+                                        (manaInfo.cmdColors || []).forEach(color => colors.add(color));
+                                    } else {
+                                        colors.add(c);
+                                    }
+                                });
 
-                                        if (source && source.abilityType === 'tap' && choosingColorForId) {
-                                            const obj = boardObjects.find(o => o.id === choosingColorForId);
-                                            if (obj) {
-                                                const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
-                                                    ? mySeatIndex
-                                                    : playersList.findIndex(p => p.id === obj.controllerId);
-                                                const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
+                                return Array.from(colors).map(color => (
+                                    <button
+                                        key={color}
+                                        onClick={() => {
+                                            setFloatingMana(prev => {
+                                                const next = { ...prev };
+                                                next[color] = (next[color] || 0) + 1;
+                                                return next;
+                                            });
+                                            addLog(`added {${color}} to mana pool`);
 
-                                                if (obj.quantity > 1) {
-                                                    const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                                                    updateBoardObject(obj.id, { tappedQuantity: newTapped });
-                                                } else {
-                                                    const isTapped = obj.rotation !== defaultRotation;
-                                                    if (!isTapped) {
-                                                        const newRotation = (defaultRotation + 90) % 360;
-                                                        updateBoardObject(obj.id, { rotation: newRotation });
+                                            if (source && source.abilityType === 'tap' && choosingColorForId) {
+                                                const obj = boardObjects.find(o => o.id === choosingColorForId);
+                                                if (obj) {
+                                                    const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
+                                                        ? mySeatIndex
+                                                        : playersList.findIndex(p => p.id === obj.controllerId);
+                                                    const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
+
+                                                    if (obj.quantity > 1) {
+                                                        const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
+                                                        updateBoardObject(obj.id, { tappedQuantity: newTapped });
+                                                    } else {
+                                                        const isTapped = obj.rotation !== defaultRotation;
+                                                        if (!isTapped) {
+                                                            const newRotation = (defaultRotation + 90) % 360;
+                                                            updateBoardObject(obj.id, { rotation: newRotation });
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                        setChoosingColorForId(null);
-                                    }}
-                                    className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
-                                >
-                                    <img src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : 'green'
-                                        }.png`} className="w-full h-full object-contain" />
-                                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
-                                        {color}
-                                    </div>
-                                </button>
-                            ))}
+                                            setChoosingColorForId(null);
+                                        }}
+                                        className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
+                                    >
+                                        <img src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : color === 'G' ? 'green' : 'colorless'
+                                            }.png`} className="w-full h-full object-contain" />
+                                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
+                                            {color}
+                                        </div>
+                                    </button>
+                                ));
+                            })()}
                         </div>
                         <button
                             onClick={() => setChoosingColorForId(null)}

@@ -123,6 +123,15 @@ export const fetchBatch = async (names: string[], onProgress?: (current: number,
             data.data.forEach((c: any) => {
                 const transformed = transformScryfallData(c);
                 cardMap.set(c.name.toLowerCase(), transformed);
+
+                // Also map the front face name if it's a double-faced/adventure card
+                if (c.name.includes(' // ')) {
+                    const frontName = c.name.split(' // ')[0].toLowerCase();
+                    if (!cardMap.has(frontName)) {
+                        cardMap.set(frontName, transformed);
+                    }
+                }
+
                 cardCache[c.name] = c; // Update cache
             });
 
@@ -187,7 +196,10 @@ const transformScryfallData = (data: any): CardData => {
             !!(data.produced_mana && data.produced_mana.length > 0) ||
             !!(data.oracle_text && (
                 data.oracle_text.includes('{T}: Add') ||
-                data.oracle_text.includes('Add {')
+                data.oracle_text.includes('Add {') ||
+                data.oracle_text.includes('mana produced') ||
+                data.oracle_text.includes('produces three times') ||
+                data.oracle_text.includes('produces twice as much')
             )),
         producedMana: estimateProducedMana({
             name: data.name,
@@ -281,6 +293,7 @@ const COLOR_MAP: Record<string, ManaColorType> = { w: 'W', u: 'U', b: 'B', r: 'R
 
 export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
     const text = card.oracleText || '';
+    const lowerText = text.toLowerCase();
     const typeLine = (card.typeLine || '').toLowerCase();
 
     // Skip basic lands — handled natively by the mana system
@@ -322,12 +335,22 @@ export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
     } else if (abilityInfo.manaAbilityType === 'multi') {
         rule.trigger = 'tap';
     } else {
+        // Check for passive mana multipliers (e.g. Virtue of Strength)
+        if (lowerText.includes('mana produced') && (lowerText.includes('twice') || lowerText.includes('three times') || lowerText.includes('triple'))) {
+            rule.trigger = 'passive';
+            if (lowerText.includes('three times') || lowerText.includes('triple')) rule.manaMultiplier = 3;
+            else rule.manaMultiplier = 2;
+
+            if (lowerText.includes('basic land')) rule.appliesTo = ['basics' as any];
+            else if (lowerText.includes('land')) rule.appliesTo = ['lands'];
+
+            return rule;
+        }
         // No mana ability detected
         return null;
     }
 
     // --- CalcMode Detection ---
-    const lowerText = text.toLowerCase();
     if (lowerText.match(/for each creature/i)) {
         rule.calcMode = 'creatures';
         rule.prodMode = 'multiplied';
@@ -360,13 +383,26 @@ export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
 
     // "Add one mana of any color" — mark as flexible (W:1 as default, with alt showing all colors)
     if (lowerText.includes('one mana of any color') || lowerText.includes('mana of any type') || lowerText.includes('mana of any one color')) {
-        // Set all to 1 so user sees full flexibility
-        rule.produced = { W: 1, U: 1, B: 1, R: 1, G: 1, C: 0, WUBRG: 0, CMD: 0 };
+        // Check for commander identity restriction
+        if (lowerText.includes('commander\'s color identity') || lowerText.includes('your commander possesses')) {
+            rule.prodMode = 'commander';
+            rule.produced = { ...ZERO_POOL, C: 1 }; // C:1 stores the quantity 1
+        } else if (lowerText.includes('mana of any color') && (lowerText.includes('a land an opponent controls') || lowerText.includes('you could produce'))) {
+            rule.prodMode = 'available';
+        } else {
+            // Default "any color" modal picker
+            rule.prodMode = 'chooseColor';
+            rule.produced = { ...ZERO_POOL, C: 1 };
+        }
     }
 
-    // "Add {C}{C}" (Sol Ring pattern) — check for multiple of same color
+    // --- Specific Card Overrides ---
     if (card.name === 'Sol Ring') {
-        rule.produced = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 2, WUBRG: 0, CMD: 0 };
+        rule.produced = { ...ZERO_POOL, C: 2 };
+        rule.prodMode = 'standard';
+    } else if (card.name === 'Arcane Signet' || card.name === 'Command Tower') {
+        rule.prodMode = 'commander';
+        rule.produced = { ...ZERO_POOL, C: 1 };
     }
 
     // Non-basic lands that tap for one color (no oracle text for basic land types)

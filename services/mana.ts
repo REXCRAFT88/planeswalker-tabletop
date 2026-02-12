@@ -97,6 +97,20 @@ export const parseProducedMana = (producedMana: string[] | undefined): ManaColor
         .filter(m => MANA_COLORS.includes(m as ManaColor)) as ManaColor[];
 };
 
+export interface ManaSource {
+    objectId: string;
+    cardName: string;
+    producedMana: ManaColor[];
+    isBasic: boolean;
+    isFlexible: boolean; // Can produce 3+ colors
+    priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
+    abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive'; // How this source produces mana
+    activationCost?: string; // Mana cost to activate, if any
+    manaCount?: number; // How much mana this source produces (e.g. Sol Ring = 2)
+    alternativeRule?: ManaRule;
+    hideManaButton?: boolean; // If true, don't show the mana bubble on hover
+}
+
 // --- Available Mana Calculation ---
 // Calculate total available (untapped) mana from board objects
 // Now separates 'tap' sources (free to tap) from 'activated'/'complex' sources (require extra cost)
@@ -172,6 +186,7 @@ export const calculateAvailableMana = (
         let abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive' = 'tap';
         let sourcePriority: number = 2;
         let manaCountScored = 0;
+        let hideManaButton = customRule?.hideManaButton ?? false;
 
         if (customRule) {
             // --- Custom rule path ---
@@ -346,8 +361,8 @@ export const calculateAvailableMana = (
                 }
             }
 
-            // Handle Command Tower (filter by commander colors)
-            if (obj.cardData.name === 'Command Tower' && commanderColors) {
+            // Handle Command Tower and Arcane Signet (filter by commander colors)
+            if ((obj.cardData.name === 'Command Tower' || obj.cardData.name === 'Arcane Signet') && commanderColors) {
                 produced = produced.filter(c => commanderColors.includes(c));
             }
 
@@ -473,14 +488,21 @@ export const calculateAvailableMana = (
             priority: sourcePriority,
             abilityType,
             activationCost: activationCostStr,
-            manaCount: manaCountScored
+            manaCount: manaCountScored,
+            alternativeRule: customRule?.alternativeRule,
+            hideManaButton
         };
 
         // Passive sources always contribute to pool
         if (abilityType === 'passive') {
             sources.push(source);
             if (isFlexible) {
-                pool['WUBRG'] = (pool['WUBRG'] || 0) + 1;
+                // For flexible passive, we add 1 to each possible color to show potential
+                produced.forEach(c => {
+                    if (c === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(color => pool[color as ManaColor] = (pool[color as ManaColor] || 0) + 1);
+                    else if (c === 'CMD') (commanderColors || []).forEach(color => pool[color] = (pool[color] || 0) + 1);
+                    else pool[c] = (pool[c] || 0) + 1;
+                });
             } else {
                 produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
             }
@@ -494,6 +516,7 @@ export const calculateAvailableMana = (
             for (let i = 0; i < untappedCount; i++) {
                 sources.push(source);
                 if (isFlexible) {
+                    // Current behavior: add 1 to 'WUBRG' for flexible available
                     pool['WUBRG'] = (pool['WUBRG'] || 0) + 1;
                 } else {
                     produced.forEach(c => { pool[c] = (pool[c] || 0) + 1; });
@@ -504,7 +527,13 @@ export const calculateAvailableMana = (
             for (let i = 0; i < untappedCount; i++) {
                 potentialSources.push(source);
                 if (isFlexible) {
-                    potentialPool['WUBRG'] = (potentialPool['WUBRG'] || 0) + 1;
+                    // Distribute potential mana to each possible color (as per user request "blue counter to both")
+                    // Note: This doesn't affect the total count because total is calculated from sources list.
+                    produced.forEach(c => {
+                        if (c === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(color => potentialPool[color as ManaColor] = (potentialPool[color as ManaColor] || 0) + 1);
+                        else if (c === 'CMD') (commanderColors || []).forEach(color => potentialPool[color] = (potentialPool[color] || 0) + 1);
+                        else potentialPool[c] = (potentialPool[c] || 0) + 1;
+                    });
                 } else {
                     produced.forEach(c => { potentialPool[c] = (potentialPool[c] || 0) + 1; });
                 }
@@ -524,18 +553,6 @@ const isFlexibleMana = (produced: ManaColorType[]): boolean => {
     const unique = new Set(produced);
     return unique.size > 1 || unique.has('WUBRG') || unique.has('CMD');
 };
-
-export interface ManaSource {
-    objectId: string;
-    cardName: string;
-    producedMana: ManaColor[];
-    isBasic: boolean;
-    isFlexible: boolean; // Can produce 3+ colors
-    priority: number; // 0=basic, 1=single-nonbasic, 2=dual, 3=flexible/any
-    abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive'; // How this source produces mana
-    activationCost?: string; // Mana cost to activate, if any
-    manaCount?: number; // How much mana this source produces (e.g. Sol Ring = 2)
-}
 
 // --- Basic Land Detection ---
 const BASIC_LAND_NAMES = ['plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
@@ -660,7 +677,6 @@ export const autoTapForCost = (
     const availableSources = [...sources].sort((a, b) => a.priority - b.priority);
     const tappedIds: string[] = [];
 
-    // Helpers for Tapping
     // Helpers for Tapping
     const canSatisfy = (produced: ManaColor[], reqColor: ManaColor): boolean => {
         if (produced.includes(reqColor)) return true;

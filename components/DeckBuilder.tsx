@@ -128,12 +128,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         });
                     }
 
-                    // If we don't have a mana rule for this card yet, but it's a mana source,
-                    // we might have one from a previous version of this deck.
-                    // Actually, manaRules is a state variable in DeckBuilder which is NOT cleared
-                    // unless the card is missing from the final deck.
-                    // So we don't strictly need to "inject" them into the card objects,
-                    // but we should ensure they ARE generated if missing.
+                    // Ensure we have a mana rule if it's a mana source
+                    if (data.isManaSource && !manaRules[data.scryfallId]) {
+                        const defaultRule = generateDefaultManaRule(data);
+                        if (defaultRule) {
+                            setManaRules(prev => ({ ...prev, [data.scryfallId]: defaultRule }));
+                        }
+                    }
                 }
             }
 
