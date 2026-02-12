@@ -77,7 +77,10 @@ function App() {
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
     const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() => {
-        // Load from most recent saved deck if available
+        // First try to load from direct storage
+        const loaded = loadState<Record<string, ManaRule>>('activeManaRules', null);
+        if (loaded && Object.keys(loaded).length > 0) return loaded;
+        // Fallback to most recent saved deck if available
         if (savedDecks.length > 0) {
             const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             return sorted[0].manaRules || {};
@@ -85,6 +88,10 @@ function App() {
         return {};
     });
     const [activeDeckName, setActiveDeckName] = useState<string>(() => {
+        // First try to load from direct storage
+        const loaded = loadState<string>('activeDeckName', null);
+        if (loaded) return loaded;
+        // Fallback to saved decks
         if (savedDecks.length > 0) {
             const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             return sorted[0].name;
@@ -99,10 +106,12 @@ function App() {
             playerSleeve,
             activeDeck,
             lobbyTokens,
-            savedDecks
+            savedDecks,
+            activeManaRules,
+            activeDeckName
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
+    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeManaRules, activeDeckName]);
 
     // Prevent Render.com from sleeping by pinging the server
     useEffect(() => {
@@ -170,6 +179,7 @@ function App() {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
         setActiveManaRules(deck.manaRules || {});
+        setActiveDeckName(deck.name);
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);

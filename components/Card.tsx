@@ -388,6 +388,37 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const vx = viewX || 0;
     const vy = viewY || 0;
 
+    // Determine if mana button should be shown
+    // Only show for non-land cards with mana abilities that require manual activation (trigger='activated')
+    // Lands use tap-to-mana, not the button
+    const shouldShowManaButton = manaSource &&
+        isControlledByMe &&
+        manaSource.abilityType !== 'passive' &&
+        !manaSource.hideManaButton &&
+        (manaRule?.trigger === 'activated' || (!manaRule && !object.cardData.isLand));
+
+    // Get the primary mana color for display
+    const getPrimaryManaIcon = () => {
+        if (!manaSource) return '/mana/colorless.png';
+        const produced = manaSource.producedMana;
+
+        // If flexible (multiple options or WUBRG/CMD), show rainbow
+        if (manaSource.isFlexible || produced.includes('WUBRG') || produced.includes('CMD')) {
+            return '/mana/all.png';
+        }
+
+        // If single color, show that color
+        if (produced.length > 0) {
+            const color = produced[0];
+            const colorMap: Record<string, string> = {
+                'W': 'white', 'U': 'blue', 'B': 'black', 'R': 'red', 'G': 'green', 'C': 'colorless'
+            };
+            return `/mana/${colorMap[color] || 'colorless'}.png`;
+        }
+
+        return '/mana/colorless.png';
+    };
+
     const cardContent = (
         <div
             ref={cardRef}
@@ -446,28 +477,16 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         </div>
                     )}
 
-                    {/* Mana Button Overlay (Top-Left) */}
-                    {manaSource && isControlledByMe && !object.cardData.isLand && manaRule?.hideManaButton === false && (
+                    {/* Mana Button Overlay (Top-Left) - Only on hover for activated abilities */}
+                    {shouldShowManaButton && (
                         <div
                             className="absolute top-2 left-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); onManaClick?.(); }}
                             onDoubleClick={(e) => e.stopPropagation()}
                         >
-                            <button className="w-8 h-8 rounded-full bg-gray-900/90 border-2 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform group">
-                                {manaSource.producedMana.length === 1 ? (
-                                    <img
-                                        src={`/mana/${manaSource.producedMana[0] === 'W' ? 'white' :
-                                            manaSource.producedMana[0] === 'U' ? 'blue' :
-                                                manaSource.producedMana[0] === 'B' ? 'black' :
-                                                    manaSource.producedMana[0] === 'R' ? 'red' :
-                                                        manaSource.producedMana[0] === 'G' ? 'green' : 'colorless'
-                                            }.png`}
-                                        className="w-5 h-5 object-contain drop-shadow-md"
-                                    />
-                                ) : (
-                                    <img src="/mana/all.png" className="w-5 h-5 object-contain drop-shadow-md" />
-                                )}
+                            <button className="w-8 h-8 rounded-full bg-gray-900/90 border-2 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform">
+                                <img src={getPrimaryManaIcon()} className="w-5 h-5 object-contain drop-shadow-md" alt="Mana" />
                             </button>
                         </div>
                     )}
