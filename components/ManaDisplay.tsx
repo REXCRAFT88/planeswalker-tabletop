@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { ManaPool, CategorizedManaInfo, MANA_COLORS, BASE_COLORS, parseManaCost, poolTotal } from '../services/mana';
-import { Eye, EyeOff, Plus, Minus, X, Zap } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ManaPool, CategorizedManaInfo, MANA_COLORS, BASE_COLORS, parseManaCost, poolTotal, ManaColor } from '../services/mana';
+import { Eye, EyeOff, Plus, Minus, X, Zap, CheckCircle } from 'lucide-react';
+import { CardData } from '../types';
 
 interface ManaDisplayProps {
     manaInfo: CategorizedManaInfo;
@@ -51,7 +52,7 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
     return (
         <div className="absolute right-0 top-1/4 flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
             {/* Total Mana Header */}
-            <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1 border-l-2 border-amber-500">
+            <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1 border-l-2 border-amber-500 shadow-2xl">
                 <div className="flex flex-col items-center">
                     <span className="text-[10px] text-amber-500 font-bold uppercase">Pool</span>
                     <span className="font-bold text-2xl leading-none text-amber-400 drop-shadow-md">
@@ -60,13 +61,21 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                 </div>
                 <div className="w-px h-8 bg-gray-700 mx-1" />
                 <div className="flex flex-col items-center">
-                    <span className="text-[10px] text-cyan-400 font-bold uppercase">Board</span>
+                    <span className="text-[10px] text-cyan-400 font-bold uppercase">Available</span>
                     <span className="font-bold text-xl leading-none text-white drop-shadow-md">
                         {manaInfo.availableTotal}
                     </span>
                     {manaInfo.potentialTotal > 0 && (
                         <span className="text-[9px] text-cyan-500 font-mono leading-none">+{manaInfo.potentialTotal}</span>
                     )}
+                </div>
+                <div className="w-px h-8 bg-gray-700 mx-1" />
+                <div className="flex flex-col items-center">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase">Capacity</span>
+                    <span className="font-bold text-base leading-none text-gray-400 drop-shadow-md">
+                        {manaInfo.totalBoardPotential}
+                    </span>
+                    <span className="text-[8px] text-gray-600 font-mono leading-none">Total</span>
                 </div>
             </div>
 
@@ -102,18 +111,11 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                         <div className="flex flex-col items-center justify-center w-12 mr-1">
                             {/* Counts */}
                             <div className="flex items-center gap-1.5">
-                                {floating > 0 && (
-                                    <span className="font-bold text-lg text-amber-400 drop-shadow-md" title="Floating Pool">
-                                        {floating}
-                                    </span>
-                                )}
-                                {floating > 0 && available > 0 && <span className="text-gray-600 text-xs">|</span>}
-                                {available > 0 && (
+                                {available > 0 ? (
                                     <span className="font-bold text-lg text-white drop-shadow-md" title="Available Board">
                                         {available}
                                     </span>
-                                )}
-                                {floating === 0 && available === 0 && (
+                                ) : (
                                     <span className="text-gray-700 font-bold">0</span>
                                 )}
                             </div>
@@ -227,254 +229,223 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
     );
 };
 
-// Mana Cost Sidebar Component - shows when playing a card with mana cost
-interface ManaCostSidebarProps {
-    cardName: string;
-    manaCost: string;
+// Mana Payment Sidebar Component - interactive tallying for costs
+interface ManaPaymentSidebarProps {
+    card: CardData;
     floatingMana: ManaPool;
-    xValue: number;
-    autoTapEnabled: boolean;
+    allocatedMana: ManaPool;
+    onAllocate: (type: ManaColor) => void;
+    onUnallocate: (type: ManaColor) => void;
     onXValueChange: (value: number) => void;
     onDismiss: () => void;
-    onPay?: () => void; // Only used when autoTap is enabled
+    onConfirm: () => void;
 }
 
-export const ManaCostSidebar: React.FC<ManaCostSidebarProps> = ({
-    cardName,
-    manaCost,
+export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
+    card,
     floatingMana,
-    xValue,
-    autoTapEnabled,
+    allocatedMana,
+    onAllocate,
+    onUnallocate,
     onXValueChange,
     onDismiss,
-    onPay
+    onConfirm
 }) => {
+    const xValue = (card as any).userXValue || 0;
     const [xInput, setXInput] = useState(String(xValue));
 
     // Parse the mana cost
-    const parsed = parseManaCost(manaCost);
+    const parsed = useMemo(() => parseManaCost(card.manaCost || ""), [card.manaCost]);
     const symbols = parsed.symbols;
     const hasX = parsed.hasX;
 
-    // Calculate remaining cost after applying floating mana
-    const getRemainingCost = () => {
-        const tempPool = { ...floatingMana };
-        const remaining: { value: string; paid: boolean }[] = [];
+    // Calculate requirements
+    const totalAllocated = Object.values(allocatedMana).reduce((a, b) => a + b, 0);
+    const requiredTotal = parsed.cmc + xValue;
 
+    // Determine missing requirements (colored costs)
+    const getRemainingColoredCosts = () => {
+        const remaining: ManaColor[] = [];
+        const tempAllocated = { ...allocatedMana };
+
+        // 1. First pass: Satisfy exact colored costs
+        const unmatched: ManaColor[] = [];
         for (const sym of symbols) {
-            if (sym.type === 'x') {
-                remaining.push({ value: 'X', paid: false });
-            } else if (sym.type === 'generic') {
-                let toPay = sym.count;
-                // Pay with colorless first
-                if (tempPool.C > 0) {
-                    const paid = Math.min(tempPool.C, toPay);
-                    tempPool.C -= paid;
-                    toPay -= paid;
-                }
-                // Then pay with colored mana
-                for (const c of BASE_COLORS) {
-                    if (toPay <= 0) break;
-                    if (c === 'C') continue;
-                    if ((tempPool[c] || 0) > 0) {
-                        const paid = Math.min(tempPool[c] || 0, toPay);
-                        tempPool[c] = (tempPool[c] || 0) - paid;
-                        toPay -= paid;
-                    }
-                }
-                if (toPay > 0) {
-                    remaining.push({ value: String(toPay), paid: false });
-                }
-            } else if (sym.type === 'colored') {
+            if (sym.type === 'colored') {
                 const color = sym.color;
-                if ((tempPool[color] || 0) > 0) {
-                    tempPool[color] = (tempPool[color] || 0) - 1;
+                if ((tempAllocated[color] || 0) > 0) {
+                    tempAllocated[color] = (tempAllocated[color] || 0) - 1;
                 } else {
-                    remaining.push({ value: color, paid: false });
+                    unmatched.push(color);
                 }
             } else if (sym.type === 'hybrid') {
-                // Try to pay with any of the options
-                let paid = false;
+                let met = false;
                 for (const opt of sym.options) {
-                    if ((tempPool[opt] || 0) > 0) {
-                        tempPool[opt] = (tempPool[opt] || 0) - 1;
-                        paid = true;
+                    if ((tempAllocated[opt] || 0) > 0) {
+                        tempAllocated[opt] = (tempAllocated[opt] || 0) - 1;
+                        met = true;
                         break;
                     }
                 }
-                if (!paid) {
-                    remaining.push({ value: sym.options.join('/'), paid: false });
-                }
+                if (!met) unmatched.push(sym.options.join('/') as any);
             }
         }
 
-        // Add X costs if xValue > 0
-        for (let i = 0; i < xValue; i++) {
-            let toPay = 1;
-            if (tempPool.C > 0) {
-                tempPool.C -= 1;
-                toPay = 0;
-            } else {
-                for (const c of BASE_COLORS) {
-                    if (toPay <= 0) break;
-                    if (c === 'C') continue;
-                    if ((tempPool[c] || 0) > 0) {
-                        tempPool[c] = (tempPool[c] || 0) - 1;
-                        toPay = 0;
-                        break;
-                    }
-                }
+        // 2. Second pass: Use wildcards for remaining requirements
+        for (const req of unmatched) {
+            // Priority 1: WUBRG (Any color)
+            if ((tempAllocated.WUBRG || 0) > 0) {
+                tempAllocated.WUBRG--;
             }
-            if (toPay > 0) {
-                remaining.push({ value: '1', paid: false });
+            // Priority 2: CMD (Any commander color)
+            else if ((tempAllocated.CMD || 0) > 0) {
+                // If it's a specific color req OR hybrid, check if it matches identity (simplified: assume yes for now if allocated)
+                tempAllocated.CMD--;
+            }
+            else {
+                remaining.push(req);
             }
         }
 
         return remaining;
     };
 
-    const remaining = getRemainingCost();
-    const isPaid = remaining.length === 0;
+    const remainingColored = getRemainingColoredCosts();
+
+    // Improved isPaid logic: Total must be met AND all specific color requirements must be satisfied
+    const isPaid = totalAllocated >= requiredTotal && remainingColored.length === 0;
 
     // Handle X input change
     useEffect(() => {
         const num = parseInt(xInput) || 0;
-        if (num >= 0) {
+        if (num >= 0 && num !== xValue) {
             onXValueChange(num);
         }
-    }, [xInput]);
+    }, [xInput, onXValueChange, xValue]);
 
     return (
-        <div className="fixed left-0 top-1/2 -translate-y-1/2 z-50 pointer-events-auto animate-in slide-in-from-left">
-            <div className="bg-gray-900/95 backdrop-blur border border-gray-700 rounded-r-xl p-4 shadow-2xl w-72">
-                <div className="flex justify-between items-center mb-3">
-                    <h3 className="text-sm font-bold text-white truncate flex-1 mr-2">{cardName}</h3>
-                    <button onClick={onDismiss} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white flex-shrink-0">
-                        <X size={16} />
+        <div className="fixed right-4 bottom-24 z-[100] pointer-events-auto animate-in slide-in-from-right duration-300">
+            <div className="bg-gray-900/95 backdrop-blur-xl border border-blue-500/30 rounded-2xl p-5 shadow-2xl w-80 border-b-4 border-b-blue-600">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex gap-3 items-center">
+                        <img src={card.imageUrl} className="w-10 h-14 rounded object-cover border border-gray-700 shadow-md" alt="" />
+                        <div>
+                            <h3 className="text-sm font-bold text-white leading-tight mb-1">{card.name}</h3>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                {symbols.map((sym, idx) => (
+                                    <div key={idx} className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-black/40 border border-white/10 text-gray-300">
+                                        {sym.type === 'generic' ? sym.count : (sym.type === 'colored' ? sym.color : (sym.type === 'x' ? 'X' : '?'))}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={onDismiss} className="p-1 px-2 hover:bg-red-900/40 rounded text-gray-400 hover:text-red-400 transition-colors">
+                        <X size={18} />
                     </button>
                 </div>
 
-                {/* Mana Cost Display */}
-                <div className="mb-3">
-                    <span className="text-[10px] text-gray-500 uppercase">Cost:</span>
-                    <div className="flex items-center gap-1 mt-1 flex-wrap">
-                        {symbols.map((sym, idx) => {
-                            let display = '';
-                            let colorClass = 'bg-gray-800 border-gray-600 text-white';
-
-                            if (sym.type === 'x') {
-                                display = 'X';
-                                colorClass = 'bg-purple-900/50 border-purple-600 text-purple-300';
-                            } else if (sym.type === 'generic') {
-                                display = String(sym.count);
-                            } else if (sym.type === 'colored') {
-                                display = sym.color;
-                                if (sym.color === 'W') colorClass = 'bg-yellow-100 border-yellow-300 text-yellow-800';
-                                else if (sym.color === 'U') colorClass = 'bg-blue-300 border-blue-500 text-blue-900';
-                                else if (sym.color === 'B') colorClass = 'bg-gray-700 border-gray-500 text-white';
-                                else if (sym.color === 'R') colorClass = 'bg-red-300 border-red-500 text-red-900';
-                                else if (sym.color === 'G') colorClass = 'bg-green-300 border-green-500 text-green-900';
-                                else if (sym.color === 'C') colorClass = 'bg-gray-400 border-gray-500 text-gray-800';
-                            } else if (sym.type === 'hybrid') {
-                                display = sym.options.join('/');
-                            }
-
-                            return (
-                                <div key={idx} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border ${colorClass}`}>
-                                    {display}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* X Value Input */}
+                {/* X Value Interactive Area */}
                 {hasX && (
-                    <div className="mb-3 bg-purple-900/20 border border-purple-800/30 rounded-lg p-2">
-                        <label className="text-[10px] text-purple-300 uppercase font-bold">X Value:</label>
-                        <div className="flex items-center gap-2 mt-1">
+                    <div className="mb-4 bg-purple-900/20 border border-purple-500/20 rounded-xl p-3">
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] text-purple-300 uppercase font-black tracking-widest">Set X Value</span>
+                            <span className="text-xl font-mono font-bold text-purple-400">{xValue}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setXInput(String(Math.max(0, (parseInt(xInput) || 0) - 1)))}
-                                className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded text-white font-bold"
-                            >
-                                -
-                            </button>
+                                className="flex-1 h-10 bg-gray-800 hover:bg-gray-700 rounded-lg text-white font-bold text-xl active:scale-95 transition-all"
+                            >-</button>
                             <input
                                 type="number"
                                 value={xInput}
                                 onChange={(e) => setXInput(e.target.value)}
-                                className="w-16 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-center font-bold"
-                                min="0"
+                                className="w-16 bg-black/40 border border-gray-700 rounded-lg py-2 text-white text-center font-bold focus:border-purple-500 outline-none"
                             />
                             <button
                                 onClick={() => setXInput(String((parseInt(xInput) || 0) + 1))}
-                                className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded text-white font-bold"
-                            >
-                                +
-                            </button>
+                                className="flex-1 h-10 bg-gray-800 hover:bg-gray-700 rounded-lg text-white font-bold text-xl active:scale-95 transition-all"
+                            >+</button>
                         </div>
-                        {xValue > 0 && (
-                            <div className="text-[10px] text-purple-300 mt-1">
-                                Total X cost: {xValue} mana
+                    </div>
+                )}
+
+                {/* Tallying Area */}
+                <div className="space-y-4">
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Allocate Mana</span>
+                            <span className={`text-xs font-mono font-bold ${isPaid ? 'text-green-400' : 'text-amber-400'}`}>
+                                {totalAllocated} / {requiredTotal}
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2">
+                            {(['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'] as ManaColor[]).map(type => {
+                                const inPool = floatingMana[type] || 0;
+                                const allocated = allocatedMana[type] || 0;
+                                if (inPool === 0 && allocated === 0) return null;
+
+                                return (
+                                    <div key={type} className="bg-gray-800/50 border border-gray-700 rounded-xl p-2 flex flex-col items-center gap-1">
+                                        <img src={getIconPath(type)} className="w-5 h-5" alt={type} />
+                                        <div className="flex items-center justify-between w-full gap-1">
+                                            <button
+                                                onClick={() => onUnallocate(type)}
+                                                disabled={allocated === 0}
+                                                className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded-md text-white font-bold"
+                                            >-</button>
+                                            <span className="text-sm font-bold text-white">{allocated}</span>
+                                            <button
+                                                onClick={() => onAllocate(type)}
+                                                disabled={inPool === 0}
+                                                className="w-6 h-6 flex items-center justify-center bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded-md text-white font-bold"
+                                            >+</button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Progress Summary */}
+                    <div className="bg-black/40 rounded-xl p-3 border border-gray-800">
+                        {remainingColored.length > 0 ? (
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[9px] text-amber-500 font-bold uppercase">Required:</span>
+                                <div className="flex gap-1.5 flex-wrap">
+                                    {remainingColored.map((c, i) => (
+                                        <div key={i} className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-900/30 border border-amber-700/50 text-amber-400 text-[10px] font-bold">
+                                            <img src={getIconPath(c.includes('/') ? c.split('/')[0] : c)} className="w-3 h-3" alt="" />
+                                            {c}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : isPaid ? (
+                            <div className="flex items-center gap-2 text-green-400 font-bold text-xs">
+                                <CheckCircle size={14} /> Ready to Cast!
+                            </div>
+                        ) : (
+                            <div className="text-amber-400 text-[10px] font-bold">
+                                Need {requiredTotal - totalAllocated} more generic mana
                             </div>
                         )}
                     </div>
-                )}
 
-                {/* Remaining Cost */}
-                {!isPaid && (
-                    <div className="mb-3">
-                        <span className="text-[10px] text-amber-400 uppercase font-bold">Remaining:</span>
-                        <div className="flex items-center gap-1 mt-1 flex-wrap">
-                            {remaining.map((sym, idx) => (
-                                <div key={idx} className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-amber-900/50 border border-amber-700 text-amber-400">
-                                    {sym.value}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {isPaid && (
-                    <div className="mb-3 text-green-400 text-sm font-bold flex items-center gap-2 bg-green-900/20 border border-green-700/30 rounded-lg p-2">
-                        <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                        Cost Covered by Pool!
-                    </div>
-                )}
-
-                {/* Floating Mana Available */}
-                <div className="border-t border-gray-700 pt-2">
-                    <span className="text-[10px] text-gray-500 uppercase">Current Pool:</span>
-                    <div className="flex gap-2 mt-2 flex-wrap">
-                        {DISPLAY_COLORS.map(type => {
-                            const count = floatingMana[type] || 0;
-                            return (
-                                <div
-                                    key={type}
-                                    className={`flex items-center gap-1 px-2 py-1 rounded ${count > 0 ? 'bg-gray-800' : 'bg-gray-800/30 opacity-50'}`}
-                                >
-                                    <img src={getIconPath(type)} className="w-4 h-4" alt={type} />
-                                    <span className="text-white text-xs font-bold">{count}</span>
-                                </div>
-                            );
-                        })}
-                        {poolTotal(floatingMana) === 0 && (
-                            <span className="text-gray-600 text-xs">Empty - tap cards to add</span>
-                        )}
-                    </div>
-                </div>
-
-                {/* Pay Button - Only shows when autoTap is enabled */}
-                {autoTapEnabled && onPay && !isPaid && (
                     <button
-                        onClick={onPay}
-                        className="w-full mt-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center justify-center gap-2"
+                        onClick={onConfirm}
+                        disabled={!isPaid}
+                        className={`w-full py-3 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${isPaid
+                            ? 'bg-green-600 hover:bg-green-500 text-white active:scale-95'
+                            : 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
+                            }`}
                     >
-                        <Zap size={16} />
-                        Pay {remaining.length > 0 ? `(${remaining.length} to tap)` : ''}
+                        <Zap size={18} fill={isPaid ? "currentColor" : "none"} />
+                        Confirm Payment
                     </button>
-                )}
-
+                </div>
             </div>
         </div>
     );

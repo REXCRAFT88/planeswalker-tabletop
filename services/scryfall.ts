@@ -195,9 +195,8 @@ const transformScryfallData = (data: any): CardData => {
         isManaSource: data.type_line.toLowerCase().includes('land') ||
             !!(data.produced_mana && data.produced_mana.length > 0) ||
             !!(data.oracle_text && (
-                data.oracle_text.includes('{T}: Add') ||
-                data.oracle_text.includes('Add {') ||
-                data.oracle_text.includes('mana produced') ||
+                data.oracle_text.match(/\{T\}: Add/i) ||
+                data.oracle_text.match(/Add \{(?:[WUBRGC]|X|\d+)\}/i) ||
                 data.oracle_text.includes('produces three times') ||
                 data.oracle_text.includes('produces twice as much')
             )),

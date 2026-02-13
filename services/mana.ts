@@ -123,6 +123,9 @@ export interface CategorizedManaInfo {
     potentialTotal: number;
     potentialSources: ManaSource[];
 
+    // NEW: Total mana capacity of the board (all sources, regardless of tapped state)
+    totalBoardPotential: number;
+
     // Combined sources for reference
     sources: ManaSource[];
     cmdColors?: ManaColor[];
@@ -500,9 +503,6 @@ export const calculateAvailableMana = (
             });
         }
 
-        const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
-        if (untappedCount === 0 && abilityType !== 'passive') return;
-
         const isBasic = isBasicLand(obj.cardData.name);
         const isFlexible = isFlexibleMana(produced);
 
@@ -539,6 +539,9 @@ export const calculateAvailableMana = (
 
         allSources.push(source);
 
+        const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
+        if (untappedCount === 0 && abilityType !== 'passive') return;
+
         // Categorize: Lands go to Available, others go to Potential
         // Correction: All Lands (tap, activated, etc) should ideally go to Available to show "Land Mana"
         // But we need to be careful with activated abilities that cost mana.
@@ -563,23 +566,17 @@ export const calculateAvailableMana = (
                 availableSources.push(source);
                 if (isFlexible) {
                     if (hasOROption) {
-                        // OR sources: add to each color pool but only count 1 for total
+                        // OR sources: add to wildcards primarily to avoid double counting
                         orSourceCount++;
-                        produced.forEach(c => {
-                            if (c !== 'WUBRG' && c !== 'CMD') {
-                                available[c] = (available[c] || 0) + 1;
-                            }
-                        });
+                        available['WUBRG'] = (available['WUBRG'] || 0) + 1;
                     } else {
-                        // For filter lands or standard flexible lands
-                        produced.forEach(c => {
-                            if (c !== 'WUBRG' && c !== 'CMD') {
-                                available[c] = (available[c] || 0) + 1;
-                            }
-                        });
                         // Standard WUBRG handling for wildcards
                         if (produced.includes('WUBRG')) available['WUBRG'] = (available['WUBRG'] || 0) + 1;
-                        if (produced.includes('CMD') && commanderColors) available['CMD'] = (available['CMD'] || 0) + 1;
+                        else if (produced.includes('CMD') && commanderColors) available['CMD'] = (available['CMD'] || 0) + 1;
+                        else {
+                            // Dual lands etc - add to WUBRG to avoid total inflation
+                            available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                        }
                     }
                 } else {
                     produced.forEach(c => { available[c] = (available[c] || 0) + 1; });
@@ -591,18 +588,13 @@ export const calculateAvailableMana = (
                 potentialSources.push(source);
                 if (isFlexible) {
                     if (hasOROption) {
-                        // OR sources for creatures
-                        produced.forEach(c => {
-                            if (c !== 'WUBRG' && c !== 'CMD') {
-                                potential[c] = (potential[c] || 0) + 1;
-                            }
-                        });
+                        potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
                     } else {
-                        produced.forEach(c => {
-                            if (c === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(color => potential[color as ManaColor] = (potential[color as ManaColor] || 0) + 1);
-                            else if (c === 'CMD') (commanderColors || []).forEach(color => potential[color] = (potential[color] || 0) + 1);
-                            else potential[c] = (potential[c] || 0) + 1;
-                        });
+                        if (produced.includes('WUBRG')) potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
+                        else if (produced.includes('CMD') && commanderColors) potential['CMD'] = (potential['CMD'] || 0) + 1;
+                        else {
+                            potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
+                        }
                     }
                 } else {
                     produced.forEach(c => { potential[c] = (potential[c] || 0) + 1; });
@@ -618,6 +610,7 @@ export const calculateAvailableMana = (
     }, 0);
 
     const potentialTotal = potentialSources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
+    const totalBoardPotential = allSources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
 
     return {
         available,
@@ -626,6 +619,7 @@ export const calculateAvailableMana = (
         potential,
         potentialTotal,
         potentialSources,
+        totalBoardPotential,
         sources: allSources,
         cmdColors: commanderColors
     };
@@ -697,12 +691,54 @@ export const autoTapForCost = (
     const manaUsed: ManaPool = { ...EMPTY_POOL };
     const currentFloating = { ...initialFloatingMana };
 
-    const payWithFloating = (color: ManaColor, count: number): number => {
-        const available = currentFloating[color] || 0;
-        const paid = Math.min(available, count);
-        currentFloating[color] -= paid;
-        manaUsed[color] += paid;
-        return paid;
+    const payWithFloating = (reqColor: ManaColor, count: number, options?: ManaColor[]): number => {
+        let remainingToPay = count;
+
+        // 1. Try exact match
+        if (reqColor !== 'WUBRG' && reqColor !== 'CMD') {
+            const available = currentFloating[reqColor] || 0;
+            const paid = Math.min(available, remainingToPay);
+            currentFloating[reqColor] -= paid;
+            manaUsed[reqColor] += paid;
+            remainingToPay -= paid;
+        }
+
+        // 2. Try hybrid options index exact
+        if (remainingToPay > 0 && options) {
+            for (const opt of options) {
+                const available = currentFloating[opt] || 0;
+                const paid = Math.min(available, remainingToPay);
+                currentFloating[opt] -= paid;
+                manaUsed[opt] += paid;
+                remainingToPay -= paid;
+                if (remainingToPay <= 0) break;
+            }
+        }
+
+        // 3. Try WUBRG wildcard
+        if (remainingToPay > 0 && (currentFloating.WUBRG || 0) > 0) {
+            const paid = Math.min(currentFloating.WUBRG, remainingToPay);
+            currentFloating.WUBRG -= paid;
+            // For stats, we don't know the exact color used, use reqColor if specific
+            const statColor = (reqColor !== 'WUBRG' && reqColor !== 'CMD') ? reqColor : 'WUBRG' as ManaColor;
+            manaUsed[statColor] += paid;
+            remainingToPay -= paid;
+        }
+
+        // 4. Try CMD wildcard
+        if (remainingToPay > 0 && (currentFloating.CMD || 0) > 0) {
+            // Only if it's generic OR if reqColor is in identity
+            const isMatch = (reqColor as any) === 'CMD' || (reqColor as any) === 'WUBRG' || (reqColor !== 'WUBRG' && commanderColors?.includes(reqColor));
+            if (isMatch) {
+                const paid = Math.min(currentFloating.CMD, remainingToPay);
+                currentFloating.CMD -= paid;
+                const statColor = (reqColor !== 'WUBRG' && reqColor !== 'CMD') ? reqColor : 'CMD' as ManaColor;
+                manaUsed[statColor] += paid;
+                remainingToPay -= paid;
+            }
+        }
+
+        return count - remainingToPay;
     };
 
     const costToPay: { type: 'colored' | 'generic' | 'hybrid', color?: ManaColor, options?: ManaColor[] }[] = [];
@@ -722,31 +758,28 @@ export const autoTapForCost = (
     const finalCostToTap: typeof costToPay = [];
 
     for (const req of costToPay) {
-        let paid = false;
+        let paid = 0;
         if (req.type === 'colored' && req.color) {
-            if ((currentFloating[req.color] || 0) > 0) {
-                payWithFloating(req.color, 1);
-                paid = true;
-            }
+            paid = payWithFloating(req.color, 1);
         } else if (req.type === 'hybrid' && req.options) {
-            const best = req.options.sort((a, b) => (currentFloating[b] || 0) - (currentFloating[a] || 0))[0];
-            if ((currentFloating[best] || 0) > 0) {
-                payWithFloating(best, 1);
-                paid = true;
-            }
+            paid = payWithFloating('WUBRG', 1, req.options); // Use generic search with options
         } else if (req.type === 'generic') {
+            // For generic, we can use colorless first
             if ((currentFloating.C || 0) > 0) {
-                payWithFloating('C', 1);
-                paid = true;
+                currentFloating.C--;
+                manaUsed.C++;
+                paid = 1;
             } else {
-                const available = BASE_COLORS.find(c => (currentFloating[c] || 0) > 0);
-                if (available) {
-                    payWithFloating(available, 1);
-                    paid = true;
+                // Try any color we have
+                const anyColor = BASE_COLORS.find(c => (currentFloating[c] || 0) > 0) ||
+                    (currentFloating.WUBRG > 0 ? 'WUBRG' as ManaColor : null) ||
+                    (currentFloating.CMD > 0 ? 'CMD' as ManaColor : null);
+                if (anyColor) {
+                    paid = payWithFloating(anyColor, 1);
                 }
             }
         }
-        if (!paid) finalCostToTap.push(req);
+        if (paid === 0) finalCostToTap.push(req);
     }
 
     if (finalCostToTap.length === 0) {

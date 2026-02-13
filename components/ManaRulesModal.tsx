@@ -628,6 +628,21 @@ const ManaRuleEditor: React.FC<{
                             <p className="text-[10px] text-gray-500">Force this card to be categorized as a Land (Available Mana)</p>
                         </div>
                     </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                        <div
+                            onClick={() => updateRule('entersTapped', !rule.entersTapped)}
+                            className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${rule.entersTapped ? 'bg-red-500' : 'bg-gray-600'
+                                }`}
+                        >
+                            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${rule.entersTapped ? 'translate-x-4' : 'translate-x-0.5'
+                                }`} />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm text-gray-300">Enters Tapped</span>
+                            <p className="text-[10px] text-gray-500">Initialize this card as tapped when played from anywhere</p>
+                        </div>
+                    </label>
                 </div>
             </div>
         </div>

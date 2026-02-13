@@ -610,7 +610,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                         onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
                         onClose={() => setManaRulesCard(null)}
                         allSources={editingDeck.deck
-                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land'))
+                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land') || !!editingDeck.manaRules?.[c.scryfallId])
                             .map(c => {
                                 const rule = editingDeck.manaRules?.[c.scryfallId];
                                 let priority = rule?.autoTapPriority;

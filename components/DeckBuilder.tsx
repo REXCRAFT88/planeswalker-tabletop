@@ -213,7 +213,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const filteredDeck = stagedDeck
         ? stagedDeck.filter(c => {
             const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
-            const matchesManaFilter = !showManaFilter || c.isManaSource || (c.producedMana && c.producedMana.length > 0);
+            const rule = manaRules[c.scryfallId];
+            const hasActiveRule = rule && !rule.disabled;
+            const matchesManaFilter = !showManaFilter ||
+                (hasActiveRule) ||
+                (c.isManaSource && !rule?.disabled) ||
+                (c.producedMana && c.producedMana.length > 0 && !rule?.disabled);
             return matchesSearch && matchesManaFilter;
         })
         : [];
@@ -532,7 +537,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     }}
                     onClose={() => setManaRulesCard(null)}
                     allSources={stagedDeck
-                        ?.filter(c => (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land'))
+                        ?.filter(c => c.isManaSource || (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land') || !!manaRules[c.scryfallId])
                         .map(c => {
                             const rule = manaRules[c.scryfallId];
                             let priority = rule?.autoTapPriority;

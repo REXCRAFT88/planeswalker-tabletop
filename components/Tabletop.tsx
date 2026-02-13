@@ -3,14 +3,14 @@ import { createPortal } from 'react-dom';
 import { CardData, BoardObject, LogEntry, PlayerStats, ManaRule } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { ManaDisplay } from './ManaDisplay';
+import { ManaDisplay, ManaPaymentSidebar } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
 import {
     calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
-    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
+    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
 import {
@@ -850,9 +850,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-    const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
-    const [choosingXForCard, setChoosingXForCard] = useState<CardData | null>(null);
     const [pendingPaymentCard, setPendingPaymentCard] = useState<CardData | null>(null);
+    const [allocatedMana, setAllocatedMana] = useState<ManaPool>(EMPTY_POOL);
     const isDraggingRef = useRef(false);
 
     const [showManaCalculator, setShowManaCalculator] = useState(true);
@@ -900,6 +899,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
 
     const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
+    const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
+    const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
 
     // Sync state with prop initially or if prop changes (but allow internal override)
     useEffect(() => {
@@ -3043,12 +3044,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                     if (obj.quantity > 1) {
                         const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true);
+                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true, true);
                     } else {
                         const isTapped = obj.rotation !== defaultRotation;
                         if (!isTapped) {
                             const newRotation = (defaultRotation + 90) % 360;
-                            updateBoardObject(obj.id, { rotation: newRotation }, true);
+                            updateBoardObject(obj.id, { rotation: newRotation }, true, true);
                         }
                     }
                 }
@@ -3063,9 +3064,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         produceMana(source, false);
     };
 
-    const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
 
-    const updateBoardObject = (id: string, updates: Partial<BoardObject>, silent: boolean = false) => {
+
+    const updateBoardObject = (id: string, updates: Partial<BoardObject>, silent: boolean = false, skipMana: boolean = false) => {
         setBoardObjects(prev => {
             const movingObj = prev.find(o => o.id === id);
             if (!movingObj) return prev;
@@ -3109,8 +3110,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
 
                 // Trigger mana production when tapping (regardless of isLocal)
-                // STOP MANA PRODUCTION DURING DRAG/MOVE
-                if (!wasTapped && isNowTapped && !isDraggingRef.current) {
+                // STOP MANA PRODUCTION DURING DRAG/MOVE OR IF skipMana IS TRUE
+                if (!wasTapped && isNowTapped && !isDraggingRef.current && !skipMana) {
                     // Use manaInfoRef to get the latest calculated info
                     const currentManaInfo = manaInfoRef.current || manaInfo;
 
@@ -3208,14 +3209,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
 
-        // Auto-tap lands for mana if needed
+        // Show mana payment sidebar if it has a cost
         if (!card.isToken && !card.isLand) {
             const cost = parseManaCost(card.manaCost || "");
-            if (cost.hasX) {
-                setChoosingXForCard(card);
-            } else if (autoTapEnabled) {
-                handleAutoTap(card);
-            } else {
+            if (cost.cmc > 0) {
+                setAllocatedMana(EMPTY_POOL);
                 setPendingPaymentCard(card);
             }
         }
@@ -3328,7 +3326,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (cost.symbols.length === 0) return;
 
         // 1. Try to pay with Floating Mana first
-        const result = autoTapForCost(cost, manaInfo.sources, floatingMana, xValue, manaInfo.cmdColors);
+        const untappedSources = [...manaInfo.availableSources, ...manaInfo.potentialSources];
+        const result = autoTapForCost(cost, untappedSources, floatingMana, xValue, manaInfo.cmdColors);
 
         if (!result.success) {
             addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
@@ -3635,7 +3634,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         const cost = parseManaCost(card.manaCost || "");
         if (cost.hasX) {
-            setChoosingXForCard(card);
+            setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
         } else if (autoTapEnabled) {
             handleAutoTap(card);
         } else {
@@ -3670,7 +3669,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         const cost = parseManaCost(card.manaCost || "");
         if (cost.hasX) {
-            setChoosingXForCard(card);
+            setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
         } else if (autoTapEnabled) {
             handleAutoTap(card);
         } else {
@@ -4733,109 +4732,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
-            {/* X-Spell Modal */}
-            {choosingXForCard && (
-                <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8 w-full max-w-sm flex flex-col gap-6 animate-in zoom-in-95 duration-200">
-                        <div className="text-center">
-                            <h3 className="text-2xl font-bold text-white mb-2">Cast {choosingXForCard.name}</h3>
-                            <p className="text-gray-400 text-sm">Choose the value for X</p>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest text-center">Value of X</div>
-                            <div className="flex items-center justify-center gap-4">
-                                <button
-                                    onClick={() => {
-                                        const input = document.getElementById('x-value-input') as HTMLInputElement;
-                                        if (input) input.value = Math.max(0, parseInt(input.value || "0") - 1).toString();
-                                    }}
-                                    className="w-12 h-12 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white text-2xl font-bold transition-colors"
-                                >-</button>
-                                <input
-                                    id="x-value-input"
-                                    type="number"
-                                    defaultValue="0"
-                                    min="0"
-                                    className="w-24 bg-black/40 border border-gray-600 rounded-xl text-center text-3xl font-bold text-white py-3 focus:outline-none focus:border-blue-500"
-                                />
-                                <button
-                                    onClick={() => {
-                                        const input = document.getElementById('x-value-input') as HTMLInputElement;
-                                        if (input) input.value = (parseInt(input.value || "0") + 1).toString();
-                                    }}
-                                    className="w-12 h-12 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white text-2xl font-bold transition-colors"
-                                >+</button>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col gap-3">
-                            <button
-                                onClick={() => {
-                                    const xVal = parseInt((document.getElementById('x-value-input') as HTMLInputElement)?.value || "0");
-                                    if (autoTapEnabled) {
-                                        handleAutoTap(choosingXForCard, xVal);
-                                    } else {
-                                        // Manual pay logic for X spells
-                                        // (This would open the payment UI with the specific X value)
-                                        setPendingPaymentCard({ ...choosingXForCard, userXValue: xVal } as any);
-                                    }
-                                    setChoosingXForCard(null);
-                                }}
-                                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95"
-                            >
-                                Confirm & {autoTapEnabled ? 'Auto-Pay' : 'Cast'}
-                            </button>
-                            <button
-                                onClick={() => setChoosingXForCard(null)}
-                                className="w-full py-2 text-gray-400 hover:text-white text-sm transition-colors"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Manual Payment UI */}
-            {pendingPaymentCard && (
-                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top duration-300">
-                    <div className="bg-gray-800/90 backdrop-blur-md rounded-2xl shadow-2xl border border-blue-500/30 p-4 flex items-center gap-6 border-b-4 border-b-blue-500">
-                        <div className="flex flex-col gap-0.5">
-                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Unpaid Cost</span>
-                            <div className="flex items-center gap-2">
-                                <span className="text-white font-bold text-lg">{pendingPaymentCard.name}</span>
-                                <div className="text-amber-400 font-mono text-xl font-bold bg-black/30 px-2 py-0.5 rounded border border-amber-900/30">
-                                    {pendingPaymentCard.manaCost || "{0}"} {(pendingPaymentCard as any).userXValue !== undefined && `(X=${(pendingPaymentCard as any).userXValue})`}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => {
-                                    const success = payManaForCard(pendingPaymentCard, (pendingPaymentCard as any).userXValue || 0);
-                                    if (success) {
-                                        setPendingPaymentCard(null);
-                                        addLog(`paid mana for ${pendingPaymentCard.name}`);
-                                    } else {
-                                        alert("Insufficient mana in pool!");
-                                    }
-                                }}
-                                className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2 active:scale-95"
-                            >
-                                <Zap size={18} fill="currentColor" /> Pay Mana
-                            </button>
-                            <button
-                                onClick={() => setPendingPaymentCard(null)}
-                                className="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold rounded-xl transition-all active:scale-95"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* --- UI: Top Bar --- */}
             <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
@@ -5250,6 +5146,46 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         onAddMana={handleAddMana}
                         onRemoveMana={handleRemoveMana}
                         onAutoTapColor={handleAutoTapColor}
+                    />
+                )}
+
+                {/* New Mana Payment Sidebar */}
+                {pendingPaymentCard && (
+                    <ManaPaymentSidebar
+                        card={pendingPaymentCard}
+                        floatingMana={floatingMana}
+                        allocatedMana={allocatedMana}
+                        onAllocate={(type) => {
+                            if (floatingMana[type] > 0) {
+                                handleRemoveMana(type);
+                                setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
+                            }
+                        }}
+                        onUnallocate={(type) => {
+                            if (allocatedMana[type] > 0) {
+                                handleAddMana(type);
+                                setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) - 1 }));
+                            }
+                        }}
+                        onXValueChange={(xVal) => {
+                            setPendingPaymentCard(prev => prev ? { ...prev, userXValue: xVal } as any : null);
+                        }}
+                        onDismiss={() => {
+                            // Return allocated mana to pool
+                            BASE_COLORS.forEach(c => {
+                                const amount = allocatedMana[c] || 0;
+                                if (amount > 0) {
+                                    for (let i = 0; i < amount; i++) handleAddMana(c);
+                                }
+                            });
+                            setAllocatedMana(EMPTY_POOL);
+                            setPendingPaymentCard(null);
+                        }}
+                        onConfirm={() => {
+                            setAllocatedMana(EMPTY_POOL);
+                            setPendingPaymentCard(null);
+                            addLog(`paid mana for ${pendingPaymentCard.name}`);
+                        }}
                     />
                 )}
 
