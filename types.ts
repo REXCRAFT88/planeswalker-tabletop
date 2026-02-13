@@ -83,6 +83,7 @@ export interface CardData {
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
+  userXValue?: number; // Runtime state for mana payment
 }
 
 export interface BoardObject {

@@ -3063,16 +3063,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const produced = source.producedMana;
         const flexible = produced.length > 1 && !produced.every(c => c === produced[0]);
 
-        // Check if this source has an alternative rule - show modal to pick
-        if (source.alternativeRule && !choosingRuleForId) {
+        // Check if this source has an alternative rule OR is an OR option (e.g. canopy vista)
+        if ((source.alternativeRule || source.hasOROption) && !choosingRuleForId) {
             setChoosingRuleForId(source.objectId);
             return;
         }
 
         // Check if this source requires a color choice (flexible mana)
         const hasWUBRG = produced.includes('WUBRG');
-        const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD');
-        const needsColorChoice = hasWUBRG || (flexible && actualColorOptions.length > 1);
+        const hasCMD = produced.includes('CMD');
+        const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD' && BASE_COLORS.includes(c as any));
+        const needsColorChoice = hasWUBRG ||
+            (hasCMD && (manaInfo.cmdColors?.length || 0) > 1) ||
+            (flexible && actualColorOptions.length > 1);
 
         if (!needsColorChoice && produced.length > 0) {
             // Fixed mana production - add directly to pool
@@ -3176,7 +3179,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         // 1. It is a land (always auto-produce if tap ability)
                         // 2. Or it is a rock/dork with 'tap' ability and NOT hideManaButton (unless user explicitly hid it, but usually we want to auto-prod if they tap it physically)
                         // Actually, if they tap it physically, they probably want mana.
-                        // Exception: Attacking with a creature that produces mana? 
+                        // Exception: Attacking with a creature that produces mana?
                         // But usually you tap to attack in combat phase.
                         // For now, let's auto-produce if it has a 'tap' ability.
 
@@ -3923,7 +3926,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const myId = isLocal ? currentTurnPlayerId : socket.id;
                     const myCmd = boardObjects.find(o => o.controllerId === myId && o.cardData.isCommander);
                     if (myCmd) {
-                        setCommandZone(prev => [myCmd.cardData, ...prev]);
+                        setCommandZone(prev => [...prev, myCmd.cardData]);
                         setBoardObjects(prev => prev.filter(o => o.id !== myCmd.id));
                         emitAction('REMOVE_OBJECT', { id: myCmd.id });
                         addLog(`returned commander ${myCmd.cardData.name} to command zone`);
@@ -4228,7 +4231,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const delta = -e.deltaY * 0.001;
 
         setView(prev => {
-            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
+            const newScale = Math.min(Math.max(0.1, prev.scale + 0.1 * (delta > 0 ? 1 : -1)), 5); // Adjust sensitivity
             const scaleRatio = newScale / prev.scale;
             const newX = mx - (mx - prev.x) * scaleRatio;
             const newY = my - (my - prev.y) * scaleRatio;
@@ -4269,7 +4272,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const delta = -e.deltaY * 0.001;
 
         setOpponentView(prev => {
-            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
+            const newScale = Math.min(Math.max(0.1, prev.scale + 0.1 * (delta > 0 ? 1 : -1)), 5); // Adjust sensitivity
             const scaleRatio = newScale / prev.scale;
             const newX = mx - (mx - prev.x) * scaleRatio;
             const newY = my - (my - prev.y) * scaleRatio;
@@ -4726,17 +4729,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <h3 className="text-xl font-bold text-white">Choose Color</h3>
                         <div className="flex gap-4">
                             {(() => {
-                                const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) || manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
+                                const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) ||
+                                    manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
                                 if (!source) return null;
 
                                 const colors = new Set<ManaColor>();
                                 source.producedMana.forEach(c => {
-                                    if (c === "CMD") {
-                                        colors.add("CMD" as ManaColor);
-                                    } else if (c === "WUBRG") {
-                                        colors.add("WUBRG" as ManaColor);
+                                    if (c === 'WUBRG') {
+                                        (['W', 'U', 'B', 'R', 'G'] as ManaColor[]).forEach(color => colors.add(color));
+                                    } else if (c === 'CMD') {
+                                        if (manaInfo.cmdColors && manaInfo.cmdColors.length > 0) {
+                                            manaInfo.cmdColors.forEach(color => colors.add(color));
+                                        } else {
+                                            colors.add('C');
+                                        }
                                     } else {
-                                        colors.add(c);
+                                        colors.add(c as ManaColor);
                                     }
                                 });
 
@@ -4795,61 +4803,93 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
-            {/* Rule Choice Modal (Alternative Rule Picker) */}
+            {/* Rule Choice Modal (Alternative Rule or OR Picker) */}
             {choosingRuleForId && (
                 <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6 max-w-sm">
-                        <h3 className="text-xl font-bold text-white">Choose Mana Ability</h3>
                         {(() => {
-                            const source = (manaInfo.sources.find(s => s.objectId === choosingRuleForId) || manaInfo.potentialSources.find(s => s.objectId === choosingRuleForId)) as ManaSource;
+                            const source = manaInfo.sources.find(s => s.objectId === choosingRuleForId) ||
+                                manaInfo.potentialSources.find(s => s.objectId === choosingRuleForId);
                             if (!source) return null;
 
-                            return (
-                                <div className="flex flex-col gap-3 w-full">
-                                    <button
-                                        onClick={() => {
-                                            const primarySource = { ...source, alternativeRule: undefined };
-                                            setChoosingRuleForId(null);
-                                            produceMana(primarySource, false);
-                                        }}
-                                        className="flex flex-col items-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
-                                    >
-                                        <span className="text-sm font-bold text-white">Primary Option</span>
-                                        <div className="flex gap-1">
-                                            {source.producedMana.map((c, i) => (
-                                                <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                            // Handle "OR" branches (e.g. canopy vista or complex OR sources)
+                            if (source.hasOROption && source.orColors) {
+                                return (
+                                    <div className="flex flex-col items-center gap-4">
+                                        <h3 className="text-xl font-bold text-white">Choose Ability</h3>
+                                        <div className="grid grid-cols-1 gap-3 w-full">
+                                            {source.orColors.map((branch, branchIdx) => (
+                                                <button
+                                                    key={branchIdx}
+                                                    onClick={() => {
+                                                        const newSource = {
+                                                            ...source,
+                                                            producedMana: branch,
+                                                            hasOROption: false,
+                                                            alternativeRule: undefined
+                                                        };
+                                                        setChoosingRuleForId(null);
+                                                        produceMana(newSource, false);
+                                                    }}
+                                                    className="flex items-center justify-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
+                                                >
+                                                    <div className="flex gap-1">
+                                                        {branch.length > 0 ? branch.map((c, i) => (
+                                                            <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                                        )) : <span className="text-gray-400 italic text-xs">No mana</span>}
+                                                    </div>
+                                                </button>
                                             ))}
                                         </div>
-                                    </button>
-
-                                    <div className="flex items-center justify-center">
-                                        <div className="w-1/3 h-px bg-gray-700" />
-                                        <span className="px-3 text-gray-500 text-xs font-bold">OR</span>
-                                        <div className="w-1/3 h-px bg-gray-700" />
                                     </div>
+                                );
+                            }
 
-                                    <button
-                                        onClick={() => {
-                                            if (source.alternativeRule) {
-                                                const altSource = {
-                                                    ...source,
-                                                    producedMana: ruleToColors(source.alternativeRule),
-                                                    activationCost: ruleToActivationString(source.alternativeRule),
-                                                    alternativeRule: undefined
-                                                };
+                            // Handle Alternative Rule
+                            return (
+                                <div className="flex flex-col items-center gap-4">
+                                    <h3 className="text-xl font-bold text-white">Choose Ability</h3>
+                                    <div className="flex gap-4">
+                                        <button
+                                            onClick={() => {
+                                                const primarySource = { ...source, alternativeRule: undefined };
                                                 setChoosingRuleForId(null);
-                                                produceMana(altSource, false);
-                                            }
-                                        }}
-                                        className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
-                                    >
-                                        <span className="text-sm font-bold text-amber-400">Alternative Option</span>
-                                        <div className="flex gap-1">
-                                            {source.alternativeRule ? ruleToColors(source.alternativeRule).map((c, i) => (
-                                                <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
-                                            )) : <span className="text-xs text-gray-500 italic">Special Rule</span>}
-                                        </div>
-                                    </button>
+                                                produceMana(primarySource, false);
+                                            }}
+                                            className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
+                                        >
+                                            <span className="text-sm font-bold text-amber-400">Primary Option</span>
+                                            <div className="flex gap-1">
+                                                {source.producedMana.slice(0, 5).map((c, i) => (
+                                                    <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                                ))}
+                                                {source.producedMana.length > 5 && <span className="text-white font-bold ml-1">...</span>}
+                                            </div>
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                if (source.alternativeRule) {
+                                                    const altSource = {
+                                                        ...source,
+                                                        producedMana: ruleToColors(source.alternativeRule),
+                                                        activationCost: ruleToActivationString(source.alternativeRule),
+                                                        alternativeRule: undefined
+                                                    };
+                                                    setChoosingRuleForId(null);
+                                                    produceMana(altSource, false);
+                                                }
+                                            }}
+                                            className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
+                                        >
+                                            <span className="text-sm font-bold text-amber-400">Alternative Option</span>
+                                            <div className="flex gap-1">
+                                                {source.alternativeRule ? ruleToColors(source.alternativeRule).map((c, i) => (
+                                                    <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                                )) : <span className="text-xs text-gray-500 italic">Special Rule</span>}
+                                            </div>
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })()}
@@ -5147,7 +5187,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div
                                         className={`pointer-events-auto transition-transform ${isLandscape
                                             ? `h-full w-8 flex items-center justify-center ${!isHandVisible ? '-translate-x-12' : '-ml-6'}`
-                                            : `w-full h-8 flex items-center justify-center ${!isHandVisible ? '-translate-y-12' : '-mt-6'}`
+                                            : `w-full h-8 flex items-center justify-center ${!isHandVisible ? 'translate-y-12' : '-mt-6'}`
                                             }`}
                                         onClick={() => setIsHandVisible(!isHandVisible)}
                                     >
@@ -5269,58 +5309,76 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     )}
                 </div>
 
-                {/* Mana Display */}
+                {/* --- RIGHT SIDE MANA UI --- */}
                 {(gamePhase === 'PLAYING' && showManaCalculator) && (
-                    <ManaDisplay
-                        manaInfo={manaInfo}
-                        floatingMana={floatingMana}
-                        onAddMana={handleAddMana}
-                        onRemoveMana={handleRemoveMana}
-                        onAutoTapColor={handleAutoTapColor}
-                    />
-                )}
+                    <div className="fixed right-2 top-24 flex flex-col items-end gap-2 z-[90] pointer-events-none">
+                        <ManaDisplay
+                            manaInfo={manaInfo}
+                            floatingMana={floatingMana}
+                            onAddMana={handleAddMana}
+                            onRemoveMana={handleRemoveMana}
+                            onAutoTapColor={handleAutoTapColor}
+                        />
 
-                {/* New Mana Payment Sidebar */}
-                {(pendingPaymentCard && showManaCalculator) && (
-                    <ManaPaymentSidebar
-                        card={pendingPaymentCard}
-                        floatingMana={floatingMana}
-                        allocatedMana={allocatedMana}
-                        availableMana={manaInfo.available}
-                        onAllocate={(type) => {
-                            if (floatingMana[type] > 0) {
-                                handleRemoveMana(type);
-                                setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
-                            }
-                        }}
-                        onUnallocate={(type) => {
-                            if (allocatedMana[type] > 0) {
-                                handleAddMana(type);
-                                setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) - 1 }));
-                            }
-                        }}
-                        onXValueChange={(xVal) => {
-                            setPendingPaymentCard(prev => prev ? { ...prev, userXValue: xVal } as any : null);
-                        }}
-                        onDismiss={() => {
-                            // Return allocated mana to pool
-                            BASE_COLORS.forEach(c => {
-                                const amount = allocatedMana[c] || 0;
-                                if (amount > 0) {
-                                    for (let i = 0; i < amount; i++) handleAddMana(c);
-                                }
-                            });
-                            setAllocatedMana(EMPTY_POOL);
-                            setPendingPaymentCard(null);
-                        }}
-                        onConfirm={() => {
-                            setAllocatedMana(EMPTY_POOL);
-                            setPendingPaymentCard(null);
-                            addLog(`paid mana for ${pendingPaymentCard.name}`);
-                        }}
-                    />
-                )}
+                        {/* New Mana Payment Sidebar */}
+                        {pendingPaymentCard && (
+                            <ManaPaymentSidebar
+                                card={pendingPaymentCard}
+                                floatingMana={floatingMana}
+                                allocatedMana={allocatedMana}
+                                availableMana={manaInfo.available}
+                                requiredTotal={pendingPaymentCard.manaCost ? parseManaCost(pendingPaymentCard.manaCost).cmc + (pendingPaymentCard.userXValue || 0) : 0}
+                                onAllocate={(type) => {
+                                    // PREVENT OVER-PAYMENT: Handled by sidebar disabling UI,
+                                    // but we block here too.
+                                    // Note: we don't block if we aren't "paid" yet (might be swapping colors)
+                                    // However, without easy access to 'isPaid' here, we'll check total.
+                                    const currentTotal = Object.values(allocatedMana).reduce((a, b) => a + b, 0);
+                                    const cost = parseManaCost(pendingPaymentCard.manaCost || '0');
+                                    const targetTotal = cost.cmc + (pendingPaymentCard.userXValue || 0);
 
+                                    // If we are already over the target, definitely block.
+                                    // If we are AT the target, we only allow if the sidebar hasn't
+                                    // disabled the button (which it does if isPaid).
+                                    if (currentTotal > targetTotal) return;
+
+                                    // Check if we have enough in pool that isn't already allocated
+                                    const count = floatingMana[type] || 0;
+                                    const allocated = allocatedMana[type] || 0;
+                                    if (count > allocated) {
+                                        setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
+                                    }
+                                }}
+                                onUnallocate={(type) => {
+                                    if (allocatedMana[type] > 0) {
+                                        setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) - 1 }));
+                                    }
+                                }}
+                                onXValueChange={(xVal) => {
+                                    setPendingPaymentCard(prev => prev ? { ...prev, userXValue: xVal } as any : null);
+                                }}
+                                onDismiss={() => {
+                                    setAllocatedMana(EMPTY_POOL);
+                                    setPendingPaymentCard(null);
+                                }}
+                                onConfirm={() => {
+                                    // SUBTRACT FROM POOL ONLY ON CONFIRM
+                                    setFloatingMana(prev => {
+                                        const next = { ...prev };
+                                        BASE_COLORS.forEach(c => {
+                                            const amount = allocatedMana[c] || 0;
+                                            next[c] = Math.max(0, next[c] - amount);
+                                        });
+                                        return next;
+                                    });
+                                    setAllocatedMana(EMPTY_POOL);
+                                    setPendingPaymentCard(null);
+                                    addLog(`paid mana for ${pendingPaymentCard.name}`);
+                                }}
+                            />
+                        )}
+                    </div>
+                )}
                 {/* Auto-Tap Flash Overlay — highlights tapped cards */}
                 {autoTappedIds.length > 0 && (
                     <style>{`

@@ -51,7 +51,7 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
     const grandTotal = manaInfo.availableTotal + totalFloating;
 
     return (
-        <div className="absolute right-0 top-1/4 flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
+        <div className="flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
             {/* Total Mana Header */}
             <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1 border-l-2 border-amber-500 shadow-2xl">
                 <div className="flex flex-col items-center">
@@ -247,6 +247,7 @@ interface ManaPaymentSidebarProps {
     onDismiss: () => void;
     onConfirm: () => void;
     availableMana?: ManaPool; // Remaining untapped mana sources
+    requiredTotal: number;
 }
 
 export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
@@ -258,7 +259,8 @@ export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
     onXValueChange,
     onDismiss,
     onConfirm,
-    availableMana
+    availableMana,
+    requiredTotal
 }) => {
     const xValue = (card as any).userXValue || 0;
     const [xInput, setXInput] = useState(String(xValue));
@@ -271,7 +273,6 @@ export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
 
     // Calculate requirements
     const totalAllocated = Object.values(allocatedMana).reduce((a, b) => a + b, 0);
-    const requiredTotal = parsed.cmc + xValue;
 
     // Group colored requirements by color with counts
     const getColoredRequirements = useMemo(() => {
@@ -387,7 +388,7 @@ export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
     const totalAvailable = availableMana ? Object.values(availableMana).reduce((a, b) => a + b, 0) : 0;
 
     return (
-        <div className="fixed right-2 bottom-20 z-[90] pointer-events-auto animate-in slide-in-from-right duration-300">
+        <div className="pointer-events-auto animate-in slide-in-from-right duration-300">
             <div className="bg-gray-900/50 backdrop-blur-md border border-white/10 rounded-xl p-3 shadow-xl w-52">
                 <div className="flex justify-between items-start mb-2">
                     <div className="flex gap-2 items-center">
@@ -459,10 +460,18 @@ export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
 
                 {/* Mana Allocation Grid */}
                 <div className="grid grid-cols-4 gap-1 mb-2">
-                    {(['W', 'U', 'B', 'R', 'G', 'C'] as ManaColor[]).map(type => {
+                    {(['W', 'U', 'B', 'R', 'G', 'C', 'CMD'] as ManaColor[]).map(type => {
                         const inPool = floatingMana[type] || 0;
                         const allocated = allocatedMana[type] || 0;
+                        const availableInPool = inPool - allocated;
                         if (inPool === 0 && allocated === 0) return null;
+
+                        // Check if adding this mana is necessary (to prevent accidental over-payment)
+                        // Allow if:
+                        // 1. Not paid yet
+                        // 2. Or if this specific color is needed (remainingColored)
+                        const colorNeeded = remainingColored.some(r => r.color === type);
+                        const canAdd = !isPaid || colorNeeded;
 
                         return (
                             <div key={type} className="bg-gray-800/40 border border-gray-700/50 rounded-lg p-1 flex flex-col items-center gap-0.5">
@@ -476,7 +485,7 @@ export const ManaPaymentSidebar: React.FC<ManaPaymentSidebarProps> = ({
                                     <span className="text-xs font-bold text-white">{allocated}</span>
                                     <button
                                         onClick={() => onAllocate(type)}
-                                        disabled={inPool === 0}
+                                        disabled={availableInPool <= 0 || !canAdd}
                                         className="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-white font-bold text-xs"
                                     >+</button>
                                 </div>

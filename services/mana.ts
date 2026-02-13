@@ -110,6 +110,7 @@ export interface ManaSource {
     hasOROption: boolean; // True if this source has an OR ability
     orColors?: ManaColor[][]; // Array of color options for OR abilities
     autoTap?: boolean; // Whether this source is allowed to be auto-tapped
+    quantity: number; // Number of objects in the stack
 }
 
 // NEW: Categorized mana info for the new display
@@ -315,7 +316,9 @@ export const calculateAvailableMana = (
                     if (lo.cardData.producedMana) {
                         lo.cardData.producedMana.forEach(m => {
                             const uc = m.toUpperCase() as ManaColor;
-                            if (['W', 'U', 'B', 'R', 'G'].includes(uc)) landColors.add(uc);
+                            if (uc === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(c => landColors.add(c as ManaColor));
+                            else if (uc === 'CMD') (commanderColors || []).forEach(c => landColors.add(c));
+                            else if (MANA_COLORS.includes(uc)) landColors.add(uc);
                         });
                     }
                 });
@@ -409,6 +412,10 @@ export const calculateAvailableMana = (
             if (isBas) {
                 hideManaButton = true;
                 isLand = true; // Basics are always lands
+                if (produced.length === 0) {
+                    const color = getBasicLandColor(obj.cardData.name);
+                    if (color) produced = [color];
+                }
             }
 
             if ((obj.cardData.name === 'Command Tower' || obj.cardData.name === 'Arcane Signet') && commanderColors) {
@@ -418,7 +425,7 @@ export const calculateAvailableMana = (
                     produced = produced.filter(c => c !== 'WUBRG');
                     produced.push(...commanderColors);
                 } else if (!produced.includes('CMD')) {
-                    produced = produced.filter(c => commanderColors.includes(c));
+                    produced = produced.filter(c => commanderColors.includes(c) || c === 'C');
                 }
             }
 
@@ -552,7 +559,8 @@ export const calculateAvailableMana = (
             isLand,
             hasOROption,
             orColors,
-            autoTap: customRule ? customRule.autoTap : (sourcePriority < 999)
+            autoTap: customRule ? customRule.autoTap : (sourcePriority < 999),
+            quantity: obj.quantity
         };
 
         allSources.push(source);
@@ -587,17 +595,25 @@ export const calculateAvailableMana = (
             for (let i = 0; i < untappedCount; i++) {
                 availableSources.push(source);
                 if (isFlexible) {
-                    if (hasOROption) {
-                        // OR sources: add to wildcards primarily to avoid double counting
+                    if (hasOROption && orColors) {
+                        // USER REQUEST: Show all branches in individual counters
+                        // availableTotal will still only count manaCountScored (max of branches)
                         orSourceCount++;
-                        available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                        orColors.forEach(branch => {
+                            branch.forEach(c => {
+                                available[c] = (available[c] || 0) + 1;
+                            });
+                        });
                     } else {
                         // Standard WUBRG handling for wildcards
                         if (produced.includes('WUBRG')) available['WUBRG'] = (available['WUBRG'] || 0) + 1;
                         else if (produced.includes('CMD') && commanderColors) available['CMD'] = (available['CMD'] || 0) + 1;
                         else {
-                            // Dual lands etc - add to WUBRG to avoid total inflation
-                            available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                            // Dual lands etc - add to individual counts so they show up in counters
+                            const unique = Array.from(new Set(produced));
+                            unique.forEach(c => {
+                                available[c] = (available[c] || 0) + 1;
+                            });
                         }
                     }
                 } else {
@@ -632,7 +648,7 @@ export const calculateAvailableMana = (
     }, 0);
 
     const potentialTotal = potentialSources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
-    const totalBoardPotential = allSources.reduce((sum, s) => sum + (s.manaCount || 1), 0);
+    const totalBoardPotential = allSources.reduce((sum, s) => sum + ((s.manaCount || 1) * s.quantity), 0);
 
     return {
         available,
@@ -654,8 +670,10 @@ const isFlexibleMana = (produced: ManaColorType[]): boolean => {
 };
 
 // --- Basic Land Detection ---
-const BASIC_LAND_NAMES = ['plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
-    'snow-covered plains', 'snow-covered island', 'snow-covered swamp', 'snow-covered mountain', 'snow-covered forest'];
+const BASIC_LAND_NAMES = [
+    'plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
+    'snow-covered plains', 'snow-covered island', 'snow-covered swamp', 'snow-covered mountain', 'snow-covered forest', 'snow-covered wastes'
+];
 
 export const isBasicLand = (name: string): boolean => {
     return BASIC_LAND_NAMES.includes(name.toLowerCase());
