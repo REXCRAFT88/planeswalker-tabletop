@@ -77,6 +77,40 @@ interface LibraryActionState {
     cardId: string;
 }
 
+// Helper for mana icons
+const getIconPath = (type: string) => {
+    switch (type) {
+        case 'W': return '/mana/white.png';
+        case 'U': return '/mana/blue.png';
+        case 'B': return '/mana/black.png';
+        case 'R': return '/mana/red.png';
+        case 'G': return '/mana/green.png';
+        case 'C': return '/mana/colorless.png';
+        case 'WUBRG': return '/mana/all.png';
+        case 'CMD': return '/mana/all.png';
+        default: return '/mana/all.png';
+    }
+};
+
+const ruleToColors = (rule: ManaRule): ManaColor[] => {
+    const colors: ManaColor[] = [];
+    Object.entries(rule.produced).forEach(([color, count]) => {
+        for (let i = 0; i < count; i++) colors.push(color as ManaColor);
+    });
+    return colors;
+};
+
+const ruleToActivationString = (rule: ManaRule): string => {
+    const parts: string[] = [];
+    if (rule.genericActivationCost && rule.genericActivationCost > 0) {
+        parts.push(`{${rule.genericActivationCost}}`);
+    }
+    Object.entries(rule.activationCost).forEach(([color, count]) => {
+        if (count > 0) parts.push(Array(count).fill(`{${color}}`).join(''));
+    });
+    return parts.join('');
+};
+
 // --- Layout Constants ---
 const MAT_W = 840; // Wider to fit more cards
 const MAT_H = 400;
@@ -3000,40 +3034,59 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const produceMana = (source: ManaSource, skipRotation: boolean = false) => {
+        if (!showManaCalculator) return;
+
+        // Check if this source has an activation cost and we need to pay it
+        if (source.activationCost && showManaCalculator) {
+            const cost = parseManaCost(source.activationCost);
+            const poolRes = subtractFromPool(floatingMana, cost, (manaInfoRef.current || manaInfo).cmdColors);
+
+            if (!poolRes) {
+                // Not enough mana in pool - show payment sidebar for the cost
+                const virtualCard = {
+                    id: 'virtual-cost-' + source.objectId,
+                    name: `Activate ${source.cardName}`,
+                    manaCost: source.activationCost,
+                    imageUrl: boardObjects.find(o => o.id === source.objectId)?.cardData.imageUrl,
+                    type: 'Ability',
+                    producedMana: []
+                } as any;
+                setPendingPaymentCard(virtualCard);
+                return;
+            } else {
+                // Auto-paid from pool
+                setFloatingMana(poolRes);
+                addLog(`paid {${source.activationCost}} for ${source.cardName} ability`);
+            }
+        }
+
         const produced = source.producedMana;
         const flexible = produced.length > 1 && !produced.every(c => c === produced[0]);
-        const manaCount = source.manaCount || 1;
 
         // Check if this source has an alternative rule - show modal to pick
-        if (source.alternativeRule) {
+        if (source.alternativeRule && !choosingRuleForId) {
             setChoosingRuleForId(source.objectId);
             return;
         }
 
         // Check if this source requires a color choice (flexible mana)
-        // This includes WUBRG/CMD in the produced array, or actual multiple color options
         const hasWUBRG = produced.includes('WUBRG');
-        const hasCMD = produced.includes('CMD');
         const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD');
-        const needsColorChoice = hasWUBRG || hasCMD || (flexible && actualColorOptions.length > 1);
+        const needsColorChoice = hasWUBRG || (flexible && actualColorOptions.length > 1);
 
         if (!needsColorChoice && produced.length > 0) {
             // Fixed mana production - add directly to pool
             setFloatingMana(prev => {
                 const next = { ...prev };
-
-                // Add all valid produced mana to the pool (1 per item in the array)
                 produced.forEach(c => {
-                    if (c !== 'WUBRG' && c !== 'CMD') {
-                        next[c] = (next[c] || 0) + 1;
-                    }
+                    next[c] = (next[c] || 0) + 1;
                 });
-
                 return next;
             });
-            const validProduced = produced.filter(c => c !== 'WUBRG' && c !== 'CMD');
-            if (validProduced.length > 0) {
-                addLog(`added {${validProduced.join('}{')}} to mana pool (via ${source.cardName})`);
+
+            if (produced.length > 0) {
+                const displayStr = produced.map(c => `{${c}}`).join('');
+                addLog(`added ${displayStr} to mana pool (via ${source.cardName})`);
             }
 
             if (!skipRotation && source.abilityType === 'tap') {
@@ -3127,10 +3180,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         // But usually you tap to attack in combat phase.
                         // For now, let's auto-produce if it has a 'tap' ability.
 
-                        // We filter by abilityType === 'tap' to avoid triggering on "Pay {1}, Tap: ..." if we can't pay the cost automatically or it's complex.
-                        // But `source.abilityType` handles some of that logic.
-
-                        if (source.abilityType === 'tap') {
+                        // Trigger mana production only if it doesn't have a button (like Lands)
+                        // This prevents double triggering and respects user's wish to tap for other reasons (e.g. attacking)
+                        if (source.abilityType === 'tap' && source.hideManaButton) {
                             console.log(`[Tap Detection] Triggering mana production for ${source.cardName}`);
                             // Use setTimeout to ensure state update happens first so visual tap is clear
                             setTimeout(() => produceMana(source, true), 50);
@@ -4679,10 +4731,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                                 const colors = new Set<ManaColor>();
                                 source.producedMana.forEach(c => {
-                                    if (c === 'WUBRG') {
-                                        ['W', 'U', 'B', 'R', 'G'].forEach(color => colors.add(color as ManaColor));
-                                    } else if (c === 'CMD') {
-                                        (manaInfo.cmdColors || []).forEach(color => colors.add(color));
+                                    if (c === "CMD") {
+                                        colors.add("CMD" as ManaColor);
+                                    } else if (c === "WUBRG") {
+                                        colors.add("WUBRG" as ManaColor);
                                     } else {
                                         colors.add(c);
                                     }
@@ -4711,12 +4763,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                                                     if (obj.quantity > 1) {
                                                         const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                                                        updateBoardObject(obj.id, { tappedQuantity: newTapped });
+                                                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true, true);
                                                     } else {
                                                         const isTapped = obj.rotation !== defaultRotation;
                                                         if (!isTapped) {
                                                             const newRotation = (defaultRotation + 90) % 360;
-                                                            updateBoardObject(obj.id, { rotation: newRotation }, true); // silent = true
+                                                            updateBoardObject(obj.id, { rotation: newRotation }, true, true); // silent = true, skipMana = true
                                                         }
                                                     }
                                                 }
@@ -4725,8 +4777,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         }}
                                         className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
                                     >
-                                        <img src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : color === 'G' ? 'green' : 'colorless'
-                                            }.png`} className="w-full h-full object-contain" />
+                                        <img src={getIconPath(color)} className="w-full h-full object-contain" />
                                         <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
                                             {color}
                                         </div>
@@ -4737,6 +4788,74 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <button
                             onClick={() => setChoosingColorForId(null)}
                             className="text-sm text-gray-400 hover:text-white underline mt-2"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Rule Choice Modal (Alternative Rule Picker) */}
+            {choosingRuleForId && (
+                <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6 max-w-sm">
+                        <h3 className="text-xl font-bold text-white">Choose Mana Ability</h3>
+                        {(() => {
+                            const source = (manaInfo.sources.find(s => s.objectId === choosingRuleForId) || manaInfo.potentialSources.find(s => s.objectId === choosingRuleForId)) as ManaSource;
+                            if (!source) return null;
+
+                            return (
+                                <div className="flex flex-col gap-3 w-full">
+                                    <button
+                                        onClick={() => {
+                                            const primarySource = { ...source, alternativeRule: undefined };
+                                            setChoosingRuleForId(null);
+                                            produceMana(primarySource, false);
+                                        }}
+                                        className="flex flex-col items-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
+                                    >
+                                        <span className="text-sm font-bold text-white">Primary Option</span>
+                                        <div className="flex gap-1">
+                                            {source.producedMana.map((c, i) => (
+                                                <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                            ))}
+                                        </div>
+                                    </button>
+
+                                    <div className="flex items-center justify-center">
+                                        <div className="w-1/3 h-px bg-gray-700" />
+                                        <span className="px-3 text-gray-500 text-xs font-bold">OR</span>
+                                        <div className="w-1/3 h-px bg-gray-700" />
+                                    </div>
+
+                                    <button
+                                        onClick={() => {
+                                            if (source.alternativeRule) {
+                                                const altSource = {
+                                                    ...source,
+                                                    producedMana: ruleToColors(source.alternativeRule),
+                                                    activationCost: ruleToActivationString(source.alternativeRule),
+                                                    alternativeRule: undefined
+                                                };
+                                                setChoosingRuleForId(null);
+                                                produceMana(altSource, false);
+                                            }
+                                        }}
+                                        className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
+                                    >
+                                        <span className="text-sm font-bold text-amber-400">Alternative Option</span>
+                                        <div className="flex gap-1">
+                                            {source.alternativeRule ? ruleToColors(source.alternativeRule).map((c, i) => (
+                                                <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                            )) : <span className="text-xs text-gray-500 italic">Special Rule</span>}
+                                        </div>
+                                    </button>
+                                </div>
+                            );
+                        })()}
+                        <button
+                            onClick={() => setChoosingRuleForId(null)}
+                            className="text-sm text-gray-400 hover:text-white underline"
                         >
                             Cancel
                         </button>

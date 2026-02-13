@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ManaPool, CategorizedManaInfo, MANA_COLORS, BASE_COLORS, parseManaCost, poolTotal, ManaColor } from '../services/mana';
-import { Eye, EyeOff, Plus, Minus, X, Zap, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, Plus, Minus, X, Zap, CheckCircle, Crown } from 'lucide-react';
 import { CardData } from '../types';
 
 interface ManaDisplayProps {
@@ -11,7 +11,7 @@ interface ManaDisplayProps {
     onAutoTapColor?: (color: string) => void;
 }
 
-const DISPLAY_COLORS = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
+const DISPLAY_COLORS = ['W', 'U', 'B', 'R', 'G', 'C', 'CMD'] as const;
 
 // Helper function for getting mana icon paths - defined at module level for reuse
 const getIconPath = (type: string) => {
@@ -22,6 +22,7 @@ const getIconPath = (type: string) => {
         case 'R': return '/mana/red.png';
         case 'G': return '/mana/green.png';
         case 'C': return '/mana/colorless.png';
+        case 'CMD': return '/mana/all.png'; // Placeholder for CMD if no img
         default: return '/mana/all.png';
     }
 };
@@ -125,26 +126,32 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                         </div>
 
                         <div
-                            className="relative w-8 h-8 cursor-pointer hover:scale-110 active:scale-95 transition-transform"
+                            className="relative w-8 h-8 cursor-pointer hover:scale-110 active:scale-95 transition-transform flex items-center justify-center"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onAutoTapColor?.(type);
                             }}
                             title={`Click to auto-tap a ${type} source`}
                         >
-                            <img
-                                src={getIconPath(type)}
-                                alt={type}
-                                className="w-full h-full object-contain drop-shadow-lg"
-                                onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                }}
-                            />
-                            {/* Fallback Circle */}
-                            <div className={`hidden w-8 h-8 rounded-full border-2 border-white/30 flex items-center justify-center font-bold text-sm shadow-inner ${getFallbackColor(type)}`}>
-                                {type}
-                            </div>
+                            {type === 'CMD' ? (
+                                <Crown size={24} className="text-amber-500 drop-shadow-md fill-amber-500/20" />
+                            ) : (
+                                <>
+                                    <img
+                                        src={getIconPath(type)}
+                                        alt={type}
+                                        className="w-full h-full object-contain drop-shadow-lg"
+                                        onError={(e) => {
+                                            e.currentTarget.style.display = 'none';
+                                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                        }}
+                                    />
+                                    {/* Fallback Circle */}
+                                    <div className={`hidden w-8 h-8 rounded-full border-2 border-white/30 flex items-center justify-center font-bold text-sm shadow-inner ${getFallbackColor(type)}`}>
+                                        {type}
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 );

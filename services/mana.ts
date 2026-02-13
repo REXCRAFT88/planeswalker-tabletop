@@ -394,13 +394,14 @@ export const calculateAvailableMana = (
 
         } else {
             // Default path
-            produced = obj.cardData.producedMana as ManaColor[];
-            if (!produced || produced.length === 0) {
+            // Default path - start with card's native mana production
+            produced = (obj.cardData.producedMana || []) as ManaColor[];
+
+            // If no native production, try to estimate
+            if (produced.length === 0) {
                 const estimated = estimateProducedMana(obj.cardData as any);
                 if (estimated && estimated.length > 0) {
                     produced = estimated as ManaColor[];
-                } else {
-                    return;
                 }
             }
 
@@ -917,15 +918,61 @@ export const addToManaPool = (pool: ManaPool, source: ManaSource): ManaPool => {
     return newPool;
 };
 
-export const subtractFromPool = (pool: ManaPool, cost: ManaCost): ManaPool | null => {
+export const subtractFromPool = (pool: ManaPool, cost: ManaCost, commanderColors?: ManaColor[]): ManaPool | null => {
     const newPool = { ...pool };
+
+    // Function to pay a specific color (or hybrid) from floating mana wildcards
+    const payWildcard = (color: ManaColor): boolean => {
+        // 1. Try WUBRG
+        if (newPool.WUBRG > 0) {
+            newPool.WUBRG--;
+            return true;
+        }
+        // 2. Try CMD if color is in identity
+        if (newPool.CMD > 0) {
+            const isMatch = color === ('CMD' as any) || color === ('WUBRG' as any) || (commanderColors?.includes(color));
+            if (isMatch) {
+                newPool.CMD--;
+                return true;
+            }
+        }
+        return false;
+    };
 
     for (const sym of cost.symbols) {
         if (sym.type === 'colored') {
-            if (newPool[sym.color] <= 0) return null;
-            newPool[sym.color]--;
+            if (newPool[sym.color] > 0) {
+                newPool[sym.color]--;
+            } else if (!payWildcard(sym.color)) {
+                return null;
+            }
+        } else if (sym.type === 'hybrid') {
+            // Try to find a match among options
+            let paid = false;
+            for (const opt of sym.options) {
+                if (newPool[opt] > 0) {
+                    newPool[opt]--;
+                    paid = true;
+                    break;
+                }
+            }
+            if (!paid) {
+                // Try wildcards - if any option is in identity for CMD, or just WUBRG
+                let wildcardPaid = false;
+                if (newPool.WUBRG > 0) {
+                    newPool.WUBRG--;
+                    wildcardPaid = true;
+                } else if (newPool.CMD > 0) {
+                    if (sym.options.some(opt => commanderColors?.includes(opt))) {
+                        newPool.CMD--;
+                        wildcardPaid = true;
+                    }
+                }
+                if (!wildcardPaid) return null;
+            }
         } else if (sym.type === 'generic') {
             let remaining = sym.count;
+            // Use colorless first
             if (newPool.C >= remaining) {
                 newPool.C -= remaining;
                 remaining = 0;
@@ -933,11 +980,14 @@ export const subtractFromPool = (pool: ManaPool, cost: ManaCost): ManaPool | nul
                 remaining -= newPool.C;
                 newPool.C = 0;
             }
+            // Use colored/wildcard mana for remaining generic
             while (remaining > 0) {
-                const maxColor = BASE_COLORS.reduce((best, c) =>
-                    newPool[c] > newPool[best] ? c : best, 'W' as ManaColor);
-                if (newPool[maxColor] <= 0) return null;
-                newPool[maxColor]--;
+                const colors: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'WUBRG', 'CMD'];
+                const bestColor = colors.reduce((best, c) =>
+                    (newPool[c] || 0) > (newPool[best] || 0) ? c : best, 'W' as ManaColor);
+
+                if ((newPool[bestColor] || 0) <= 0) return null;
+                newPool[bestColor]--;
                 remaining--;
             }
         }
