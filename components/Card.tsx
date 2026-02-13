@@ -452,7 +452,12 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     // Get the primary mana color for display
     const getPrimaryManaIcon = () => {
         if (!manaSource) return '/mana/colorless.png';
-        const produced = manaSource.producedMana;
+        let produced = manaSource.producedMana;
+
+        // Fallback for empty produced array if rule exists (e.g. conditional production currently 0)
+        if (produced.length === 0 && manaRule && manaRule.produced) {
+            produced = Object.keys(manaRule.produced).filter(k => manaRule.produced[k] > 0) as any[];
+        }
 
         // If flexible (multiple options or WUBRG/CMD), show rainbow
         if (manaSource.isFlexible || produced.includes('WUBRG') || produced.includes('CMD')) {

@@ -7,6 +7,7 @@ interface ManaDisplayProps {
     floatingMana: ManaPool;
     onAddMana: (type: keyof ManaPool) => void;
     onRemoveMana: (type: keyof ManaPool) => void;
+    onAutoTapColor?: (color: string) => void;
 }
 
 const DISPLAY_COLORS = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
@@ -24,7 +25,7 @@ const getIconPath = (type: string) => {
     }
 };
 
-export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana, onAddMana, onRemoveMana }) => {
+export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana, onAddMana, onRemoveMana, onAutoTapColor }) => {
     const [showAll, setShowAll] = useState(false);
 
     const hasMana = (type: keyof ManaPool) =>
@@ -104,7 +105,14 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                             </div>
                         </div>
 
-                        <div className="relative w-8 h-8">
+                        <div
+                            className="relative w-8 h-8 cursor-pointer hover:scale-110 active:scale-95 transition-transform"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onAutoTapColor?.(type);
+                            }}
+                            title={`Click to auto-tap a ${type} source`}
+                        >
                             <img
                                 src={getIconPath(type)}
                                 alt={type}
@@ -123,54 +131,65 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                 );
             })}
 
-            {/* Potential Mana Section */}
-            {manaInfo.potentialTotal > 0 && (
-                <>
-                    <div className="text-[8px] text-cyan-400 font-bold uppercase tracking-wider mr-2 mt-2 mb-0.5">
-                        Potential (tap)
-                    </div>
-                    <div className="bg-black/40 rounded-l-lg px-2 py-1 pointer-events-auto">
-                        <span className="text-cyan-400 font-bold text-sm">{manaInfo.potentialTotal}</span>
-                        <span className="text-gray-500 text-[10px] ml-1">mana from creatures/artifacts</span>
-                    </div>
-                </>
-            )}
+            {/* Potential Mana Section Removed as Redundant */}
 
-            {/* Floating Mana Section with minus button */}
+
+            {/* Floating Mana Section with granular controls */}
             {totalFloating > 0 && (
                 <>
                     <div className="text-[8px] text-amber-400 font-bold uppercase tracking-wider mr-2 mt-2 mb-0.5">
                         Pool
                     </div>
-                    <div className="bg-black/40 rounded-l-lg px-2 py-1 pointer-events-auto flex items-center gap-2">
-                        <span className="text-amber-400 font-bold text-sm">{totalFloating}</span>
-                        <div className="flex gap-1">
+                    <div className="bg-black/40 rounded-l-lg px-2 py-1 pointer-events-auto flex flex-col gap-1 items-end">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-amber-400 font-bold text-sm">Total: {totalFloating}</span>
+                            <button
+                                onClick={() => {
+                                    // Remove one mana from the first non-zero color
+                                    for (const c of DISPLAY_COLORS) {
+                                        if ((floatingMana[c] || 0) > 0) {
+                                            onRemoveMana(c);
+                                            break;
+                                        }
+                                    }
+                                }}
+                                className="p-1 bg-red-900/50 hover:bg-red-800 rounded text-red-400"
+                                title="Remove 1 mana (any)"
+                            >
+                                <Minus size={12} />
+                            </button>
+                        </div>
+
+                        <div className="flex flex-col gap-1 w-full">
                             {DISPLAY_COLORS.map(type => {
                                 const count = floatingMana[type] || 0;
                                 if (count === 0) return null;
                                 return (
-                                    <div key={type} className="flex items-center gap-0.5">
-                                        <img src={getIconPath(type)} className="w-4 h-4" alt={type} />
-                                        <span className="text-amber-400 text-xs font-bold">{count}</span>
+                                    <div key={type} className="flex items-center justify-end gap-2 px-1 rounded hover:bg-white/5 transition-colors">
+                                        <div className="flex items-center gap-1">
+                                            <img src={getIconPath(type)} className="w-4 h-4 ml-1" alt={type} />
+                                            <span className="text-amber-400 text-xs font-bold w-4 text-center">{count}</span>
+                                        </div>
+                                        <div className="flex gap-0.5">
+                                            <button
+                                                onClick={() => onAddMana(type)}
+                                                className="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white"
+                                                title={`Add ${type} mana`}
+                                            >
+                                                <Plus size={10} />
+                                            </button>
+                                            <button
+                                                onClick={() => onRemoveMana(type)}
+                                                className="w-5 h-5 flex items-center justify-center bg-red-900/50 hover:bg-red-800 rounded-full text-red-200"
+                                                title={`Remove ${type} mana`}
+                                            >
+                                                <Minus size={10} />
+                                            </button>
+                                        </div>
                                     </div>
                                 );
                             })}
                         </div>
-                        <button
-                            onClick={() => {
-                                // Remove one mana from the first non-zero color
-                                for (const c of DISPLAY_COLORS) {
-                                    if ((floatingMana[c] || 0) > 0) {
-                                        onRemoveMana(c);
-                                        break;
-                                    }
-                                }
-                            }}
-                            className="p-1 bg-red-900/50 hover:bg-red-800 rounded text-red-400"
-                            title="Remove 1 mana from pool"
-                        >
-                            <Minus size={12} />
-                        </button>
                     </div>
                 </>
             )}

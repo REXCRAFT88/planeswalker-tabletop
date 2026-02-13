@@ -194,7 +194,10 @@ export const calculateAvailableMana = (
 
         const customRule = manaRules?.[obj.cardData.scryfallId];
         const myTypeLine = (obj.cardData.typeLine || '').toLowerCase();
-        const isLand = myTypeLine.includes('land');
+        let isLand = myTypeLine.includes('land');
+        if (customRule && customRule.isLandOverride !== undefined) {
+            isLand = customRule.isLandOverride;
+        }
 
         let produced: ManaColor[] = [];
         let abilityType: 'tap' | 'activated' | 'multi' | 'complex' | 'passive' = 'tap';
@@ -368,12 +371,22 @@ export const calculateAvailableMana = (
                 }
             }
 
-            if (produced.length === 0) return;
+            // if (produced.length === 0) return;
 
             abilityType = customRule.trigger === 'tap' ? 'tap' :
                 customRule.trigger === 'activated' ? 'activated' :
                     customRule.trigger === 'passive' ? 'passive' : 'tap';
             sourcePriority = customRule.autoTap ? customRule.autoTapPriority : 999;
+
+            // Calculate Net Mana for Available/Potential counts (subtract activation cost)
+            let totalCost = 0;
+            if (customRule.genericActivationCost) totalCost += customRule.genericActivationCost;
+            if (customRule.activationCost) {
+                Object.values(customRule.activationCost).forEach(v => totalCost += v);
+            }
+            if (totalCost > 0) {
+                manaCountScored = Math.max(0, manaCountScored - totalCost);
+            }
 
         } else {
             // Default path
@@ -510,7 +523,9 @@ export const calculateAvailableMana = (
         allSources.push(source);
 
         // Categorize: Lands go to Available, others go to Potential
-        const isCreatureOrArtifact = !isLand;
+        // Correction: All Lands (tap, activated, etc) should ideally go to Available to show "Land Mana"
+        // But we need to be careful with activated abilities that cost mana.
+        // For now, if it's a Land, put it in Available.
 
         if (abilityType === 'passive') {
             // Passive sources add to available directly
@@ -524,8 +539,9 @@ export const calculateAvailableMana = (
             } else {
                 produced.forEach(c => { available[c] = (available[c] || 0) + 1; });
             }
-        } else if (isLand && !isCreatureOrArtifact && abilityType === 'tap') {
-            // Land tap sources = Available
+        } else if (isLand) {
+            // Land sources = Available (regardless of ability type being tap or activated for now, to support filter lands)
+            // Note: complex activated abilities might be tricky, but for Sungrass Prairie it is `activated`.
             for (let i = 0; i < untappedCount; i++) {
                 availableSources.push(source);
                 if (isFlexible) {
@@ -538,22 +554,39 @@ export const calculateAvailableMana = (
                             }
                         });
                     } else {
-                        available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                        // For filter lands or standard flexible lands
+                        produced.forEach(c => {
+                            if (c !== 'WUBRG' && c !== 'CMD') {
+                                available[c] = (available[c] || 0) + 1;
+                            }
+                        });
+                        // Standard WUBRG handling for wildcards
+                        if (produced.includes('WUBRG')) available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                        if (produced.includes('CMD') && commanderColors) available['CMD'] = (available['CMD'] || 0) + 1;
                     }
                 } else {
                     produced.forEach(c => { available[c] = (available[c] || 0) + 1; });
                 }
             }
         } else {
-            // Creatures, artifacts, activated abilities = Potential
+            // Creatures, artifacts = Potential
             for (let i = 0; i < untappedCount; i++) {
                 potentialSources.push(source);
                 if (isFlexible) {
-                    produced.forEach(c => {
-                        if (c === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(color => potential[color as ManaColor] = (potential[color as ManaColor] || 0) + 1);
-                        else if (c === 'CMD') (commanderColors || []).forEach(color => potential[color] = (potential[color] || 0) + 1);
-                        else potential[c] = (potential[c] || 0) + 1;
-                    });
+                    if (hasOROption) {
+                        // OR sources for creatures
+                        produced.forEach(c => {
+                            if (c !== 'WUBRG' && c !== 'CMD') {
+                                potential[c] = (potential[c] || 0) + 1;
+                            }
+                        });
+                    } else {
+                        produced.forEach(c => {
+                            if (c === 'WUBRG') ['W', 'U', 'B', 'R', 'G'].forEach(color => potential[color as ManaColor] = (potential[color as ManaColor] || 0) + 1);
+                            else if (c === 'CMD') (commanderColors || []).forEach(color => potential[color] = (potential[color] || 0) + 1);
+                            else potential[c] = (potential[c] || 0) + 1;
+                        });
+                    }
                 } else {
                     produced.forEach(c => { potential[c] = (potential[c] || 0) + 1; });
                 }
@@ -612,10 +645,21 @@ export const getBasicLandColor = (name: string): ManaColor | null => {
 export const getManaPriority = (card: CardData, produced: ManaColor[]): number => {
     const isBasic = isBasicLand(card.name);
     if (isBasic) return 0;
-    if (produced.length <= 1) return 1;
+
+    // Check if it's a land
+    const typeLine = (card.typeLine || '').toLowerCase();
+    const isLand = typeLine.includes('land');
+
+    if (isLand) {
+        if (produced.length <= 1) return 1; // Basic non-basic (e.g. specialized land)
+        return 2; // Dual/Tri lands
+    }
+
+    // Non-lands (rocks/dorks)
+    if (produced.length <= 1) return 3;
     const uniqueColors = new Set(produced);
-    if (uniqueColors.size > 1) return 3;
-    return 2;
+    if (uniqueColors.size > 1) return 4;
+    return 3;
 };
 
 // --- Auto-Tap Algorithm ---

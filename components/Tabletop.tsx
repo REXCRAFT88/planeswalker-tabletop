@@ -3016,20 +3016,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // Fixed mana production - add directly to pool
             setFloatingMana(prev => {
                 const next = { ...prev };
-                const uniqueColors = [...new Set(produced.filter(c => c !== 'WUBRG' && c !== 'CMD'))];
 
-                if (uniqueColors.length === 0) {
-                    // Edge case: only WUBRG/CMD without other colors, treat as flexible
-                    next['WUBRG'] = (next['WUBRG'] || 0) + manaCount;
-                } else {
-                    uniqueColors.forEach(color => {
-                        next[color] = (next[color] || 0) + manaCount;
-                    });
-                }
-                console.log(`Using mana ability: Added ${manaCount > 1 ? manaCount : ''}{${uniqueColors.join('}{')}} to mana pool (via ${source.cardName})`);
+                // Add all valid produced mana to the pool (1 per item in the array)
+                produced.forEach(c => {
+                    if (c !== 'WUBRG' && c !== 'CMD') {
+                        next[c] = (next[c] || 0) + 1;
+                    }
+                });
+
                 return next;
             });
-            addLog(`added ${manaCount > 1 ? manaCount : ''}{${[...new Set(produced.filter(c => c !== 'WUBRG' && c !== 'CMD'))].join('}{')}} to mana pool (via ${source.cardName})`);
+            const validProduced = produced.filter(c => c !== 'WUBRG' && c !== 'CMD');
+            if (validProduced.length > 0) {
+                addLog(`added {${validProduced.join('}{')}} to mana pool (via ${source.cardName})`);
+            }
 
             if (!skipRotation && source.abilityType === 'tap') {
                 const obj = boardObjects.find(o => o.id === source.objectId);
@@ -3096,15 +3096,37 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
 
                 // --- Tap-to-Mana Detection ---
-                if (!silent && isLocal) {
-                    const defaultRot = 0; // Simplified, could be layout[idx].rot
-                    const wasTapped = movingObj.rotation !== defaultRot || movingObj.tappedQuantity === movingObj.quantity;
-                    const isNowTapped = (updates.rotation !== undefined ? updates.rotation !== defaultRot : wasTapped) ||
-                        (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
+                // Check if this is a tap action (rotation or tappedQuantity change)
+                const myControllerIdx = playersList.findIndex(p => p.id === movingObj.controllerId);
+                const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
 
-                    if (!wasTapped && isNowTapped) {
-                        const source = manaInfo.sources.find(s => s.objectId === id) || manaInfo.potentialSources.find(s => s.objectId === id);
-                        if (source && source.abilityType === 'tap') {
+                const wasTapped = movingObj.rotation !== defaultRot || movingObj.tappedQuantity === movingObj.quantity;
+                const isNowTapped = (updates.rotation !== undefined ? updates.rotation !== defaultRot : wasTapped) ||
+                    (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
+
+                // Trigger mana production when tapping (regardless of isLocal)
+                if (!wasTapped && isNowTapped) {
+                    // Use manaInfoRef to get the latest calculated info
+                    const currentManaInfo = manaInfoRef.current || manaInfo;
+
+                    // Find the mana source for this object
+                    const source = currentManaInfo?.sources?.find((s: any) => s.objectId === id);
+
+                    if (source) {
+                        // Check if we should auto-produce
+                        // 1. It is a land (always auto-produce if tap ability)
+                        // 2. Or it is a rock/dork with 'tap' ability and NOT hideManaButton (unless user explicitly hid it, but usually we want to auto-prod if they tap it physically)
+                        // Actually, if they tap it physically, they probably want mana.
+                        // Exception: Attacking with a creature that produces mana? 
+                        // But usually you tap to attack in combat phase.
+                        // For now, let's auto-produce if it has a 'tap' ability.
+
+                        // We filter by abilityType === 'tap' to avoid triggering on "Pay {1}, Tap: ..." if we can't pay the cost automatically or it's complex.
+                        // But `source.abilityType` handles some of that logic.
+
+                        if (source.abilityType === 'tap') {
+                            console.log(`[Tap Detection] Triggering mana production for ${source.cardName}`);
+                            // Use setTimeout to ensure state update happens first so visual tap is clear
                             setTimeout(() => produceMana(source, true), 50);
                         }
                     }
@@ -3175,6 +3197,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });
 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
+
+        // Auto-tap lands for mana if needed
+        if (!card.isToken && !card.isLand) {
+            handleAutoTap(card);
+        }
     };
 
     // --- Mana Calculator Functions ---
@@ -3248,6 +3275,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Handle auto-tap when Tab is pressed
     const handleAutoTap = useCallback((card: CardData) => {
+        if (!autoTapEnabled) return; // Only run if setting is active
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
 
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
@@ -3339,7 +3367,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
         addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
         setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats]);
+    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats, autoTapEnabled]);
+
+    // Handle UI auto-tap for a specific color (from ManaDisplay)
+    const handleAutoTapColor = useCallback((color: string) => {
+        if (!autoTapEnabled) return; // Only run if setting is active
+        // Find an untapped source that produces this color and is in 'availableSources'
+        // We prefer sources that produce ONLY this color if possible, to save flexible sources
+        const source = manaInfo.availableSources.find(s =>
+            s.producedMana.includes(color as ManaColor) &&
+            !s.isFlexible // Prefer simple sources first
+        ) || manaInfo.availableSources.find(s =>
+            s.producedMana.includes(color as ManaColor)
+        );
+
+        if (source) {
+            produceMana(source, true); // true = isTapped (trigger tap animation/update)
+            // Note: produceMana handles the actual state update and logging
+        } else {
+            addLog(`No available ${color} source to auto-tap`);
+        }
+    }, [manaInfo.availableSources, produceMana, autoTapEnabled]);
 
     // Handle undo (Ctrl+Z)
     const handleUndo = useCallback(() => {
@@ -3478,6 +3526,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`cast commander ${card.name}`);
+        handleAutoTap(card);
     };
 
     const handleDamageReport = (damageReport: Record<string, number>, healingReport: Record<string, number>) => {
@@ -3534,6 +3583,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`played top card of library`);
+        handleAutoTap(card);
     };
 
     const playTopGraveyard = () => {
@@ -3555,6 +3605,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`returned ${card.name} from graveyard to battlefield`);
+        handleAutoTap(card);
     };
 
     const returnToHand = (id: string) => {
@@ -5021,6 +5072,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         floatingMana={floatingMana}
                         onAddMana={handleAddMana}
                         onRemoveMana={handleRemoveMana}
+                        onAutoTapColor={handleAutoTapColor}
                     />
                 )}
 

@@ -597,21 +597,38 @@ const ManaRuleEditor: React.FC<{
 
             {/* UI Settings */}
             <div>
-                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display Settings</h4>
-                <label className="flex items-center gap-3 cursor-pointer">
-                    <div
-                        onClick={() => updateRule('hideManaButton', !rule.hideManaButton)}
-                        className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${!rule.hideManaButton ? 'bg-green-600' : 'bg-gray-600'
-                            }`}
-                    >
-                        <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${!rule.hideManaButton ? 'translate-x-4' : 'translate-x-0.5'
-                            }`} />
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-sm text-gray-300">Show Mana Bubble on Hover</span>
-                        <p className="text-[10px] text-gray-500">Toggle the manual mana production button visibility</p>
-                    </div>
-                </label>
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Display & Logic Settings</h4>
+                <div className="flex flex-col gap-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                        <div
+                            onClick={() => updateRule('hideManaButton', !rule.hideManaButton)}
+                            className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${!rule.hideManaButton ? 'bg-green-600' : 'bg-gray-600'
+                                }`}
+                        >
+                            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${!rule.hideManaButton ? 'translate-x-4' : 'translate-x-0.5'
+                                }`} />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm text-gray-300">Show Mana Bubble on Hover</span>
+                            <p className="text-[10px] text-gray-500">Toggle the manual mana production button visibility</p>
+                        </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer">
+                        <div
+                            onClick={() => updateRule('isLandOverride', !rule.isLandOverride)}
+                            className={`w-10 h-6 rounded-full transition-colors relative cursor-pointer ${rule.isLandOverride ? 'bg-amber-600' : 'bg-gray-600'
+                                }`}
+                        >
+                            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${rule.isLandOverride ? 'translate-x-4' : 'translate-x-0.5'
+                                }`} />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm text-gray-300">Treat as Land</span>
+                            <p className="text-[10px] text-gray-500">Force this card to be categorized as a Land (Available Mana)</p>
+                        </div>
+                    </label>
+                </div>
             </div>
         </div>
 

@@ -35,6 +35,8 @@ export interface ManaRule {
   autoTapPriority: number; // decimal allowed
   // UI settings
   hideManaButton?: boolean;
+  // Categorization override
+  isLandOverride?: boolean;
 }
 
 export const EMPTY_MANA_RULE: ManaRule = {
@@ -50,6 +52,7 @@ export const EMPTY_MANA_RULE: ManaRule = {
   autoTap: true,
   autoTapPriority: 1,
   hideManaButton: true,
+  isLandOverride: false,
 };
 
 export enum CardState {
