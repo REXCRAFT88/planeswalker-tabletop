@@ -3209,8 +3209,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
 
-        // Show mana payment sidebar if it has a cost
-        if (!card.isToken && !card.isLand) {
+        // Show mana payment sidebar if it has a cost and calculator is ENABLED
+        if (showManaCalculator && !card.isToken && !card.isLand) {
             const cost = parseManaCost(card.manaCost || "");
             if (cost.cmc > 0) {
                 setAllocatedMana(EMPTY_POOL);
@@ -3302,6 +3302,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [turn, currentTurnPlayerId]);
 
     const handleAddMana = (type: keyof ManaPool) => {
+        if (!showManaCalculator) return;
         setFloatingMana(prev => ({
             ...prev,
             [type]: (prev[type] || 0) + 1
@@ -3317,7 +3318,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Handle auto-tap when Tab is pressed
     const handleAutoTap = useCallback((card: CardData, xValue: number = 0) => {
-        if (!autoTapEnabled) return; // Only run if setting is active
+        if (!showManaCalculator || !autoTapEnabled) return; // Only run if setting is active and tracker shown
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
 
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
@@ -3408,7 +3409,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Handle UI auto-tap for a specific color (from ManaDisplay)
     const handleAutoTapColor = useCallback((color: string) => {
-        if (!autoTapEnabled) return; // Only run if setting is active
+        if (!showManaCalculator || !autoTapEnabled) return; // Only run if setting is active and tracker shown
         // Find an untapped source that produces this color and is in 'availableSources'
         // We prefer sources that produce ONLY this color if possible, to save flexible sources
         const source = manaInfo.availableSources.find(s =>
@@ -3633,11 +3634,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`played top card of library`);
 
         const cost = parseManaCost(card.manaCost || "");
-        if (cost.hasX) {
+        if (cost.hasX && showManaCalculator) {
             setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
-        } else if (autoTapEnabled) {
+        } else if (autoTapEnabled && showManaCalculator) {
             handleAutoTap(card);
-        } else {
+        } else if (showManaCalculator) {
             setPendingPaymentCard(card);
         }
     };
@@ -3668,11 +3669,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`returned ${card.name} from graveyard to battlefield`);
 
         const cost = parseManaCost(card.manaCost || "");
-        if (cost.hasX) {
+        if (cost.hasX && showManaCalculator) {
             setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
-        } else if (autoTapEnabled) {
+        } else if (autoTapEnabled && showManaCalculator) {
             handleAutoTap(card);
-        } else {
+        } else if (showManaCalculator) {
             setPendingPaymentCard(card);
         }
     };
@@ -3894,7 +3895,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
-            case 'm': setShowManaCalculator(prev => !prev); break;
+            case 'm':
+                setShowManaCalculator(prev => {
+                    const next = !prev;
+                    if (!next) {
+                        setFloatingMana({ ...EMPTY_POOL });
+                        setPendingPaymentCard(null);
+                        setAllocatedMana({ ...EMPTY_POOL });
+                    }
+                    return next;
+                });
+                break;
             case 'tab':
                 break;
             case 'z': {
@@ -4399,6 +4410,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
                                 }}
                                 onDragChange={(dragging) => { isDraggingRef.current = dragging; }}
+                                showManaCalculator={showManaCalculator}
                             />
                         </div>
                     );
@@ -5150,11 +5162,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 )}
 
                 {/* New Mana Payment Sidebar */}
-                {pendingPaymentCard && (
+                {(pendingPaymentCard && showManaCalculator) && (
                     <ManaPaymentSidebar
                         card={pendingPaymentCard}
                         floatingMana={floatingMana}
                         allocatedMana={allocatedMana}
+                        availableMana={manaInfo.available}
                         onAllocate={(type) => {
                             if (floatingMana[type] > 0) {
                                 handleRemoveMana(type);

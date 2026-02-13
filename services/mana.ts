@@ -109,6 +109,7 @@ export interface ManaSource {
     isLand: boolean;
     hasOROption: boolean; // True if this source has an OR ability
     orColors?: ManaColor[][]; // Array of color options for OR abilities
+    autoTap?: boolean; // Whether this source is allowed to be auto-tapped
 }
 
 // NEW: Categorized mana info for the new display
@@ -429,9 +430,24 @@ export const calculateAvailableMana = (
             } else {
                 manaCountScored = produced.length;
             }
-            // Basic lands should usually be hidden icons unless they have weird abilities
-            if (isBas && !obj.cardData.isToken) {
-                hideManaButton = true;
+
+            // --- Utility Land Detection ---
+            // If it's a land and has non-mana tap abilities, we should show the button and avoid auto-tapping
+            if (isLand) {
+                const text = (obj.cardData.oracleText || '').toLowerCase();
+                // Regex for a tap ability that isn't just "Add {mana}"
+                // Matches patterns like "{T}: [actions]" where actions don't start with "Add"
+                // Or patterns like "Tap an untapped [thing] you control: Add..." (mana-related but complex)
+                const hasNonManaTap = text.match(/\{t\},?\s*(?![^:]*add)/i);
+
+                if (hasNonManaTap) {
+                    hideManaButton = false;
+                    sourcePriority = 999;
+                    // We'll set a flag on the source later
+                } else if (isBas && !obj.cardData.isToken) {
+                    // Basics stay hidden
+                    hideManaButton = true;
+                }
             }
         }
 
@@ -534,12 +550,17 @@ export const calculateAvailableMana = (
             hideManaButton,
             isLand,
             hasOROption,
-            orColors
+            orColors,
+            autoTap: customRule ? customRule.autoTap : (sourcePriority < 999)
         };
 
         allSources.push(source);
 
-        const untappedCount = Math.max(0, obj.quantity - obj.tappedQuantity);
+        const isNowTapped = (obj.quantity === 1)
+            ? (obj.rotation !== defaultRotation)
+            : (obj.tappedQuantity === obj.quantity);
+
+        const untappedCount = isNowTapped ? 0 : Math.max(0, obj.quantity - obj.tappedQuantity);
         if (untappedCount === 0 && abilityType !== 'passive') return;
 
         // Categorize: Lands go to Available, others go to Potential
@@ -800,7 +821,7 @@ export const autoTapForCost = (
     };
 
     const processTap = (reqColor: ManaColor): boolean => {
-        const sourceIdx = availableSources.findIndex(s => canSatisfy(s.producedMana, reqColor));
+        const sourceIdx = availableSources.findIndex(s => s.autoTap !== false && canSatisfy(s.producedMana, reqColor));
         if (sourceIdx === -1) return false;
 
         const source = availableSources[sourceIdx];
@@ -860,7 +881,7 @@ export const autoTapForCost = (
             continue;
         }
 
-        const sourceIdx = availableSources.findIndex(s => !tappedIds.includes(s.objectId));
+        const sourceIdx = availableSources.findIndex(s => s.autoTap !== false && !tappedIds.includes(s.objectId));
         if (sourceIdx === -1) return { tappedIds: [], success: false, floatingManaRemaining: initialFloatingMana, manaProducedFromTap: { ...EMPTY_POOL }, manaUsed: { ...EMPTY_POOL } };
 
         const source = availableSources[sourceIdx];
