@@ -3053,10 +3053,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!soundsEnabled) return;
         const sounds = {
             TURN: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Simple notify
-            PLAY: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Card flip
-            DRAW: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Draw/Flip
-            REQUEST: 'https://cdn.pixabay.com/audio/2022/01/21/audio_4eb6046e7f.mp3', // Chime
-            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b325ef01.mp3' // Pop
+            PLAY: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Card flip (using same as TURN)
+            DRAW: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Draw/Flip (using same as TURN)
+            REQUEST: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Chime (using same as TURN)
+            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3' // Pop (using same as TURN)
         };
         try {
             const audio = new Audio(sounds[type]);
