@@ -41,9 +41,10 @@ interface CardProps {
     manaSource?: ManaSource;
     onManaClick?: () => void;
     manaRule?: ManaRule;
+    onDragChange?: (isDragging: boolean) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -83,6 +84,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
             onBringToFront(object.id);
             setIsDragging(true);
+            if (onDragChange) onDragChange(true);
 
             dragStartRef.current = {
                 offsetX: worldX - object.x,
@@ -171,6 +173,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
 
             setIsDragging(true);
+            if (onDragChange) onDragChange(true);
             setHasMoved(true);
         }
 
@@ -216,6 +219,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         }
 
         setIsDragging(false);
+        if (onDragChange) onDragChange(false);
         setIsOverHand(false);
         setHasMoved(false);
         dragStartRef.current = null;

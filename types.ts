@@ -37,6 +37,8 @@ export interface ManaRule {
   hideManaButton?: boolean;
   // Categorization override
   isLandOverride?: boolean;
+  // Initialize as tapped
+  entersTapped?: boolean;
 }
 
 export const EMPTY_MANA_RULE: ManaRule = {
@@ -53,6 +55,7 @@ export const EMPTY_MANA_RULE: ManaRule = {
   autoTapPriority: 1,
   hideManaButton: true,
   isLandOverride: false,
+  entersTapped: false,
 };
 
 export enum CardState {

@@ -851,6 +851,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
+    const [choosingXForCard, setChoosingXForCard] = useState<CardData | null>(null);
+    const [pendingPaymentCard, setPendingPaymentCard] = useState<CardData | null>(null);
+    const isDraggingRef = useRef(false);
+
     const [showManaCalculator, setShowManaCalculator] = useState(true);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
@@ -3105,7 +3109,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
 
                 // Trigger mana production when tapping (regardless of isLocal)
-                if (!wasTapped && isNowTapped) {
+                // STOP MANA PRODUCTION DURING DRAG/MOVE
+                if (!wasTapped && isNowTapped && !isDraggingRef.current) {
                     // Use manaInfoRef to get the latest calculated info
                     const currentManaInfo = manaInfoRef.current || manaInfo;
 
@@ -3184,6 +3189,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
+
+        // Apply enters tapped rule
+        if (manaRulesState[card.scryfallId]?.entersTapped) {
+            newObject.rotation = (newObject.rotation + 90) % 360;
+        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
@@ -3200,9 +3210,43 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         // Auto-tap lands for mana if needed
         if (!card.isToken && !card.isLand) {
-            handleAutoTap(card);
+            const cost = parseManaCost(card.manaCost || "");
+            if (cost.hasX) {
+                setChoosingXForCard(card);
+            } else if (autoTapEnabled) {
+                handleAutoTap(card);
+            } else {
+                setPendingPaymentCard(card);
+            }
         }
     };
+
+    const payManaForCard = useCallback((card: CardData, xValue: number = 0): boolean => {
+        const cost = parseManaCost(card.manaCost || "{0}");
+        // Simplistic payment check - could be improved for specific colors
+        const requiredTotal = cost.cmc + xValue;
+        const availableInPool = Object.values(floatingMana).reduce((a, b) => a + b, 0);
+
+        if (availableInPool >= requiredTotal) {
+            // Subtract mana from pool (simplistic generic first)
+            setFloatingMana(prev => {
+                const next = { ...prev };
+                let remaining = requiredTotal;
+
+                // Try to subtract from colorless first, then others
+                const colors: (keyof ManaPool)[] = ['C', 'W', 'U', 'B', 'R', 'G'];
+                for (const color of colors) {
+                    if (remaining <= 0) break;
+                    const took = Math.min(next[color] || 0, remaining);
+                    next[color] = (next[color] || 0) - took;
+                    remaining -= took;
+                }
+                return next;
+            });
+            return true;
+        }
+        return false;
+    }, [floatingMana]);
 
     // --- Mana Calculator Functions ---
     const myDefaultRotation = useMemo(() => layout[mySeatIndex]?.rot || 0, [layout, mySeatIndex]);
@@ -3274,7 +3318,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     // Handle auto-tap when Tab is pressed
-    const handleAutoTap = useCallback((card: CardData) => {
+    const handleAutoTap = useCallback((card: CardData, xValue: number = 0) => {
         if (!autoTapEnabled) return; // Only run if setting is active
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
 
@@ -3283,14 +3327,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const cost = parseManaCost(card.manaCost);
         if (cost.symbols.length === 0) return;
 
-        // X spells: skip auto-tap (user needs to manually decide X value)
-        if (cost.hasX) {
-            addLog(`${card.name} has X in its cost — tap mana manually`);
-            return;
-        }
-
         // 1. Try to pay with Floating Mana first
-        const result = autoTapForCost(cost, manaInfo.sources, floatingMana, 0, manaInfo.cmdColors);
+        const result = autoTapForCost(cost, manaInfo.sources, floatingMana, xValue, manaInfo.cmdColors);
 
         if (!result.success) {
             addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
@@ -3474,6 +3512,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
+
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
@@ -3521,6 +3560,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
+
+        // Apply enters tapped rule
+        if (manaRulesState[card.scryfallId]?.entersTapped) {
+            newObject.rotation = (newObject.rotation + 90) % 360;
+        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
@@ -3578,12 +3622,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
+
+        // Apply enters tapped rule
+        if (manaRulesState[card.scryfallId]?.entersTapped) {
+            newObject.rotation = (newObject.rotation + 90) % 360;
+        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`played top card of library`);
-        handleAutoTap(card);
+
+        const cost = parseManaCost(card.manaCost || "");
+        if (cost.hasX) {
+            setChoosingXForCard(card);
+        } else if (autoTapEnabled) {
+            handleAutoTap(card);
+        } else {
+            setPendingPaymentCard(card);
+        }
     };
 
     const playTopGraveyard = () => {
@@ -3600,12 +3657,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
+
+        // Apply enters tapped rule
+        if (manaRulesState[card.scryfallId]?.entersTapped) {
+            newObject.rotation = (newObject.rotation + 90) % 360;
+        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`returned ${card.name} from graveyard to battlefield`);
-        handleAutoTap(card);
+
+        const cost = parseManaCost(card.manaCost || "");
+        if (cost.hasX) {
+            setChoosingXForCard(card);
+        } else if (autoTapEnabled) {
+            handleAutoTap(card);
+        } else {
+            setPendingPaymentCard(card);
+        }
     };
 
     const returnToHand = (id: string) => {
@@ -4329,6 +4399,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     const source = manaInfo.sources.find(s => s.objectId === obj.id) || manaInfo.potentialSources.find(s => s.objectId === obj.id);
                                     if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
                                 }}
+                                onDragChange={(dragging) => { isDraggingRef.current = dragging; }}
                             />
                         </div>
                     );
@@ -4612,10 +4683,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         onClick={() => {
                                             setFloatingMana(prev => {
                                                 const next = { ...prev };
-                                                next[color] = (next[color] || 0) + 1;
+                                                const amount = source.manaCount || 1;
+                                                next[color] = (next[color] || 0) + amount;
                                                 return next;
                                             });
-                                            addLog(`added {${color}} to mana pool`);
+                                            const amount = source.manaCount || 1;
+                                            addLog(`added ${amount > 1 ? `${amount}x {${color}}` : `{${color}}`} to mana pool`);
 
                                             if (source && source.abilityType === 'tap' && choosingColorForId) {
                                                 const obj = boardObjects.find(o => o.id === choosingColorForId);
@@ -4632,7 +4705,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                         const isTapped = obj.rotation !== defaultRotation;
                                                         if (!isTapped) {
                                                             const newRotation = (defaultRotation + 90) % 360;
-                                                            updateBoardObject(obj.id, { rotation: newRotation });
+                                                            updateBoardObject(obj.id, { rotation: newRotation }, true); // silent = true
                                                         }
                                                     }
                                                 }
@@ -4656,6 +4729,110 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         >
                             Cancel
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* X-Spell Modal */}
+            {choosingXForCard && (
+                <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8 w-full max-w-sm flex flex-col gap-6 animate-in zoom-in-95 duration-200">
+                        <div className="text-center">
+                            <h3 className="text-2xl font-bold text-white mb-2">Cast {choosingXForCard.name}</h3>
+                            <p className="text-gray-400 text-sm">Choose the value for X</p>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest text-center">Value of X</div>
+                            <div className="flex items-center justify-center gap-4">
+                                <button
+                                    onClick={() => {
+                                        const input = document.getElementById('x-value-input') as HTMLInputElement;
+                                        if (input) input.value = Math.max(0, parseInt(input.value || "0") - 1).toString();
+                                    }}
+                                    className="w-12 h-12 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white text-2xl font-bold transition-colors"
+                                >-</button>
+                                <input
+                                    id="x-value-input"
+                                    type="number"
+                                    defaultValue="0"
+                                    min="0"
+                                    className="w-24 bg-black/40 border border-gray-600 rounded-xl text-center text-3xl font-bold text-white py-3 focus:outline-none focus:border-blue-500"
+                                />
+                                <button
+                                    onClick={() => {
+                                        const input = document.getElementById('x-value-input') as HTMLInputElement;
+                                        if (input) input.value = (parseInt(input.value || "0") + 1).toString();
+                                    }}
+                                    className="w-12 h-12 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white text-2xl font-bold transition-colors"
+                                >+</button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-3">
+                            <button
+                                onClick={() => {
+                                    const xVal = parseInt((document.getElementById('x-value-input') as HTMLInputElement)?.value || "0");
+                                    if (autoTapEnabled) {
+                                        handleAutoTap(choosingXForCard, xVal);
+                                    } else {
+                                        // Manual pay logic for X spells
+                                        // (This would open the payment UI with the specific X value)
+                                        setPendingPaymentCard({ ...choosingXForCard, userXValue: xVal } as any);
+                                    }
+                                    setChoosingXForCard(null);
+                                }}
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95"
+                            >
+                                Confirm & {autoTapEnabled ? 'Auto-Pay' : 'Cast'}
+                            </button>
+                            <button
+                                onClick={() => setChoosingXForCard(null)}
+                                className="w-full py-2 text-gray-400 hover:text-white text-sm transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Manual Payment UI */}
+            {pendingPaymentCard && (
+                <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top duration-300">
+                    <div className="bg-gray-800/90 backdrop-blur-md rounded-2xl shadow-2xl border border-blue-500/30 p-4 flex items-center gap-6 border-b-4 border-b-blue-500">
+                        <div className="flex flex-col gap-0.5">
+                            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Unpaid Cost</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-white font-bold text-lg">{pendingPaymentCard.name}</span>
+                                <div className="text-amber-400 font-mono text-xl font-bold bg-black/30 px-2 py-0.5 rounded border border-amber-900/30">
+                                    {pendingPaymentCard.manaCost || "{0}"} {(pendingPaymentCard as any).userXValue !== undefined && `(X=${(pendingPaymentCard as any).userXValue})`}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => {
+                                    const success = payManaForCard(pendingPaymentCard, (pendingPaymentCard as any).userXValue || 0);
+                                    if (success) {
+                                        setPendingPaymentCard(null);
+                                        addLog(`paid mana for ${pendingPaymentCard.name}`);
+                                    } else {
+                                        alert("Insufficient mana in pool!");
+                                    }
+                                }}
+                                className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2 active:scale-95"
+                            >
+                                <Zap size={18} fill="currentColor" /> Pay Mana
+                            </button>
+                            <button
+                                onClick={() => setPendingPaymentCard(null)}
+                                className="px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold rounded-xl transition-all active:scale-95"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

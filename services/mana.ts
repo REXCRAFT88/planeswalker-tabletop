@@ -400,8 +400,21 @@ export const calculateAvailableMana = (
                 }
             }
 
+            const isBas = isBasicLand(obj.cardData.name);
+            if (isBas) {
+                hideManaButton = true;
+                isLand = true; // Basics are always lands
+            }
+
             if ((obj.cardData.name === 'Command Tower' || obj.cardData.name === 'Arcane Signet') && commanderColors) {
-                produced = produced.filter(c => commanderColors.includes(c));
+                // If it produces CMD, it's already "any color in commander's identity"
+                // If it produces WUBRG, we filter it to ONLY commander colors
+                if (produced.includes('WUBRG')) {
+                    produced = produced.filter(c => c !== 'WUBRG');
+                    produced.push(...commanderColors);
+                } else if (!produced.includes('CMD')) {
+                    produced = produced.filter(c => commanderColors.includes(c));
+                }
             }
 
             abilityType = (obj.cardData.manaAbilityType || 'tap') as typeof abilityType;
@@ -412,6 +425,10 @@ export const calculateAvailableMana = (
                 manaCountScored = 1;
             } else {
                 manaCountScored = produced.length;
+            }
+            // Basic lands should usually be hidden icons unless they have weird abilities
+            if (isBas && !obj.cardData.isToken) {
+                hideManaButton = true;
             }
         }
 

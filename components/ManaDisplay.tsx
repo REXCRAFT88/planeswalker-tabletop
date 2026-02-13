@@ -51,14 +51,21 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
     return (
         <div className="absolute right-0 top-1/4 flex flex-col items-end gap-1 p-2 pointer-events-none z-40">
             {/* Total Mana Header */}
-            <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1">
-                <img src="/mana/all.png" alt="Total" className="w-5 h-5 object-contain opacity-70" />
+            <div className="bg-black/60 backdrop-blur-sm rounded-l-xl px-3 py-1.5 pointer-events-auto flex items-center gap-2 mb-1 border-l-2 border-amber-500">
                 <div className="flex flex-col items-center">
-                    <span className={`font-bold text-xl leading-none drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] ${totalFloating > 0 ? 'text-amber-400' : 'text-white'}`}>
-                        {grandTotal}
+                    <span className="text-[10px] text-amber-500 font-bold uppercase">Pool</span>
+                    <span className="font-bold text-2xl leading-none text-amber-400 drop-shadow-md">
+                        {totalFloating}
+                    </span>
+                </div>
+                <div className="w-px h-8 bg-gray-700 mx-1" />
+                <div className="flex flex-col items-center">
+                    <span className="text-[10px] text-cyan-400 font-bold uppercase">Board</span>
+                    <span className="font-bold text-xl leading-none text-white drop-shadow-md">
+                        {manaInfo.availableTotal}
                     </span>
                     {manaInfo.potentialTotal > 0 && (
-                        <span className="text-[9px] text-cyan-400 font-mono leading-none">+{manaInfo.potentialTotal}</span>
+                        <span className="text-[9px] text-cyan-500 font-mono leading-none">+{manaInfo.potentialTotal}</span>
                     )}
                 </div>
             </div>
@@ -92,17 +99,27 @@ export const ManaDisplay: React.FC<ManaDisplayProps> = ({ manaInfo, floatingMana
                             <button onClick={() => onRemoveMana(type)} className="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-full text-white"><Minus size={10} /></button>
                         </div>
 
-                        <div className="flex flex-col items-center justify-center w-10 mr-1">
-                            {/* Total Count */}
-                            <span className={`font-bold text-xl drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] leading-none ${floating > 0 ? 'text-amber-400' : 'text-white'}`}>
-                                {total}
-                            </span>
-
-                            {/* Breakdown: Potential shown in cyan */}
-                            <div className="flex gap-1 text-[9px] font-mono leading-none">
-                                {floating > 0 && <span className="text-amber-400" title="Floating Mana">{floating}</span>}
-                                {potential > 0 && <span className="text-cyan-400" title="Potential">{`+${potential}`}</span>}
+                        <div className="flex flex-col items-center justify-center w-12 mr-1">
+                            {/* Counts */}
+                            <div className="flex items-center gap-1.5">
+                                {floating > 0 && (
+                                    <span className="font-bold text-lg text-amber-400 drop-shadow-md" title="Floating Pool">
+                                        {floating}
+                                    </span>
+                                )}
+                                {floating > 0 && available > 0 && <span className="text-gray-600 text-xs">|</span>}
+                                {available > 0 && (
+                                    <span className="font-bold text-lg text-white drop-shadow-md" title="Available Board">
+                                        {available}
+                                    </span>
+                                )}
+                                {floating === 0 && available === 0 && (
+                                    <span className="text-gray-700 font-bold">0</span>
+                                )}
                             </div>
+                            {potential > 0 && (
+                                <span className="text-[9px] text-cyan-500 font-mono leading-none" title="Potential Tap Sources">+{potential}</span>
+                            )}
                         </div>
 
                         <div
