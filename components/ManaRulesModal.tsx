@@ -499,21 +499,6 @@ const ManaRuleEditor: React.FC<{
                 </div>
             </div>
 
-            {/* Persistence */}
-            <div>
-                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Persistence</h4>
-                <RadioGroup
-                    options={[
-                        { value: 'permanent', label: '♾ Permanent', desc: 'Mana stays in pool indefinitely' },
-                        { value: 'untilNextTurn', label: '↻ Until Next Turn', desc: 'Mana clears at start of next turn' },
-                        { value: 'untilEndOfTurn', label: '⏱ Until End of Turn', desc: 'Mana clears at end of current turn' },
-                    ]}
-                    selected={rule.persistence}
-                    onChange={(v) => updateRule('persistence', v)}
-                    disabled={disabled}
-                />
-            </div>
-
             {/* Auto-Tap */}
             <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1">

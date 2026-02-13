@@ -209,6 +209,11 @@ const transformScryfallData = (data: any): CardData => {
         ...detectManaAbilityType(data),
         power: data.power,
         toughness: data.toughness,
+        relatedTokens: data.all_parts
+            ? data.all_parts
+                .filter((p: any) => p.component === 'token')
+                .map((p: any) => ({ id: p.id, name: p.name }))
+            : undefined
     };
 };
 

@@ -21,8 +21,6 @@ export interface ManaRule {
   includeNonBasics?: boolean; // for multiplied mode
   // Alternative rule set (opens modal for player to choose which rule to apply)
   alternativeRule?: ManaRule;
-  // Persistence of produced mana
-  persistence: 'permanent' | 'untilNextTurn' | 'untilEndOfTurn';
   // Global application (e.g. "All Creatures have...")
   appliesTo?: ('creatures' | 'lands')[];
   appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
@@ -49,7 +47,6 @@ export const EMPTY_MANA_RULE: ManaRule = {
   calcMultiplier: 1,
   prodMode: 'standard',
   produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  persistence: 'permanent',
   manaMultiplier: 1,
   autoTap: true,
   autoTapPriority: 1,
@@ -62,6 +59,8 @@ export enum CardState {
   UNTAPPED = 'UNTAPPED',
   TAPPED = 'TAPPED',
 }
+
+export type TurnStep = 'UNTAP' | 'UPKEEP' | 'DRAW' | 'MAIN1' | 'ATTACK' | 'MAIN2' | 'END';
 
 export interface CardData {
   id: string; // Unique instance ID
@@ -84,6 +83,7 @@ export interface CardData {
   isToken?: boolean;
   shortcutKey?: string;
   userXValue?: number; // Runtime state for mana payment
+  relatedTokens?: { id: string, name: string }[];
 }
 
 export interface BoardObject {
@@ -92,6 +92,8 @@ export interface BoardObject {
   cardData: CardData;
   x: number;
   y: number;
+  relX?: number; // Position relative to mat center
+  relY?: number;
   z: number;
   rotation: number; // in degrees, usually 0 or 90
   isFaceDown: boolean; // Morph/Manifest state (Sleeve visible)
@@ -102,6 +104,7 @@ export interface BoardObject {
   // Stacking properties
   quantity: number;
   tappedQuantity: number;
+  isCopy?: boolean;
 }
 
 export interface Player {

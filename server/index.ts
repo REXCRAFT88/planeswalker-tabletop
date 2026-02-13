@@ -286,6 +286,8 @@ io.on('connection', (socket) => {
                 rooms[room].splice(index, 1);
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
                 io.to(room).emit('notification', { message: `Player has been kicked.` });
+                // Tell all clients to remove this player's board objects
+                io.to(room).emit('game_action', { action: 'REMOVE_PLAYER_OBJECTS', data: { targetId }, playerId: socket.id });
             }
         }
     });
@@ -448,7 +450,7 @@ io.on('connection', (socket) => {
                     }
                 }
             }
-        }, 5 * 60 * 1000); // 5 minutes
+        }, 20 * 60 * 1000); // 20 minutes
 
         // Find player and mark as disconnected
         for (const room in rooms) {
@@ -466,7 +468,7 @@ io.on('connection', (socket) => {
                 }
 
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
-                io.to(room).emit('notification', { message: `${player.name} disconnected. They have 5 minutes to reconnect.` });
+                io.to(room).emit('notification', { message: `${player.name} disconnected. They have 20 minutes to reconnect.` });
 
                 if (rooms[room].every(p => p.disconnected)) {
                     delete rooms[room];

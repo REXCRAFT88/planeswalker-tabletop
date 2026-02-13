@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
 import { ManaSource } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Trash2, Hand } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -22,7 +22,10 @@ interface CardProps {
     onReturnToHand: (id: string) => void;
     onUnstack: (id: string) => void;
     onRemoveOne: (id: string) => void;
+    onDelete: (id: string) => void;
     onLog: (msg: string) => void;
+    onCopy?: (id: string) => void;
+    onRequestControl?: (id: string, cardName: string, controllerId: string) => void;
     scale?: number;
     viewScale?: number;
     viewRotation?: number;
@@ -43,9 +46,10 @@ interface CardProps {
     manaRule?: ManaRule;
     onDragChange?: (isDragging: boolean) => void;
     showManaCalculator?: boolean;
+    sleeveImage?: string;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange, showManaCalculator = true }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onDelete, onLog, onCopy, onRequestControl, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange, showManaCalculator = true, sleeveImage }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -269,7 +273,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         if (newTapped !== object.tappedQuantity) {
             onUpdate(object.id, { tappedQuantity: newTapped });
             const action = delta > 0 ? 'tapped' : 'untapped';
-            onLog(`${action} 1 ${object.cardData.name} (Total Tapped: ${newTapped}/${object.quantity})`);
+            onLog(`${action} 1 ${object.cardData.name} (Untapped: ${untappedCount + (delta > 0 ? -1 : 1)}/${object.quantity})`);
         }
     }
 
@@ -364,7 +368,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                     if (!isControlledByMe) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    onReturnToHand(object.id); // Triggers removal logic in Tabletop
+                    onDelete(object.id);
                 }}
                 title="Drag to move. Double click to change color. Right click to remove."
             >
@@ -514,16 +518,20 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             )}
 
             <div className="relative w-full h-full group perspective-1000">
-                <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border ${object.cardData.isToken ? 'border-yellow-400' : 'border-black/50'}`}>
+                <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border-2 ${object.isCopy ? 'border-white px-[1px] py-[1px]' : (object.cardData.isToken ? 'border-yellow-400' : 'border-black/50')}`}>
                     {object.isFaceDown ? (
                         // Render Sleeve
                         <div
-                            className="w-full h-full flex items-center justify-center border-4 border-white/10"
+                            className="w-full h-full flex items-center justify-center border-4 border-white/10 overflow-hidden"
                             style={{ backgroundColor: sleeveColor }}
                         >
-                            <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
-                                <div className="w-12 h-12 rounded-full border-2 border-white/20" />
-                            </div>
+                            {sleeveImage ? (
+                                <img src={sleeveImage} className="w-full h-full object-cover" alt="Sleeve" />
+                            ) : (
+                                <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                                    <div className="w-12 h-12 rounded-full border-2 border-white/20" />
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <img
@@ -572,10 +580,10 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         {isStack && isControlledByMe ? (
                             <div className="flex flex-col gap-1 items-center interactive-ui mb-1">
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-300 font-bold uppercase">Tap</span>
+                                    <span className="text-[10px] text-gray-300 font-bold uppercase">Untapped</span>
                                     <div className="flex items-center gap-1 bg-gray-800/80 rounded-full px-2 py-0.5">
                                         <button onClick={(e) => { e.stopPropagation(); adjustStackTap(1); }} className="text-gray-300 hover:text-white"><RotateCw size={14} /></button>
-                                        <span className="text-xs font-mono min-w-[2rem] text-center">{object.tappedQuantity}/{object.quantity}</span>
+                                        <span className="text-xs font-mono min-w-[2rem] text-center">{untappedCount}/{object.quantity}</span>
                                         <button onClick={(e) => { e.stopPropagation(); adjustStackTap(-1); }} className="text-gray-300 hover:text-white"><RefreshCcw size={14} /></button>
                                     </div>
                                 </div>
@@ -604,15 +612,30 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                             </div>
                         ) : null}
 
-                        <div className="flex gap-1 interactive-ui">
+                        <div className="flex gap-1 interactive-ui flex-wrap justify-center">
                             {isControlledByMe && (
                                 <>
-                                    <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
-                                        <Reply size={12} />
-                                    </button>
-                                    <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
-                                        <EyeOff size={12} />
-                                    </button>
+                                    {/* Tokens and Copies only get Delete button, no return to hand */}
+                                    {(object.cardData.isToken || object.isCopy) ? (
+                                        <button onClick={() => onDelete(object.id)} className="p-1.5 bg-red-900/80 text-white rounded-full hover:bg-red-600" title="Delete">
+                                            <Trash2 size={12} />
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
+                                                <Reply size={12} />
+                                            </button>
+                                            <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
+                                                <EyeOff size={12} />
+                                            </button>
+                                        </>
+                                    )}
+                                    {/* Face down option for tokens/copies too */}
+                                    {(object.cardData.isToken || object.isCopy) && (
+                                        <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
+                                            <EyeOff size={12} />
+                                        </button>
+                                    )}
                                 </>
                             )}
                             <button
@@ -626,6 +649,26 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                             >
                                 <Maximize2 size={12} />
                             </button>
+                            {/* Copy button - available for all cards */}
+                            {onCopy && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onCopy(object.id); }}
+                                    className="p-1.5 bg-cyan-700 text-white rounded-full hover:bg-cyan-500"
+                                    title="Create Copy"
+                                >
+                                    <Copy size={12} />
+                                </button>
+                            )}
+                            {/* Steal/Request Control button - only for opponent's cards */}
+                            {!isControlledByMe && onRequestControl && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onRequestControl(object.id, object.cardData.name, object.controllerId); }}
+                                    className="p-1.5 bg-amber-700 text-white rounded-full hover:bg-amber-500"
+                                    title="Request Control"
+                                >
+                                    <Hand size={12} />
+                                </button>
+                            )}
                         </div>
 
                         {object.cardData.backImageUrl && isControlledByMe && (
@@ -648,7 +691,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                 {/* Stack Count Badge - Moved outside overflow-hidden */}
                 {isStack && (
                     <div className="absolute -top-3 -right-3 bg-red-600 text-white font-mono rounded-lg px-2 h-6 border-2 border-gray-900 shadow-xl z-20 flex items-center justify-center text-xs font-bold pointer-events-none whitespace-nowrap">
-                        {object.tappedQuantity} / {object.quantity}
+                        {untappedCount} / {object.quantity}
                     </div>
                 )}
             </div>
