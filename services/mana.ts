@@ -509,11 +509,12 @@ export const calculateAvailableMana = (
         if (produced.length === 0) return;
 
         // Apply multipliers
-        if (multipliers.length > 0 && manaCountScored > 0 && !isFlexibleMana(produced)) {
+        if (multipliers.length > 0 && manaCountScored > 0) {
             const isBas = isBasicLand(obj.cardData.name);
             multipliers.forEach(m => {
                 let applies = false;
                 if (m.appliesTo?.includes('basics' as any) && isBas) applies = true;
+                else if (m.appliesTo?.includes('nonbasics' as any) && isLand && !isBas) applies = true;
                 else if (m.appliesTo?.includes('lands') && isLand) applies = true;
                 else if (m.appliesTo?.includes('creatures') && myTypeLine.includes('creature')) applies = true;
 
@@ -858,7 +859,9 @@ export const autoTapForCost = (
             currentFloating[reqColor]--;
             manaUsed[reqColor]++;
         } else {
-            manaProducedFromTap[reqColor] += 1;
+            const count = source.manaCount || 1;
+            manaProducedFromTap[reqColor] += count;
+            currentFloating[reqColor] += (count - 1); // We use 1 immediately for the requirement
             manaUsed[reqColor]++;
         }
         return true;
@@ -916,7 +919,9 @@ export const autoTapForCost = (
             manaUsed[color]++;
         } else {
             const color = source.producedMana[0] as ManaColor;
-            manaProducedFromTap[color] += 1;
+            const count = source.manaCount || 1;
+            manaProducedFromTap[color] += count;
+            currentFloating[color] += (count - 1); // We use 1 immediately for the generic requirement
             manaUsed[color]++;
         }
     }

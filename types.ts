@@ -22,7 +22,7 @@ export interface ManaRule {
   // Alternative rule set (opens modal for player to choose which rule to apply)
   alternativeRule?: ManaRule;
   // Global application (e.g. "All Creatures have...")
-  appliesTo?: ('creatures' | 'lands')[];
+  appliesTo?: ('creatures' | 'lands' | 'basics' | 'nonbasics')[];
   appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
 
   // Global Multipliers (e.g. Virtue of Strength)

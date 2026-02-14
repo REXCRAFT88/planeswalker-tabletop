@@ -3277,7 +3277,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                         // Trigger mana production only if it doesn't have a button (like Lands)
                         // This prevents double triggering and respects user's wish to tap for other reasons (e.g. attacking)
-                        if (source.abilityType === 'tap' && source.hideManaButton) {
+                        if (source.abilityType === 'tap' && (source.hideManaButton || source.isLand)) {
                             console.log(`[Tap Detection] Triggering mana production for ${source.cardName}`);
                             // Use setTimeout to ensure state update happens first so visual tap is clear
                             setTimeout(() => produceMana(source, true), 50);
@@ -3350,6 +3350,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         // Track last played card for auto-tap
         setLastPlayedCard(card);
+
+        if (autoTapEnabled && showManaCalculator && !card.isLand) {
+            handleAutoTap(card);
+        }
 
         // Record undo
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });

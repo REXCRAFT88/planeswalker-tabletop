@@ -448,21 +448,38 @@ const ManaRuleEditor: React.FC<{
                         <span className="text-sm text-gray-300">Applies to All Creatures</span>
                     </label>
 
-                    <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('lands') ? 'border-amber-500 bg-amber-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
+                    <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('basics') ? 'border-amber-500 bg-amber-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
                         <input
                             type="checkbox"
-                            checked={rule.appliesTo?.includes('lands') || false}
+                            checked={rule.appliesTo?.includes('basics') || false}
                             onChange={(e) => {
                                 const current = rule.appliesTo || [];
                                 const next = e.target.checked
-                                    ? [...current, 'lands']
-                                    : current.filter(t => t !== 'lands');
+                                    ? [...current, 'basics']
+                                    : current.filter(t => t !== 'basics');
                                 onChange({ ...rule, appliesTo: next as any });
                             }}
                             className="bg-gray-900 border-gray-600 rounded text-amber-500 focus:ring-amber-900"
                         />
                         <MapIcon size={16} className="text-amber-400" />
-                        <span className="text-sm text-gray-300">Applies to All Lands</span>
+                        <span className="text-sm text-gray-300">Applies to Basic Lands</span>
+                    </label>
+
+                    <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('nonbasics') ? 'border-orange-500 bg-orange-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
+                        <input
+                            type="checkbox"
+                            checked={rule.appliesTo?.includes('nonbasics') || false}
+                            onChange={(e) => {
+                                const current = rule.appliesTo || [];
+                                const next = e.target.checked
+                                    ? [...current, 'nonbasics']
+                                    : current.filter(t => t !== 'nonbasics');
+                                onChange({ ...rule, appliesTo: next as any });
+                            }}
+                            className="bg-gray-900 border-gray-600 rounded text-orange-500 focus:ring-orange-900"
+                        />
+                        <MapIcon size={16} className="text-orange-400" />
+                        <span className="text-sm text-gray-300">Applies to Non-Basic Lands</span>
                     </label>
 
                     {(rule.appliesTo && rule.appliesTo.length > 0) && (
