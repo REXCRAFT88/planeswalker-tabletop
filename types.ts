@@ -83,7 +83,6 @@ export interface CardData {
   isToken?: boolean;
   shortcutKey?: string;
   userXValue?: number; // Runtime state for mana payment
-  relatedTokens?: { id: string, name: string }[];
 }
 
 export interface BoardObject {
@@ -92,8 +91,6 @@ export interface BoardObject {
   cardData: CardData;
   x: number;
   y: number;
-  relX?: number; // Position relative to mat center
-  relY?: number;
   z: number;
   rotation: number; // in degrees, usually 0 or 90
   isFaceDown: boolean; // Morph/Manifest state (Sleeve visible)
@@ -104,7 +101,6 @@ export interface BoardObject {
   // Stacking properties
   quantity: number;
   tappedQuantity: number;
-  isCopy?: boolean;
 }
 
 export interface Player {

@@ -366,14 +366,13 @@ interface PlaymatProps {
     onMobileZoneAction: (zone: string) => void;
     onDoubleClickZone: (zone: 'LIBRARY' | 'GRAVEYARD' | 'EXILE') => void;
     disconnected?: boolean;
-    matImage?: string;
 }
 
 const Playmat: React.FC<PlaymatProps> = ({
     x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
     topGraveyardCard, isShuffling, isControlled, commanders,
     onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander, onViewHand,
-    isMobile, onMobileZoneAction, onDoubleClickZone, disconnected, matImage
+    isMobile, onMobileZoneAction, onDoubleClickZone, disconnected
 }) => {
 
     const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -461,19 +460,14 @@ const Playmat: React.FC<PlaymatProps> = ({
 
     return (
         <div
-            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 ${disconnected ? 'opacity-50' : ''} overflow-hidden`}
+            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 ${disconnected ? 'opacity-50' : ''}`}
             style={{
                 left: x, top: y, width, height,
                 borderColor: sleeveColor,
                 boxShadow: `0 0 15px ${sleeveColor}20`,
-                transform: `rotate(${rotation}deg)`,
-                backgroundImage: matImage ? `url(${matImage})` : 'none',
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
+                transform: `rotate(${rotation}deg)`
             }}
         >
-            {/* Dark Overlay for Mat Image visibility */}
-            {matImage && <div className="absolute inset-0 bg-black/30 pointer-events-none" />}
             <div
                 className="absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
                 style={{ color: sleeveColor, filter: 'brightness(1.8)' }}
@@ -594,14 +588,7 @@ const Playmat: React.FC<PlaymatProps> = ({
                         key={cmd.id}
                         className="relative bg-gray-800 border border-amber-500/30 cursor-pointer hover:scale-105 transition-transform"
                         style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
-                        onClick={(e) => {
-                            if (isMobile) {
-                                handleCommanderTouch(cmd, e as any);
-                            } else {
-                                if (e.shiftKey || !isControlled) onInspectCommander(cmd);
-                                else onPlayCommander(cmd);
-                            }
-                        }}
+                        onClick={(e) => isMobile ? handleCommanderTouch(cmd, e as any) : (isControlled ? onPlayCommander(cmd) : onInspectCommander(cmd))}
                         title={isControlled ? "Click to Cast Commander" : "Click to Inspect"}
                     >
                         <img src={cmd.imageUrl} className="w-full h-full object-cover rounded opacity-90" alt={cmd.name} />
@@ -939,15 +926,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [showStatsModal, setShowStatsModal] = useState(false);
     const [revealedCards, setRevealedCards] = useState<CardData[]>([]);
     const [showPlayerManager, setShowPlayerManager] = useState(false);
-    const [showCustomizationModal, setShowCustomizationModal] = useState(false);
-
-    const [matImage, setMatImage] = useState(() => localStorage.getItem('planeswalker_mat_image') || '');
-    const [sleeveImage, setSleeveImage] = useState(() => localStorage.getItem('planeswalker_sleeve_image') || '');
-
-    useEffect(() => {
-        localStorage.setItem('planeswalker_mat_image', matImage);
-        localStorage.setItem('planeswalker_sleeve_image', sleeveImage);
-    }, [matImage, sleeveImage]);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [showDamageReportModal, setShowDamageReportModal] = useState(false);
     const [mobileZoneMenu, setMobileZoneMenu] = useState<string | null>(null);
@@ -968,7 +946,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
     const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
     const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
-    const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
 
     // Sync state with prop initially or if prop changes (but allow internal override)
     useEffect(() => {
@@ -993,16 +970,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         localStorage.setItem('planeswalker_search_card_size', String(searchCardSize));
     }, [searchCardSize]);
-
-    const handleToggleSelection = useCallback((id: string) => {
-        setSelectedObjectIds(prev =>
-            prev.includes(id) ? prev.filter(oid => oid !== id) : [...prev, id]
-        );
-    }, []);
-
-    const clearSelection = useCallback(() => {
-        setSelectedObjectIds([]);
-    }, []);
 
     // Local Table Host Logic
     useEffect(() => {
@@ -3255,20 +3222,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             let nextState = prev;
             const changes: { id: string, updates: Partial<BoardObject> }[] = [];
 
-            if (movingObj.type === 'CARD' && (updates.x !== undefined || updates.y !== undefined)) {
-                const targetX = updates.x ?? movingObj.x;
-                const targetY = updates.y ?? movingObj.y;
-
-                const controllerIdx = playersList.findIndex(p => p.id === movingObj.controllerId);
-                const matPos = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx] : null;
-
-                if (matPos) {
-                    updates.relX = targetX - matPos.x;
-                    updates.relY = targetY - matPos.y;
-                }
-
-                const dx = targetX - movingObj.x;
-                const dy = targetY - movingObj.y;
+            if (movingObj.type === 'CARD' && updates.x !== undefined && updates.y !== undefined) {
+                const dx = updates.x - movingObj.x;
+                const dy = updates.y - movingObj.y;
                 if (dx !== 0 || dy !== 0) {
                     nextState = prev.map(obj => {
                         if (obj.id === id) {
@@ -3338,16 +3294,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             return nextState;
         });
-    };
-
-    const deleteBoardObject = (id: string, silent: boolean = false) => {
-        const obj = boardObjects.find(o => o.id === id);
-        if (!obj) return;
-
-        setBoardObjects(prev => prev.filter(o => o.id !== id));
-        if (!silent) addLog(`deleted ${obj.cardData.name} from board`);
-
-        emitAction('DELETE_OBJECT', { id });
     };
 
     const updateCommanderDamage = (commanderId: string, victimId: string, delta: number) => {
@@ -4267,7 +4213,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
     };
 
-    type TrayAction = 'HAND' | 'HAND_REVEAL' | 'TOP' | 'BOTTOM' | 'GRAVEYARD' | 'EXILE' | 'SHUFFLE' | 'REVEAL';
+    type TrayAction = 'HAND' | 'HAND_REVEAL' | 'TOP' | 'BOTTOM' | 'GRAVEYARD' | 'EXILE' | 'SHUFFLE';
 
     const handleTrayAction = (action: TrayAction) => {
         const trayCards = searchModal.tray;
@@ -4286,12 +4232,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             newHand = [...newHand, ...trayCards];
             addLog(`revealed and added to hand: ${trayCards.map(c => c.name).join(', ')}`);
             emitAction('REVEAL_CARDS', { cards: trayCards });
-        }
-        else if (action === 'REVEAL') {
-            // Reveal cards without moving them anywhere
-            emitAction('REVEAL_CARDS', { cards: trayCards });
-            addLog(`revealed ${trayCards.length} cards: ${trayCards.map(c => c.name).join(', ')}`);
-            // Don't modify any zones - cards stay where they are
         }
         else if (action === 'TOP') { newLib = [...trayCards, ...newLib]; addLog(`put ${trayCards.length} cards from tray on top of library`); }
         else if (action === 'BOTTOM') { newLib = [...newLib, ...trayCards]; addLog(`put ${trayCards.length} cards from tray on bottom of library`); }
@@ -4576,8 +4516,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 playerName={p.name} rotation={rot}
                                 zones={{ library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET }}
                                 counts={counts}
-                                sleeveColor={isMe ? sleeveColor : p.color}
-                                matImage={isMe ? matImage : undefined}
+                                sleeveColor={p.color}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 isControlled={isMe}
@@ -4638,23 +4577,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
                         ? mySeatIndex
                         : playersList.findIndex(p => p.id === obj.controllerId);
-
-                    // Apply relative positioning if available
-                    const visualObj = { ...obj };
-                    if (obj.relX !== undefined && obj.relY !== undefined && controllerIdx !== -1 && layout[controllerIdx]) {
-                        visualObj.x = layout[controllerIdx].x + obj.relX;
-                        visualObj.y = layout[controllerIdx].y + obj.relY;
-                    }
-
                     const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
                     const controller = playersList.find(p => p.id === obj.controllerId);
                     const objSleeveColor = controller ? controller.color : sleeveColor;
-                    const isSelected = selectedObjectIds.includes(obj.id) || mobileActionCardId === obj.id;
+                    const isSelected = mobileActionCardId === obj.id;
 
                     return (
                         <div key={obj.id} className="pointer-events-auto">
                             <Card
-                                object={visualObj}
+                                object={obj}
                                 sleeveColor={objSleeveColor}
                                 isControlledByMe={isControlled}
                                 players={playersList}
@@ -4665,9 +4596,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 onReturnToHand={returnToHand}
                                 onUnstack={unstackCards}
                                 onRemoveOne={removeCardFromStack}
-                                onDelete={deleteBoardObject}
                                 onLog={addLog}
-                                sleeveImage={isControlled ? sleeveImage : undefined}
                                 viewScale={viewState.scale}
                                 viewRotation={rotation}
                                 viewX={viewState.x}
@@ -6130,7 +6059,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div className="flex gap-2 flex-wrap justify-center">
                                         <button onClick={() => handleTrayAction('HAND')} disabled={searchModal.tray.length === 0} className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Hand size={12} /> Hand</button>
                                         <button onClick={() => handleTrayAction('HAND_REVEAL')} disabled={searchModal.tray.length === 0} className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Eye size={12} /> Hand & Reveal</button>
-                                        <button onClick={() => handleTrayAction('REVEAL')} disabled={searchModal.tray.length === 0} className="px-3 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Eye size={12} /> Reveal</button>
                                         <button onClick={() => handleTrayAction('GRAVEYARD')} disabled={searchModal.tray.length === 0} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><Archive size={12} /> Grave</button>
                                         {!isMobile && <button onClick={() => handleTrayAction('EXILE')} disabled={searchModal.tray.length === 0} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-white font-bold flex items-center gap-1"><X size={12} /> Exile</button>}
                                         <div className="w-px h-6 bg-gray-700 mx-2" />
@@ -6233,8 +6161,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {showSettingsModal && (
-                <div className="fixed inset-0 z-[12000] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300">
-                    <div className="bg-gray-900/90 border border-white/10 rounded-2xl p-6 shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                 <Settings className="text-blue-400" /> Settings
@@ -6297,84 +6225,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </div>
                                 <ChevronRight className="text-gray-500 group-hover:text-white" size={20} />
                             </button>
-
-                            <button
-                                onClick={() => { setShowCustomizationModal(true); setShowSettingsModal(false); }}
-                                className="w-full bg-gradient-to-r from-blue-900/40 to-purple-900/40 hover:from-blue-900/60 hover:to-purple-900/60 p-4 rounded-lg border border-white/10 flex justify-between items-center transition-all group shadow-lg"
-                            >
-                                <div className="flex flex-col items-start">
-                                    <h4 className="font-bold text-white flex items-center gap-2"><Palette size={16} className="text-purple-400" /> Custom Appearance</h4>
-                                    <p className="text-xs text-gray-400 group-hover:text-gray-300">Set custom playmat and sleeve images</p>
-                                </div>
-                                <ChevronRight className="text-gray-500 group-hover:text-white" size={20} />
-                            </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Customization Modal */}
-            {showCustomizationModal && (
-                <div className="fixed inset-0 z-[12000] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-gray-900/95 border border-white/20 rounded-2xl p-6 shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">Customization</h3>
-                            <button onClick={() => setShowCustomizationModal(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} className="text-gray-400" /></button>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div>
-                                <label className="block text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Playmat Image URL</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={matImage}
-                                        onChange={(e) => setMatImage(e.target.value)}
-                                        placeholder="https://example.com/mat.jpg"
-                                        className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-white focus:border-blue-500 outline-none transition-colors"
-                                    />
-                                    {matImage && <button onClick={() => setMatImage('')} className="p-2 text-red-400 hover:bg-red-900/20 rounded-lg"><Trash2 size={20} /></button>}
-                                </div>
-                                <p className="text-[10px] text-gray-500 mt-1 italic">Accepts direct image links.</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Card Sleeve Image URL</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={sleeveImage}
-                                        onChange={(e) => setSleeveImage(e.target.value)}
-                                        placeholder="https://example.com/sleeve.jpg"
-                                        className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition-colors"
-                                    />
-                                    {sleeveImage && <button onClick={() => setSleeveImage('')} className="p-2 text-red-400 hover:bg-red-900/20 rounded-lg"><Trash2 size={20} /></button>}
-                                </div>
-                                <p className="text-[10px] text-gray-500 mt-1 italic">Displays on library and face-down cards.</p>
-                            </div>
-
-                            {/* Preview */}
-                            <div className="pt-4 border-t border-white/10">
-                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-4">Preview</h4>
-                                <div className="flex gap-8 items-center justify-center">
-                                    <div className="w-24 h-16 rounded-lg border border-white/20 overflow-hidden bg-gray-800 shadow-inner relative">
-                                        {matImage ? <img src={matImage} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[8px] text-gray-600">No Mat</div>}
-                                    </div>
-                                    <div className="w-12 h-16 rounded-md border border-white/20 overflow-hidden bg-gray-800 shadow-lg rotate-12">
-                                        {sleeveImage ? <img src={sleeveImage} className="w-full h-full object-cover shadow-2xl" /> : <div className="w-full h-full flex items-center justify-center text-[8px] text-gray-600">No Sleeve</div>}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={() => setShowCustomizationModal(false)}
-                            className="w-full mt-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95"
-                        >
-                            Apply Changes
-                        </button>
-                    </div>
-                </div>
+            {isMobile && isFullScreen && window.innerWidth > window.innerHeight && (
+                <button
+                    onClick={toggleFullScreen}
+                    className="fixed bottom-4 right-4 z-[10000] p-3 bg-red-600 text-white rounded-full shadow-lg animate-in fade-in"
+                    title="Exit Full Screen"
+                >
+                    <Minimize size={24} />
+                </button>
             )}
         </div>
     );
