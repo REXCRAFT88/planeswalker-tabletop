@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
 import { ManaSource } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Trash2, Hand } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Trash2 } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -24,8 +24,6 @@ interface CardProps {
     onRemoveOne: (id: string) => void;
     onDelete: (id: string) => void;
     onLog: (msg: string) => void;
-    onCopy?: (id: string) => void;
-    onRequestControl?: (id: string, cardName: string, controllerId: string) => void;
     scale?: number;
     viewScale?: number;
     viewRotation?: number;
@@ -49,7 +47,7 @@ interface CardProps {
     sleeveImage?: string;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onDelete, onLog, onCopy, onRequestControl, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange, showManaCalculator = true, sleeveImage }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onDelete, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange, showManaCalculator = true, sleeveImage }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -612,7 +610,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                             </div>
                         ) : null}
 
-                        <div className="flex gap-1 interactive-ui flex-wrap justify-center">
+                        <div className="flex gap-1 interactive-ui">
                             {isControlledByMe && (
                                 <>
                                     {/* Tokens and Copies only get Delete button, no return to hand */}
@@ -649,26 +647,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                             >
                                 <Maximize2 size={12} />
                             </button>
-                            {/* Copy button - available for all cards */}
-                            {onCopy && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onCopy(object.id); }}
-                                    className="p-1.5 bg-cyan-700 text-white rounded-full hover:bg-cyan-500"
-                                    title="Create Copy"
-                                >
-                                    <Copy size={12} />
-                                </button>
-                            )}
-                            {/* Steal/Request Control button - only for opponent's cards */}
-                            {!isControlledByMe && onRequestControl && (
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); onRequestControl(object.id, object.cardData.name, object.controllerId); }}
-                                    className="p-1.5 bg-amber-700 text-white rounded-full hover:bg-amber-500"
-                                    title="Request Control"
-                                >
-                                    <Hand size={12} />
-                                </button>
-                            )}
                         </div>
 
                         {object.cardData.backImageUrl && isControlledByMe && (

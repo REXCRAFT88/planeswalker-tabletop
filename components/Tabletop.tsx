@@ -904,9 +904,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mobileControllers, setMobileControllers] = useState<Set<string>>(new Set());
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
-    const [incomingStealRequest, setIncomingStealRequest] = useState<{ requesterId: string, requesterName: string, cardId: string, cardName: string } | null>(null);
-    const [incomingCardControlRequest, setIncomingCardControlRequest] = useState<{ requesterId: string, requesterName: string, cardId: string, cardName: string, zone: string } | null>(null);
-    const [autoFollowOpponent, setAutoFollowOpponent] = useState(() => localStorage.getItem('planeswalker_auto_follow_opponent') !== 'false');
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [pendingPaymentCard, setPendingPaymentCard] = useState<CardData | null>(null);
     const [allocatedMana, setAllocatedMana] = useState<ManaPool>(EMPTY_POOL);
@@ -1459,13 +1456,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         localStorage.setItem('planeswalker_control_mode', controlMode);
     }, [controlMode]);
 
-    useEffect(() => {
-        localStorage.setItem('planeswalker_auto_follow_opponent', String(autoFollowOpponent));
-    }, [autoFollowOpponent]);
-
     // Auto-switch view to active player
     useEffect(() => {
-        if (isLocal || !autoFollowOpponent || gamePhase !== 'PLAYING') return;
+        if (isLocal || gamePhase !== 'PLAYING') return;
 
         if (currentTurnPlayerId && currentTurnPlayerId !== socket.id) {
             const opponents = playersList.filter(p => p.id !== socket.id);
@@ -1477,7 +1470,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else if (currentTurnPlayerId === socket.id) {
             setIsOpponentViewOpen(false);
         }
-    }, [currentTurnPlayerId, isLocal, gamePhase, autoFollowOpponent]);
+    }, [currentTurnPlayerId, isLocal, gamePhase]);
 
     // ...
     // ...
@@ -2182,11 +2175,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
                 }
             }
-            else if (action === 'REMOVE_PLAYER_OBJECTS') {
-                // Remove all board objects controlled by the kicked player
-                setBoardObjects(prev => prev.filter(o => o.controllerId !== data.targetId));
-                addLog(`${sender?.name || 'Host'} removed a player's board objects from the game`, 'SYSTEM');
-            }
             else if (action === 'UPDATE_COUNTS') {
                 if (sender && sender.id !== socket.id) {
                     setOpponentsCounts(prev => ({
@@ -2301,70 +2289,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             else if (action === 'REVEAL_CARDS') {
                 if (sender && sender.id !== socket.id) {
                     setRevealedCards(data.cards);
-                }
-            }
-            else if (action === 'REQUEST_CONTROL') {
-                if (data.targetId === socket.id) {
-                    setIncomingStealRequest({
-                        requesterId: data.requesterId || playerId,
-                        requesterName: sender ? sender.name : 'Unknown',
-                        cardId: data.objectId,
-                        cardName: data.cardName
-                    });
-                }
-            }
-            else if (action === 'TRANSFER_CONTROL') {
-                setBoardObjects(prev => prev.map(o => {
-                    if (o.id === data.objectId) {
-                        return { ...o, controllerId: data.newControllerId };
-                    }
-                    return o;
-                }));
-                // If I'm the new controller, log it
-                if (data.newControllerId === socket.id) {
-                    const obj = boardObjectsRef.current.find(o => o.id === data.objectId);
-                    if (obj) addLog(`took control of ${obj.cardData.name}`);
-                }
-            }
-            else if (action === 'REQUEST_CARD_CONTROL') {
-                if (data.targetId === socket.id) {
-                    setIncomingCardControlRequest({
-                        requesterId: data.requesterId || playerId,
-                        requesterName: sender ? sender.name : 'Unknown',
-                        cardId: data.cardId,
-                        cardName: data.cardName,
-                        zone: data.zone
-                    });
-                }
-            }
-            else if (action === 'TRANSFER_CARD') {
-                // Check if I'm the requester receiving the card
-                if (data.requesterId === socket.id) {
-                    // Add to my hand
-                    const card = (() => {
-                        // Find the card in the opponent's zones
-                        const targetPlayer = playersList.find(p => p.id === playerId);
-                        if (!targetPlayer) return null;
-                        const state = localPlayerStates.current[targetPlayer.id] || {
-                            hand: [], library: [], graveyard: [], exile: []
-                        };
-                        if (data.zone === 'HAND') return state.hand.find(c => c.id === data.cardId);
-                        if (data.zone === 'LIBRARY') return state.library.find(c => c.id === data.cardId);
-                        if (data.zone === 'GRAVEYARD') return state.graveyard.find(c => c.id === data.cardId);
-                        if (data.zone === 'EXILE') return state.exile.find(c => c.id === data.cardId);
-                        return null;
-                    })();
-                    if (card) {
-                        setHand(prev => [...prev, { ...card, id: crypto.randomUUID() }]);
-                        addLog(`received ${card.name} from ${data.zone.toLowerCase()}`);
-                    }
-                }
-                // If I'm the one who lost the card, remove it from my zone
-                if (playerId === socket.id) {
-                    if (data.zone === 'HAND') setHand(prev => prev.filter(c => c.id !== data.cardId));
-                    else if (data.zone === 'LIBRARY') setLibrary(prev => prev.filter(c => c.id !== data.cardId));
-                    else if (data.zone === 'GRAVEYARD') setGraveyard(prev => prev.filter(c => c.id !== data.cardId));
-                    else if (data.zone === 'EXILE') setExile(prev => prev.filter(c => c.id !== data.cardId));
                 }
             }
             else if (action === 'GAME_STATE_SYNC') {
@@ -3053,10 +2977,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!soundsEnabled) return;
         const sounds = {
             TURN: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Simple notify
-            PLAY: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Card flip (using same as TURN)
-            DRAW: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Draw/Flip (using same as TURN)
-            REQUEST: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Chime (using same as TURN)
-            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3' // Pop (using same as TURN)
+            PLAY: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Card flip
+            DRAW: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Draw/Flip
+            REQUEST: 'https://cdn.pixabay.com/audio/2022/01/21/audio_4eb6046e7f.mp3', // Chime
+            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b325ef01.mp3' // Pop
         };
         try {
             const audio = new Audio(sounds[type]);
@@ -3954,90 +3878,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else if (showManaCalculator) {
             setPendingPaymentCard(card);
         }
-    };
-
-    const copyCard = (id: string) => {
-        const obj = boardObjects.find(o => o.id === id);
-        if (!obj) return;
-
-        const newCopy: BoardObject = {
-            ...obj,
-            id: crypto.randomUUID(),
-            isCopy: true,
-            x: obj.x + 20,
-            y: obj.y + 20,
-            z: maxZ + 1
-        };
-
-        setMaxZ(prev => prev + 1);
-        setBoardObjects(prev => [...prev, newCopy]);
-        emitAction('ADD_OBJECT', newCopy);
-        addLog(`created a copy of ${obj.cardData.name}`);
-    };
-
-    const requestControl = (objectId: string, cardName: string, controllerId: string) => {
-        if (isLocal) {
-            // In local mode, just transfer control immediately
-            setBoardObjects(prev => prev.map(o => {
-                if (o.id === objectId) {
-                    return { ...o, controllerId: playersList[mySeatIndex].id };
-                }
-                return o;
-            }));
-            addLog(`took control of ${cardName}`);
-        } else {
-            // In online mode, request permission from the owner
-            emitAction('REQUEST_CONTROL', {
-                objectId,
-                cardName,
-                targetId: controllerId
-            });
-            addLog(`requested control of ${cardName}`);
-        }
-    };
-
-    const resolveStealRequest = (approved: boolean) => {
-        if (!incomingStealRequest) return;
-
-        if (approved) {
-            emitAction('TRANSFER_CONTROL', {
-                objectId: incomingStealRequest.cardId,
-                newControllerId: incomingStealRequest.requesterId
-            });
-            addLog(`allowed ${incomingStealRequest.requesterName} to take control of ${incomingStealRequest.cardName}`);
-        } else {
-            addLog(`denied control request from ${incomingStealRequest.requesterName}`);
-        }
-        setIncomingStealRequest(null);
-    };
-
-    const requestCardControl = (card: CardData) => {
-        const targetPlayerId = searchModal.playerId;
-        if (!targetPlayerId) return;
-
-        emitAction('REQUEST_CARD_CONTROL', {
-            cardId: card.id,
-            cardName: card.name,
-            zone: searchModal.source,
-            targetId: targetPlayerId
-        });
-        addLog(`requested to take ${card.name} from ${searchModal.source.toLowerCase()}`);
-    };
-
-    const resolveCardControlRequest = (approved: boolean) => {
-        if (!incomingCardControlRequest) return;
-
-        if (approved) {
-            emitAction('TRANSFER_CARD', {
-                cardId: incomingCardControlRequest.cardId,
-                zone: incomingCardControlRequest.zone,
-                requesterId: incomingCardControlRequest.requesterId
-            });
-            addLog(`allowed ${incomingCardControlRequest.requesterName} to take ${incomingCardControlRequest.cardName} from ${incomingCardControlRequest.zone.toLowerCase()}`);
-        } else {
-            addLog(`denied card control request from ${incomingCardControlRequest.requesterName}`);
-        }
-        setIncomingCardControlRequest(null);
     };
 
     const returnToHand = (id: string) => {
@@ -5796,14 +5636,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 >
                                     <ChevronRight size={20} />
                                 </button>
-                                <button
-                                    onClick={() => setAutoFollowOpponent(!autoFollowOpponent)}
-                                    className={`p-1.5 rounded flex items-center gap-1 text-xs font-bold transition-colors ${autoFollowOpponent ? 'bg-green-700/30 text-green-400 border border-green-600' : 'bg-gray-700 text-gray-400 border border-transparent hover:border-gray-500'}`}
-                                    title="Auto-Follow Current Player"
-                                >
-                                    <RefreshCw size={14} />
-                                    <span className="hidden md:inline">Auto</span>
-                                </button>
                             </div>
                             {isMobile && (
                                 <button onClick={() => setIsOpponentViewOpen(false)} className="p-1 bg-red-900/50 text-red-200 rounded"><X size={16} /></button>
@@ -6113,38 +5945,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
-            {/* Steal Request Modal (Board Objects) */}
-            {incomingStealRequest && (
-                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full text-center">
-                        <h3 className="text-xl font-bold text-white mb-2">Control Request</h3>
-                        <p className="text-gray-300 mb-6">
-                            <span className="font-bold text-blue-400">{incomingStealRequest.requesterName}</span> wants to take control of <span className="font-bold text-yellow-400">{incomingStealRequest.cardName}</span>.
-                        </p>
-                        <div className="flex gap-4 justify-center">
-                            <button onClick={() => resolveStealRequest(false)} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold">Deny</button>
-                            <button onClick={() => resolveStealRequest(true)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Allow</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Card Control Request Modal (Zone Cards) */}
-            {incomingCardControlRequest && (
-                <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full text-center">
-                        <h3 className="text-xl font-bold text-white mb-2">Card Control Request</h3>
-                        <p className="text-gray-300 mb-6">
-                            <span className="font-bold text-blue-400">{incomingCardControlRequest.requesterName}</span> wants to take <span className="font-bold text-yellow-400">{incomingCardControlRequest.cardName}</span> from your <span className="font-bold text-purple-400">{incomingCardControlRequest.zone.toLowerCase()}</span>.
-                        </p>
-                        <div className="flex gap-4 justify-center">
-                            <button onClick={() => resolveCardControlRequest(false)} className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold">Deny</button>
-                            <button onClick={() => resolveCardControlRequest(true)} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold">Allow</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Join Request Modal */}
             {incomingJoinRequest && (
                 <div className="fixed inset-0 z-[10000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
@@ -6302,23 +6102,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                     {item.isRevealed ? (
                                                         <>
                                                             <div className="text-xs text-gray-300 font-semibold mb-1 text-center line-clamp-1">{item.card.name}</div>
-                                                            {!searchModal.isReadOnly ? (
+                                                            {!searchModal.isReadOnly && (
                                                                 searchModal.source === 'TOKENS' ? (
                                                                     <button onClick={() => handleSearchAction(item.card.id, 'HAND')} className="w-full text-xs flex items-center gap-2 bg-blue-700 hover:bg-blue-600 px-2 py-1.5 rounded"><Hand size={12} /> Add to Hand</button>
                                                                 ) : (
                                                                     <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
                                                                 )
-                                                            ) : (
-                                                                // Read-only mode: viewing opponent's cards - show steal button
-                                                                <button
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        requestCardControl(item.card);
-                                                                    }}
-                                                                    className="w-full text-xs flex items-center gap-2 bg-amber-700 hover:bg-amber-600 px-2 py-1.5 rounded"
-                                                                >
-                                                                    <Hand size={12} /> Request Control
-                                                                </button>
                                                             )}
                                                         </>
                                                     ) : (
