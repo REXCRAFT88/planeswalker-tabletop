@@ -3126,7 +3126,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const produceMana = (source: ManaSource, skipRotation: boolean = false) => {
-        if (!showManaCalculator) return;
+        // Don't early return - allow tap-to-mana to trigger modal even when showManaCalculator is false
+        // The showManaCalculator controls UI display, but shouldn't prevent activation
 
         // Check if this source has an activation cost and we need to pay it
         if (source.activationCost && showManaCalculator) {
@@ -3153,21 +3154,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         const produced = source.producedMana;
-        const flexible = produced.length > 1 && !produced.every(c => c === produced[0]);
+        // flexible means you can CHOOSE which color to produce (like Command Tower, WUBRG, CMD)
+        // NOT flexible if it produces multiple fixed colors (like Sungrass Prairie: {G}{W})
+        // OR sources also have multiple colors but are handled separately with their own modal
+        const uniqueColors = new Set(produced);
+        const flexible = (uniqueColors.size > 1 && !source.hasOROption) && source.abilityType === 'tap';
 
         // Check if this source has an alternative rule OR is an OR option (e.g. canopy vista)
+        // OR sources must show a modal to choose which branch to use
         if ((source.alternativeRule || source.hasOROption) && !choosingRuleForId) {
             setChoosingRuleForId(source.objectId);
             return;
         }
 
         // Check if this source requires a color choice (flexible mana)
+        // Note: OR sources are handled above with the rule choice modal, not here
         const hasWUBRG = produced.includes('WUBRG');
         const hasCMD = produced.includes('CMD');
         const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD' && BASE_COLORS.includes(c as any));
-        const needsColorChoice = hasWUBRG ||
+        const needsColorChoice = (hasWUBRG && !source.hasOROption) ||
             (hasCMD && (manaInfo.cmdColors?.length || 0) > 1) ||
-            (flexible && actualColorOptions.length > 1);
+            (flexible && !source.hasOROption && actualColorOptions.length > 1);
 
         if (!needsColorChoice && produced.length > 0) {
             // Fixed mana production - add directly to pool
@@ -4985,7 +4992,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                             alternativeRule: undefined
                                                         };
                                                         setChoosingRuleForId(null);
-                                                        produceMana(newSource, false);
+                                                        // skipRotation: true because card is already tapped
+                                                        produceMana(newSource, true);
                                                     }}
                                                     className="flex items-center justify-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
                                                 >

@@ -529,7 +529,9 @@ export const calculateAvailableMana = (
         }
 
         const isBasic = isBasicLand(obj.cardData.name);
-        const isFlexible = isFlexibleMana(produced);
+        // OR sources are not "flexible" - they force you to choose one option when tapping
+        // Flexible means you can choose any color from the set when paying costs
+        const isFlexible = hasOROption ? false : isFlexibleMana(produced);
 
         let activationCostStr: string | undefined;
         if (customRule) {
@@ -595,27 +597,32 @@ export const calculateAvailableMana = (
             // Note: complex activated abilities might be tricky, but for Sungrass Prairie it is `activated`.
             for (let i = 0; i < untappedCount; i++) {
                 availableSources.push(source);
-                if (isFlexible) {
-                    if (hasOROption && orColors) {
-                        // USER REQUEST: Show all branches in individual counters
-                        // availableTotal will still only count manaCountScored (max of branches)
-                        orSourceCount++;
-                        orColors.forEach(branch => {
-                            branch.forEach(c => {
-                                available[c] = (available[c] || 0) + 1;
-                            });
+                if (hasOROption && orColors) {
+                    // OR sources: Show all unique colors from all branches in the pool
+                    // But the total manaCount is max of branches (not sum)
+                    orSourceCount++;
+                    const allColors = new Set<ManaColor>();
+                    orColors.forEach(branch => {
+                        branch.forEach(c => allColors.add(c));
+                    });
+                    allColors.forEach(c => {
+                        available[c] = (available[c] || 0) + 1;
+                    });
+                } else if (isFlexible) {
+                    // Standard WUBRG handling for wildcards
+                    if (produced.includes('WUBRG')) available['WUBRG'] = (available['WUBRG'] || 0) + 1;
+                    else if (produced.includes('CMD') && commanderColors) {
+                        // CMD mana: Show all commander colors as individual counters (W, G, etc.)
+                        // This allows user to see available colors clearly
+                        commanderColors.forEach(c => {
+                            available[c] = (available[c] || 0) + 1;
                         });
                     } else {
-                        // Standard WUBRG handling for wildcards
-                        if (produced.includes('WUBRG')) available['WUBRG'] = (available['WUBRG'] || 0) + 1;
-                        else if (produced.includes('CMD') && commanderColors) available['CMD'] = (available['CMD'] || 0) + 1;
-                        else {
-                            // Dual lands etc - add to individual counts so they show up in counters
-                            const unique = Array.from(new Set(produced));
-                            unique.forEach(c => {
-                                available[c] = (available[c] || 0) + 1;
-                            });
-                        }
+                        // Dual lands etc - add to individual counts so they show up in counters
+                        const unique = Array.from(new Set(produced));
+                        unique.forEach(c => {
+                            available[c] = (available[c] || 0) + 1;
+                        });
                     }
                 } else {
                     produced.forEach(c => { available[c] = (available[c] || 0) + 1; });
@@ -625,15 +632,14 @@ export const calculateAvailableMana = (
             // Creatures, artifacts = Potential
             for (let i = 0; i < untappedCount; i++) {
                 potentialSources.push(source);
-                if (isFlexible) {
-                    if (hasOROption) {
+                if (hasOROption) {
+                    // For non-land OR sources (rocks/dorks), show as WUBRG wildcard
+                    potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
+                } else if (isFlexible) {
+                    if (produced.includes('WUBRG')) potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
+                    else if (produced.includes('CMD') && commanderColors) potential['CMD'] = (potential['CMD'] || 0) + 1;
+                    else {
                         potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
-                    } else {
-                        if (produced.includes('WUBRG')) potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
-                        else if (produced.includes('CMD') && commanderColors) potential['CMD'] = (potential['CMD'] || 0) + 1;
-                        else {
-                            potential['WUBRG'] = (potential['WUBRG'] || 0) + 1;
-                        }
                     }
                 } else {
                     produced.forEach(c => { potential[c] = (potential[c] || 0) + 1; });

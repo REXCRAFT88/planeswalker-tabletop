@@ -417,7 +417,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     // 3. NOT passive (passive auto-adds mana)
     // 4. hideManaButton is FALSE (user wants to see the button)
     // 5. NOT a land (lands produce mana on tap automatically, no button needed)
-    // 
+    //
     // When button is hidden but card has tap ability:
     // - The card still produces mana when tapped via tap-to-mana detection in Tabletop
 
@@ -425,7 +425,11 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const isLand = object.cardData.isLand;
 
     // For lands without custom rules, default to hiding the button
-    const effectiveHideButton = manaSource?.hideManaButton ?? (isLand && !manaRule);
+    // Basic lands ALWAYS hide the button - they should just tap to add mana
+    const isBasicLand = ['plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
+        'snow-covered plains', 'snow-covered island', 'snow-covered swamp', 'snow-covered mountain', 'snow-covered forest', 'snow-covered wastes']
+        .includes(object.cardData.name.toLowerCase());
+    const effectiveHideButton = manaSource?.hideManaButton ?? (isBasicLand || (isLand && !manaRule));
 
     // Show mana button if:
     // - Has mana source AND controlled by me AND not passive
