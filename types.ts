@@ -13,17 +13,19 @@ export interface ManaRule {
   calcMultiplier: number; // default 1
   includeBasePower?: boolean; // when counters mode: add creature's base power to counter count
   // How the mana is produced
-  prodMode: 'standard' | 'multiplied' | 'available' | 'chooseColor' | 'commander' | 'sameAsCard';
-  // 'available' = one mana of any color you have lands for
-  // 'chooseColor' = player picks a color at runtime via modal
+  prodMode: 'standard' | 'available' | 'chooseColor' | 'commander' | 'sameAsCard';
+  // 'available' = player chooses one color from lands they control
+  // 'chooseColor' = player picks a color from WUBRG at runtime via modal
   produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
   producedAlt?: Record<ManaColor, number>; // "or" choice
-  includeNonBasics?: boolean; // for multiplied mode
   // Alternative rule set (opens modal for player to choose which rule to apply)
   alternativeRule?: ManaRule;
   // Global application (e.g. "All Creatures have...")
   appliesTo?: ('creatures' | 'lands' | 'basics' | 'nonbasics')[];
-  appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
+  // appliesToCondition options:
+  // 'counters' - only if target cards (creatures/lands) have counters (e.g. Rishkar)
+  // 'grantingCardCounters' - only if this card granting the ability has counters (e.g. Incubation Druid)
+  appliesToCondition?: 'counters' | 'grantingCardCounters';
 
   // Global Multipliers (e.g. Virtue of Strength)
   manaMultiplier?: number; // e.g. 3 for "triples mana produced by basic lands"

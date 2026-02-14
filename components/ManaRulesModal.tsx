@@ -3,6 +3,10 @@ import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map a
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 import { parseManaCost } from '../services/mana';
 
+// Colors for activation cost (NO WUBRG or CMD - use generic mana for "any color" cost)
+const COST_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
+
+// All colors including wildcards for production modes
 const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'];
 
 const getIconPath = (type: string) => {
@@ -157,7 +161,8 @@ const ManaRuleEditor: React.FC<{
                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Activation Cost</h4>
                     <p className="text-[11px] text-gray-500 mb-3">Mana required to activate {rule.trigger === 'tap' ? 'the tap' : 'this'} ability</p>
                     <div className="flex flex-wrap gap-2 md:gap-3 justify-center bg-gray-900/50 rounded-xl p-3">
-                        {MANA_COLORS.map(color => (
+                        <p className="text-[10px] text-gray-400 absolute -top-1 right-2">Use generic for "any color" costs</p>
+                        {COST_COLORS.map(color => (
                             <ManaCounter
                                 key={color}
                                 color={color}
@@ -242,8 +247,7 @@ const ManaRuleEditor: React.FC<{
                     options={[
                         { value: 'standard', label: 'Standard', desc: 'Produces specific mana types' },
                         { value: 'sameAsCard', label: '🎴 Same as Card', desc: 'Produces colors this card produces by default' },
-                        { value: 'multiplied', label: 'Multiplied', desc: 'Multiplies your existing mana production' },
-                        { value: 'available', label: '🌊 Available', desc: 'Produces one mana of any color you have lands for' },
+                        { value: 'available', label: '🌊 Available', desc: 'Choose one color from lands you control' },
                         { value: 'chooseColor', label: '🎨 Choose Color', desc: 'Player picks a color when triggered' },
                         { value: 'commander', label: '👑 Commander', desc: 'Produces mana of any color in your commander\'s identity' },
                     ]}
@@ -304,32 +308,6 @@ const ManaRuleEditor: React.FC<{
                                 </div>
                             )}
                         </div>
-                    ) : rule.prodMode === 'multiplied' ? (
-                        /* Multiplied mode */
-                        <div className="space-y-3 bg-gray-900/50 rounded-xl p-4">
-                            <p className="text-xs text-gray-400">
-                                Multiplies selected mana types by the calculated amount.
-                            </p>
-                            <div className="flex flex-wrap gap-2 md:gap-3 justify-center">
-                                {MANA_COLORS.map(color => (
-                                    <ManaCounter
-                                        key={color}
-                                        color={color}
-                                        value={rule.produced[color]}
-                                        onChange={(v) => updateProduced(color, v)}
-                                    />
-                                ))}
-                            </div>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={rule.includeNonBasics || false}
-                                    onChange={(e) => updateRule('includeNonBasics', e.target.checked)}
-                                    className="w-4 h-4 rounded bg-gray-700 border-gray-600 text-blue-500 focus:ring-blue-500"
-                                />
-                                <span className="text-sm text-gray-300">Include non-basic lands in calculation</span>
-                            </label>
-                        </div>
                     ) : rule.prodMode === 'sameAsCard' ? (
                         /* Same as Card mode */
                         <div className="bg-gray-900/50 rounded-xl p-4 border border-green-800/30">
@@ -378,8 +356,8 @@ const ManaRuleEditor: React.FC<{
                                 <span className="text-sm font-medium text-cyan-300">Available Mana</span>
                             </div>
                             <p className="text-xs text-gray-400">
-                                Produces one mana of any color you currently have lands on the battlefield for.
-                                The system checks your lands and offers those colors as available options.
+                                When activated, prompts you to choose ONE color from the lands you currently control.
+                                You'll see a modal with available land colors to pick from.
                             </p>
                             <div className="mt-3 flex items-center gap-3">
                                 <label className="text-sm text-gray-300">Amount of mana:</label>
@@ -427,9 +405,32 @@ const ManaRuleEditor: React.FC<{
                 </div>
             </div>
 
+            {/* Mana Multiplier */}
+            <div>
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Mana Multiplier</h4>
+                <div className="flex items-center gap-3 bg-gray-900/40 p-3 rounded-lg border border-gray-800/50">
+                    <span className="text-xs text-gray-400 font-medium">Production Multiplier:</span>
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="number"
+                            value={rule.manaMultiplier || 1}
+                            onChange={(e) => updateRule('manaMultiplier', Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white text-sm text-center focus:border-blue-500 transition-colors"
+                            min={1}
+                            step={1}
+                        />
+                        <span className="text-xs text-gray-600 font-bold">×</span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 max-w-[150px] leading-tight">
+                        Multiplies mana produced by this card (e.g. Mana Reflection = 3×)
+                    </p>
+                </div>
+            </div>
+
             {/* Global Application */}
             <div>
                 <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Global Application</h4>
+                <p className="text-[11px] text-gray-500 mb-3">Apply this mana ability to other cards you control</p>
                 <div className="flex flex-col gap-2 mb-4">
                     <label className={`flex items-center gap-2 cursor-pointer bg-gray-800/50 p-2 rounded-lg border transition-colors ${rule.appliesTo?.includes('creatures') ? 'border-blue-500 bg-blue-900/10' : 'border-gray-700 hover:border-gray-500'}`}>
                         <input
@@ -491,26 +492,17 @@ const ManaRuleEditor: React.FC<{
                                     onChange={(e) => onChange({ ...rule, appliesToCondition: e.target.checked ? 'counters' : undefined })}
                                     className="bg-gray-900 border-gray-600 rounded text-purple-500 focus:ring-purple-900 text-xs"
                                 />
-                                <span className="text-xs text-purple-300">Only if they have counters (e.g. Rishkar)</span>
+                                <span className="text-xs text-purple-300">Only if they have counters (e.g. Rishkar - on creature)</span>
                             </label>
-
-                            <div className="flex items-center gap-3 bg-gray-900/40 p-2 rounded-lg border border-gray-800/50 w-fit">
-                                <span className="text-xs text-gray-400 font-medium">Production Multiplier:</span>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="number"
-                                        value={rule.manaMultiplier || 1}
-                                        onChange={(e) => updateRule('manaMultiplier', Math.max(1, parseInt(e.target.value) || 1))}
-                                        className="w-16 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-white text-sm text-center focus:border-blue-500 transition-colors"
-                                        min={1}
-                                        step={1}
-                                    />
-                                    <span className="text-xs text-gray-600 font-bold">×</span>
-                                </div>
-                                <p className="text-[10px] text-gray-500 max-w-[120px] leading-tight">
-                                    Doubles or triples mana produced by results (e.g. Mana Reflection)
-                                </p>
-                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer mt-1">
+                                <input
+                                    type="checkbox"
+                                    checked={rule.appliesToCondition === 'grantingCardCounters'}
+                                    onChange={(e) => onChange({ ...rule, appliesToCondition: e.target.checked ? 'grantingCardCounters' : undefined })}
+                                    className="bg-gray-900 border-gray-600 rounded text-purple-500 focus:ring-purple-900 text-xs"
+                                />
+                                <span className="text-xs text-purple-300">Only if this card has counters (e.g. Incubation Druid)</span>
+                            </label>
                         </div>
                     )}
                 </div>
@@ -652,18 +644,76 @@ const ManaRuleEditor: React.FC<{
     );
 };
 
-// --- Helper: Summarize a rule compactly ---
+// --- Helper: Display rule details (trigger, cost, multiplier) ---
+const RuleDetailsPreview: React.FC<{ rule: ManaRule }> = ({ rule }) => {
+    const parts: string[] = [];
+
+    // Trigger
+    const triggerLabel = rule.trigger === 'tap' ? 'Tap' :
+                       rule.trigger === 'activated' ? 'Activate' :
+                       rule.trigger === 'passive' ? 'Passive' : rule.trigger;
+    parts.push(triggerLabel);
+
+    // Activation cost
+    const costParts: string[] = [];
+    if (rule.genericActivationCost && rule.genericActivationCost > 0) {
+        costParts.push(`{${rule.genericActivationCost}}`);
+    }
+    Object.entries(rule.activationCost).forEach(([color, count]) => {
+        if (count > 0) costParts.push(Array(count).fill(`{${color}}`).join(''));
+    });
+    if (costParts.length > 0) {
+        parts.push(`Cost: ${costParts.join('')}`);
+    }
+
+    // Multipliers
+    if (rule.calcMode !== 'set') {
+        parts.push(`${rule.calcMode}`);
+    }
+    if (rule.manaMultiplier && rule.manaMultiplier > 1) {
+        parts.push(`×${rule.manaMultiplier}`);
+    }
+
+    return (
+        <div className="space-y-1">
+            {parts.map((part, i) => (
+                <div key={i} className="text-[10px] text-gray-400">{part}</div>
+            ))}
+        </div>
+    );
+};
+
+// --- Helper: Summarize a rule compactly with full details ---
 const ruleSummary = (rule: ManaRule): string => {
     const colors = MANA_COLORS.filter(c => rule.produced[c] > 0);
     const totalMana = Object.values(rule.produced).reduce((a, b) => a + b, 0);
-    if (rule.prodMode === 'available') return `Available mana (${totalMana})`;
-    if (rule.prodMode === 'chooseColor') return `Choose color (${totalMana})`;
-    if (rule.prodMode === 'commander') return `Commander color (${totalMana})`;
-    if (colors.length === 0) return 'No mana';
-    const parts = colors.map(c => `${rule.produced[c]}${c}`);
-    let base = parts.join(', ');
-    if (rule.calcMode !== 'set') base += ` × ${rule.calcMode}`;
-    return base;
+
+    // Build base production string
+    let production: string;
+    if (rule.prodMode === 'available') production = `Choose 1 from available lands`;
+    else if (rule.prodMode === 'chooseColor') production = `Choose any color (${totalMana})`;
+    else if (rule.prodMode === 'commander') production = `Commander color (${totalMana})`;
+    else if (colors.length === 0) production = 'No mana';
+    else {
+        const parts = colors.map(c => `${rule.produced[c]}${c}`);
+        production = parts.join(', ');
+    }
+
+    // Add calculation mode info
+    let calcInfo = '';
+    if (rule.calcMode !== 'set') {
+        calcInfo = ` × ${rule.calcMode}`;
+    } else if (rule.calcMultiplier > 1) {
+        calcInfo = ` ×${rule.calcMultiplier}`;
+    }
+
+    // Add global multiplier
+    let multiplierInfo = '';
+    if (rule.manaMultiplier && rule.manaMultiplier > 1) {
+        multiplierInfo = ` → ×${rule.manaMultiplier}`;
+    }
+
+    return `${production}${calcInfo}${multiplierInfo}`;
 };
 
 export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRule, commanderColors, allSources, onSave, onClose }) => {
@@ -836,8 +886,25 @@ export const ManaRulesModal: React.FC<ManaRulesModalProps> = ({ card, existingRu
                                     </div>
                                     <div className="bg-gray-900/30 border border-amber-800/30 rounded-xl p-4">
                                         <p className="text-[11px] text-amber-500/80 mb-3">
-                                            When this card's mana ability triggers, a modal will let the player choose between Option A ({ruleSummary(rule)}) or Option B.
+                                            When this card's mana ability triggers, a modal will let the player choose between Option A or Option B.
                                         </p>
+                                        {/* Options Comparison Preview */}
+                                        <div className="grid grid-cols-2 gap-3 mb-4">
+                                            <div className="bg-blue-900/20 border border-blue-800/40 rounded-lg p-3">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-[10px] font-bold text-blue-400 uppercase bg-blue-900/50 px-2 py-0.5 rounded">Option A</span>
+                                                </div>
+                                                <div className="text-xs text-gray-300 font-medium mb-1">{ruleSummary(rule)}</div>
+                                                <RuleDetailsPreview rule={rule} />
+                                            </div>
+                                            <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg p-3">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-[10px] font-bold text-amber-400 uppercase bg-amber-900/50 px-2 py-0.5 rounded">Option B</span>
+                                                </div>
+                                                <div className="text-xs text-gray-300 font-medium mb-1">{ruleSummary(rule.alternativeRule || rule)}</div>
+                                                <RuleDetailsPreview rule={rule.alternativeRule || rule} />
+                                            </div>
+                                        </div>
                                         <ManaRuleEditor
                                             rule={rule.alternativeRule || { ...EMPTY_MANA_RULE }}
                                             onChange={(altRule) => setRule(prev => ({ ...prev, alternativeRule: altRule }))}

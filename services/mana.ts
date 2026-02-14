@@ -111,6 +111,8 @@ export interface ManaSource {
     orColors?: ManaColor[][]; // Array of color options for OR abilities
     autoTap?: boolean; // Whether this source is allowed to be auto-tapped
     quantity: number; // Number of objects in the stack
+    // Available colors for "available" mode (user must choose one)
+    availableColors?: ManaColor[]; // Colors available from lands for this card to produce
 }
 
 // NEW: Categorized mana info for the new display

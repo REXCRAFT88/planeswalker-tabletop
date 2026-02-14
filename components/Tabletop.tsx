@@ -113,6 +113,53 @@ const ruleToActivationString = (rule: ManaRule): string => {
     return parts.join('');
 };
 
+// Helper to get detailed rule summary for OR choice modal
+const getRuleDetails = (rule: ManaRule): {
+    production: string;
+    cost: string;
+    multiplier: string;
+    trigger: string;
+} => {
+    // Production
+    let production = 'No mana';
+    if (rule.prodMode === 'available') production = 'Choose 1 from available lands';
+    else if (rule.prodMode === 'chooseColor') {
+        const total = Object.values(rule.produced).reduce((a, b) => a + b, 0);
+        production = `Choose any color (${total})`;
+    }
+    else if (rule.prodMode === 'commander') {
+        const total = Object.values(rule.produced).reduce((a, b) => a + b, 0);
+        production = `Commander color (${total})`;
+    }
+    else {
+        const colors = Object.entries(rule.produced)
+            .filter(([_, count]) => count > 0)
+            .map(([color, count]) => `${count}${color}`)
+            .join(', ');
+        if (colors) production = colors;
+    }
+
+    // Add calc mode
+    if (rule.calcMode !== 'set') {
+        production += ` × ${rule.calcMode}`;
+    }
+
+    // Cost
+    const cost = ruleToActivationString(rule);
+
+    // Multiplier
+    const multiplier = rule.manaMultiplier && rule.manaMultiplier > 1
+        ? `→ ×${rule.manaMultiplier}`
+        : '';
+
+    // Trigger
+    const trigger = rule.trigger === 'tap' ? 'Tap' :
+                      rule.trigger === 'activated' ? 'Activate' :
+                      rule.trigger === 'passive' ? 'Passive' : rule.trigger;
+
+    return { production, cost, multiplier, trigger };
+};
+
 const TURN_STEPS: TurnStep[] = ['UNTAP', 'UPKEEP', 'DRAW', 'MAIN1', 'ATTACK', 'MAIN2', 'END'];
 
 // --- Layout Constants ---
@@ -3262,7 +3309,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                 const wasTapped = movingObj.rotation !== defaultRot || movingObj.tappedQuantity === movingObj.quantity;
                 const isNowTapped = (updates.rotation !== undefined ? updates.rotation !== defaultRot : wasTapped) ||
-                    (updates.tappedQuantity !== undefined ? updates.tappedQuantity === movingObj.quantity : wasTapped);
+                    (updates.tappedQuantity !== undefined && updates.tappedQuantity > movingObj.tappedQuantity && updates.tappedQuantity !== movingObj.quantity ? true : wasTapped);
 
                 // Trigger mana production when tapping (regardless of isLocal)
                 // STOP MANA PRODUCTION DURING DRAG/MOVE OR IF skipMana IS TRUE
@@ -5011,23 +5058,26 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                             // Handle Alternative Rule
                             return (
-                                <div className="flex flex-col items-center gap-4">
-                                    <h3 className="text-xl font-bold text-white">Choose Ability</h3>
-                                    <div className="flex gap-4">
+                                <div className="flex flex-col items-center gap-4 w-full max-w-lg">
+                                    <h3 className="text-xl font-bold text-white mb-2">Choose Ability</h3>
+                                    <div className="flex gap-4 w-full">
                                         <button
                                             onClick={() => {
                                                 const primarySource = { ...source, alternativeRule: undefined };
                                                 setChoosingRuleForId(null);
                                                 produceMana(primarySource, false);
                                             }}
-                                            className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
+                                            className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
                                         >
                                             <span className="text-sm font-bold text-amber-400">Primary Option</span>
-                                            <div className="flex gap-1">
+                                            <div className="flex gap-1 flex-wrap justify-center">
                                                 {source.producedMana.slice(0, 5).map((c, i) => (
                                                     <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
                                                 ))}
                                                 {source.producedMana.length > 5 && <span className="text-white font-bold ml-1">...</span>}
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 space-y-0.5 mt-1">
+                                                <div>{source.producedMana.join(', ')}</div>
                                             </div>
                                         </button>
 
@@ -5044,13 +5094,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                     produceMana(altSource, false);
                                                 }
                                             }}
-                                            className="flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
+                                            className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
                                         >
                                             <span className="text-sm font-bold text-amber-400">Alternative Option</span>
-                                            <div className="flex gap-1">
-                                                {source.alternativeRule ? ruleToColors(source.alternativeRule).map((c, i) => (
+                                            <div className="flex gap-1 flex-wrap justify-center">
+                                                {source.alternativeRule ? ruleToColors(source.alternativeRule).slice(0, 5).map((c, i) => (
                                                     <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
                                                 )) : <span className="text-xs text-gray-500 italic">Special Rule</span>}
+                                                {source.alternativeRule && ruleToColors(source.alternativeRule).length > 5 && <span className="text-white font-bold ml-1">...</span>}
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 space-y-0.5 mt-1">
+                                                <div>{source.alternativeRule ? Object.entries(source.alternativeRule.produced)
+                                                    .filter(([_, count]) => count > 0)
+                                                    .map(([color, count]) => `${count}${color}`)
+                                                    .join(', ') : 'No mana'}</div>
                                             </div>
                                         </button>
                                     </div>

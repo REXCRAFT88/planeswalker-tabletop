@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
-import { ManaSource } from '../services/mana';
+import { ManaSource, isBasicLand } from '../services/mana';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
 
@@ -426,10 +426,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
     // For lands without custom rules, default to hiding the button
     // Basic lands ALWAYS hide the button - they should just tap to add mana
-    const isBasicLand = ['plains', 'island', 'swamp', 'mountain', 'forest', 'wastes',
-        'snow-covered plains', 'snow-covered island', 'snow-covered swamp', 'snow-covered mountain', 'snow-covered forest', 'snow-covered wastes']
-        .includes(object.cardData.name.toLowerCase());
-    const effectiveHideButton = manaSource?.hideManaButton ?? (isBasicLand || (isLand && !manaRule));
+    const basicLand = isBasicLand(object.cardData.name);
+    const effectiveHideButton = manaSource?.hideManaButton ?? (basicLand || (isLand && !manaRule));
 
     // Show mana button if:
     // - Has mana source AND controlled by me AND not passive
