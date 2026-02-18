@@ -2,25 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { X, RotateCcw, Plus, Minus, Info, Crown, Ban, Copy, Trash2, Users, Map as MapIcon } from 'lucide-react';
 import { CardData, ManaRule, ManaColor, EMPTY_MANA_RULE } from '../types';
 import { parseManaCost } from '../services/mana';
+import { getIconPath } from './ManaDisplay';
 
 // Colors for activation cost (NO WUBRG or CMD - use generic mana for "any color" cost)
 const COST_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C'];
 
 // All colors including wildcards for production modes
 const MANA_COLORS: ManaColor[] = ['W', 'U', 'B', 'R', 'G', 'C', 'WUBRG', 'CMD'];
-
-const getIconPath = (type: string) => {
-    switch (type) {
-        case 'W': return '/mana/white.png';
-        case 'U': return '/mana/blue.png';
-        case 'B': return '/mana/black.png';
-        case 'R': return '/mana/red.png';
-        case 'G': return '/mana/green.png';
-        case 'C': return '/mana/colorless.png';
-        case 'WUBRG': return '/mana/all.png';
-        default: return '/mana/colorless.png';
-    }
-};
 
 const MANA_LABELS: Record<ManaColor, string> = {
     W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green', C: 'Colorless', WUBRG: 'WUBRG', CMD: 'Commander'
@@ -650,8 +638,8 @@ const RuleDetailsPreview: React.FC<{ rule: ManaRule }> = ({ rule }) => {
 
     // Trigger
     const triggerLabel = rule.trigger === 'tap' ? 'Tap' :
-                       rule.trigger === 'activated' ? 'Activate' :
-                       rule.trigger === 'passive' ? 'Passive' : rule.trigger;
+        rule.trigger === 'activated' ? 'Activate' :
+            rule.trigger === 'passive' ? 'Passive' : rule.trigger;
     parts.push(triggerLabel);
 
     // Activation cost

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
-import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
+import { parseDeckList, fetchBatch } from '../services/scryfall';
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 
 import { connectSocket } from '../services/socket';
@@ -34,9 +34,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     currentTokens, onTokensChange, activeDeck,
     savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
 }) => {
-    const [isSearching, setIsSearching] = useState(false);
-    const [importText, setImportText] = useState('');
-    const [isImporting, setIsImporting] = useState(false);
+
     const [roomCode, setRoomCode] = useState('');
     const [isJoining, setIsJoining] = useState(false);
     const [joinStatus, setJoinStatus] = useState('');
@@ -225,10 +223,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         setIsLibraryOpen(false);
     };
 
-    // Since I missed adding `onLoadDeck` in App.tsx diff, I will add it now in the App.tsx diff above?
-    // No, I can't go back. I will add it to the LobbyProps and assume App passes it.
-    // Actually, I can just edit the App.tsx diff to include it.
-    // Let's assume I will add `onLoadDeck` to LobbyProps and pass `handleDeckReady` from App.
+
 
     const toggleCommanderInEdit = (cardId: string) => {
         if (!editingDeck) return;

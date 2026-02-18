@@ -3,20 +3,19 @@ import { createPortal } from 'react-dom';
 import { CardData, BoardObject, LogEntry, PlayerStats, ManaRule, TurnStep } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { ManaDisplay, ManaPaymentSidebar } from './ManaDisplay';
+import { ManaDisplay, ManaPaymentSidebar, getIconPath } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
-import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { PLAYER_COLORS } from '../constants';
+import { CARD_WIDTH, CARD_HEIGHT, PLAYER_COLORS } from '../constants';
 import {
     calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
 import {
-    LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
+    LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -77,20 +76,6 @@ interface LibraryActionState {
     cardId: string;
 }
 
-// Helper for mana icons
-const getIconPath = (type: string) => {
-    switch (type) {
-        case 'W': return '/mana/white.png';
-        case 'U': return '/mana/blue.png';
-        case 'B': return '/mana/black.png';
-        case 'R': return '/mana/red.png';
-        case 'G': return '/mana/green.png';
-        case 'C': return '/mana/colorless.png';
-        case 'WUBRG': return '/mana/all.png';
-        case 'CMD': return '/mana/all.png';
-        default: return '/mana/all.png';
-    }
-};
 
 const ruleToColors = (rule: ManaRule): ManaColor[] => {
     const colors: ManaColor[] = [];
@@ -113,52 +98,7 @@ const ruleToActivationString = (rule: ManaRule): string => {
     return parts.join('');
 };
 
-// Helper to get detailed rule summary for OR choice modal
-const getRuleDetails = (rule: ManaRule): {
-    production: string;
-    cost: string;
-    multiplier: string;
-    trigger: string;
-} => {
-    // Production
-    let production = 'No mana';
-    if (rule.prodMode === 'available') production = 'Choose 1 from available lands';
-    else if (rule.prodMode === 'chooseColor') {
-        const total = Object.values(rule.produced).reduce((a, b) => a + b, 0);
-        production = `Choose any color (${total})`;
-    }
-    else if (rule.prodMode === 'commander') {
-        const total = Object.values(rule.produced).reduce((a, b) => a + b, 0);
-        production = `Commander color (${total})`;
-    }
-    else {
-        const colors = Object.entries(rule.produced)
-            .filter(([_, count]) => count > 0)
-            .map(([color, count]) => `${count}${color}`)
-            .join(', ');
-        if (colors) production = colors;
-    }
 
-    // Add calc mode
-    if (rule.calcMode !== 'set') {
-        production += ` × ${rule.calcMode}`;
-    }
-
-    // Cost
-    const cost = ruleToActivationString(rule);
-
-    // Multiplier
-    const multiplier = rule.manaMultiplier && rule.manaMultiplier > 1
-        ? `→ ×${rule.manaMultiplier}`
-        : '';
-
-    // Trigger
-    const trigger = rule.trigger === 'tap' ? 'Tap' :
-                      rule.trigger === 'activated' ? 'Activate' :
-                      rule.trigger === 'passive' ? 'Passive' : rule.trigger;
-
-    return { production, cost, multiplier, trigger };
-};
 
 const TURN_STEPS: TurnStep[] = ['UNTAP', 'UPKEEP', 'DRAW', 'MAIN1', 'ATTACK', 'MAIN2', 'END'];
 
@@ -235,9 +175,6 @@ const getLayout = (totalPlayers: number, radius: number) => {
     }
     return configs;
 };
-
-
-
 
 
 // Zone Offsets (Relative to Mat Top-Left)
@@ -384,8 +321,6 @@ interface ZoneCounts {
     hand: number;
     command: number;
 }
-
-// ...
 
 interface PlaymatProps {
     x: number;
@@ -1124,7 +1059,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [isLocalTableHost, roomId, localOpponents]);
 
-    // Override localOpponents handling for Open Slots
     // Override localOpponents handling for Open Slots and Local Table
     useEffect(() => {
         if (isLocal && localOpponents) {
@@ -1266,7 +1200,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const lastPlayedCardRef = useRef<CardData | null>(null);
     useEffect(() => { hoveredCardIdRef.current = hoveredCardId; }, [hoveredCardId]);
     useEffect(() => { lastPlayedCardRef.current = lastPlayedCard; }, [lastPlayedCard]);
-    useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
 
 
     // --- Persistence & Auto-Restore ---
@@ -1687,7 +1620,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         onExit();
     };
 
-    // Emit life changes
     // Emit life changes (Remote)
     useEffect(() => {
         if (!isLocal && (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN')) {
@@ -1841,7 +1773,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else if (action === 'UPDATE_OBJECT' && data.updates && data.updates.controllerId === 'local-player') {
             payload = { ...data, updates: { ...data.updates, controllerId: socket.id } };
         }
-        socket.emit('game_action', { room: roomId, action, data: payload });
         socket.emit('game_action', { room: roomId, action, data: payload });
     };
 

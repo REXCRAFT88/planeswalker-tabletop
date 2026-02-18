@@ -13,7 +13,7 @@ export interface ManaRule {
   calcMultiplier: number; // default 1
   includeBasePower?: boolean; // when counters mode: add creature's base power to counter count
   // How the mana is produced
-  prodMode: 'standard' | 'available' | 'chooseColor' | 'commander' | 'sameAsCard';
+  prodMode: 'standard' | 'available' | 'chooseColor' | 'commander' | 'sameAsCard' | 'multiplied';
   // 'available' = player chooses one color from lands they control
   // 'chooseColor' = player picks a color from WUBRG at runtime via modal
   produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
