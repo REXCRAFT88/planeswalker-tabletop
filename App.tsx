@@ -98,6 +98,7 @@ function App() {
         }
         return 'New Deck';
     });
+    const [geminiApiKey, setGeminiApiKey] = useState<string>(() => loadState('geminiApiKey', ''));
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -108,10 +109,11 @@ function App() {
             lobbyTokens,
             savedDecks,
             activeManaRules,
-            activeDeckName
+            activeDeckName,
+            geminiApiKey
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeManaRules, activeDeckName]);
+    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeManaRules, activeDeckName, geminiApiKey]);
 
     // Prevent Render.com from sleeping by pinging the server
     useEffect(() => {
@@ -279,6 +281,8 @@ function App() {
                     onStartGame={handleStartLocalGame}
                     onBack={() => setCurrentView(View.LOBBY)}
                     savedDecks={savedDecks}
+                    geminiApiKey={geminiApiKey}
+                    onGeminiApiKeyChange={setGeminiApiKey}
                 />
             )}
 
@@ -306,6 +310,7 @@ function App() {
                     isLocalTableHost={isLocalTableHost}
                     localOpponents={localOpponents}
                     manaRules={activeManaRules}
+                    geminiApiKey={geminiApiKey}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}

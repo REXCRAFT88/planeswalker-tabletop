@@ -19,9 +19,11 @@ interface LocalSetupProps {
     onStartGame: (opponents: LocalOpponent[], isLocalTable: boolean) => void;
     onBack: () => void;
     savedDecks: SavedDeck[];
+    geminiApiKey: string;
+    onGeminiApiKeyChange: (key: string) => void;
 }
 
-export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, savedDecks }) => {
+export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, savedDecks, geminiApiKey, onGeminiApiKeyChange }) => {
     const [opponents, setOpponents] = useState<LocalOpponent[]>([]);
     const [isImporting, setIsImporting] = useState(false);
     const [isLocalTable, setIsLocalTable] = useState(false);
@@ -34,6 +36,10 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     // Staging state for commander selection
     const [stagedOpponent, setStagedOpponent] = useState<{ name: string, deck: CardData[], tokens: CardData[] } | null>(null);
     const [showLibrary, setShowLibrary] = useState(false);
+
+    // AI Toggle State
+    const hasAiOpponent = opponents.some(o => o.type === 'ai');
+    const [isAi, setIsAi] = useState(false);
 
     const handleSelectFromLibrary = (saved: SavedDeck) => {
         setStagedOpponent({
@@ -112,12 +118,13 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
             deck: stagedOpponent.deck,
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
-            type: 'ai' // Default to AI for now, could add Human/AI toggle later if needed for non-local-table
+            type: isAi ? 'ai' : 'human_local'
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
         setNewName('');
         setDeckText('');
+        setIsAi(false);
     };
 
     const removeOpponent = (index: number) => {
@@ -143,9 +150,6 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                 <h1 className="text-3xl font-bold text-white flex items-center gap-3">
                     <User className="text-green-500" /> Local Game Setup
                 </h1>
-                <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2">
-                    <ArrowLeft size={20} /> Back
-                </button>
                 <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2">
                     <ArrowLeft size={20} /> Back
                 </button>
@@ -206,8 +210,25 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                 />
                             </div>
 
-                            <div className="flex-1 flex flex-col">
-                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Deck List</label>
+                            <div className={`p-4 rounded-lg border-2 transition-all ${isAi ? 'bg-blue-900/40 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-gray-900/50 border-gray-700 hover:border-gray-600'}`}>
+                                <div className="flex items-center justify-between">
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-white">AI Opponent (Gemini Bot)</span>
+                                        <span className="text-[10px] text-gray-400">Play against a voice-activated AI bot.</span>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        checked={isAi}
+                                        onChange={(e) => setIsAi(e.target.checked)}
+                                        disabled={hasAiOpponent && !isAi}
+                                        className="w-5 h-5 bg-gray-900 border-gray-600 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                    />
+                                </div>
+                                {hasAiOpponent && !isAi && <p className="text-[10px] text-amber-500 mt-2">Only one AI opponent allowed per game.</p>}
+                            </div>
+
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Opponent Deck List</label>
                                 <textarea
                                     className="w-full h-full bg-gray-900 border border-gray-600 rounded p-2 text-xs font-mono text-gray-300 focus:border-green-500 outline-none resize-none"
                                     value={deckText}
@@ -299,10 +320,24 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                         ))}
                     </div>
 
+                    {hasAiOpponent && (
+                        <div className="bg-gray-800 p-4 rounded-xl border border-blue-600 flex flex-col gap-2 mt-auto">
+                            <label className="text-sm font-bold text-blue-400">Gemini Live Voice API Key</label>
+                            <input
+                                type="password"
+                                className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white outline-none focus:border-blue-500"
+                                value={geminiApiKey}
+                                onChange={e => onGeminiApiKeyChange(e.target.value)}
+                                placeholder="AIzaSy..."
+                            />
+                            <p className="text-xs text-gray-400">Required to enable the AI opponent.</p>
+                        </div>
+                    )}
+
                     <button
                         onClick={() => onStartGame(opponents, isLocalTable)}
-                        disabled={opponents.length === 0}
-                        className="w-full py-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 mt-auto"
+                        disabled={opponents.length === 0 || (hasAiOpponent && !geminiApiKey.trim())}
+                        className="w-full py-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 mt-4"
                     >
                         <Play size={20} /> Start Local Game
                     </button>

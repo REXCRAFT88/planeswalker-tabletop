@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
+import { generateDeckMarkdown } from '../services/aiHelpers';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Share2, Clipboard } from 'lucide-react';
@@ -170,6 +171,20 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, manaRules, initialId);
     };
 
+    const downloadAiDatabase = () => {
+        if (!stagedDeck) return;
+        const mdString = generateDeckMarkdown(deckName || 'Deck', stagedDeck, stagedTokens);
+        const blob = new Blob([mdString], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(deckName || 'deck').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_ai_db.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     const handleSaveManaRule = (card: CardData, rule: ManaRule | null) => {
         setManaRules(prev => {
             const next = { ...prev };
@@ -252,9 +267,14 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                             onChange={e => setDeckName(e.target.value)}
                         />
                     </div>
-                    <button onClick={finalizeDeck} className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shrink-0">
-                        <Check size={20} /> Finish & Save
-                    </button>
+                    <div className="flex w-full md:w-auto gap-2 shrink-0">
+                        <button onClick={downloadAiDatabase} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold shadow-lg">
+                            <Download size={20} /> Export AI DB
+                        </button>
+                        <button onClick={finalizeDeck} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg">
+                            <Check size={20} /> Finish & Save
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">

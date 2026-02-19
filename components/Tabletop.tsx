@@ -12,6 +12,8 @@ import {
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
+import { GeminiLiveClient } from '../services/geminiVoice';
+import { generateAiSystemPrompt, generateDeckMarkdown } from '../services/aiHelpers';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
@@ -29,6 +31,7 @@ interface TabletopProps {
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
     manaRules?: Record<string, ManaRule>;
+    geminiApiKey?: string;
     onExit: () => void;
 }
 
@@ -831,7 +834,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -928,6 +931,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
     const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
     const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
+
+    // AI State
+    const aiClientRef = useRef<GeminiLiveClient | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const [aiConnected, setAiConnected] = useState(false);
+    const handleAiResponseRef = useRef<(msg: string) => void>(() => { });
 
     // Sync state with prop initially or if prop changes (but allow internal override)
     useEffect(() => {
@@ -1805,6 +1814,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         if (!overrideName) {
             emitAction('LOG', { message });
+        }
+
+        // Feed actions to AI Opponent
+        if (aiConnected && aiClientRef.current && type === 'ACTION') {
+            aiClientRef.current.sendText(`Game Event Log: ${displayMsg}`);
         }
     };
 
@@ -4621,6 +4635,247 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             </div>
         </div>
     );
+
+    // AI Initialization
+    useEffect(() => {
+        const aiOpponent = isLocal ? localOpponents.find(o => o.type === 'ai') : undefined;
+        if (!aiOpponent || !geminiApiKey) return;
+
+        let active = true;
+
+        const initAi = async () => {
+            try {
+                const rulesRes = await fetch('/magic_rules_context.md');
+                const rulesText = await rulesRes.text();
+
+                const aiDeckMd = generateDeckMarkdown(aiOpponent.name || 'AI', aiOpponent.deck || [], aiOpponent.tokens || []);
+                const localPlayerDeckMd = generateDeckMarkdown(playerName, initialDeck, initialTokens);
+
+                const systemPrompt = generateAiSystemPrompt(aiOpponent.name || 'AI', aiDeckMd, localPlayerDeckMd, rulesText);
+
+                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+                audioContextRef.current = audioCtx;
+
+                const client = new GeminiLiveClient({
+                    apiKey: geminiApiKey,
+                    systemInstruction: systemPrompt,
+                    onText: (msg) => {
+                        if (!active) return;
+                        console.log("AI Message received:", msg);
+                        if (handleAiResponseRef.current) {
+                            handleAiResponseRef.current(msg);
+                        }
+                    },
+                    onAudio: (audioData) => { }
+                });
+
+                aiClientRef.current = client;
+
+                await client.connect();
+                if (active) {
+                    setAiConnected(true);
+                    addLog("AI connected to voice api!", "SYSTEM");
+                    // client.sendText("Hello! Let's start the game. It is currently the SETUP phase.");
+                }
+            } catch (err) {
+                console.error("AI Init failed", err);
+                if (active) addLog("Failed to connect AI opponent", "SYSTEM");
+            }
+        };
+
+        if (!aiConnected && !aiClientRef.current) {
+            initAi();
+        }
+
+        return () => {
+            active = false;
+            if (aiClientRef.current) {
+                aiClientRef.current.disconnect();
+                aiClientRef.current = null;
+            }
+            if (audioContextRef.current) {
+                audioContextRef.current.close().catch(() => { });
+                audioContextRef.current = null;
+            }
+            setAiConnected(false);
+        };
+    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens, aiConnected]);
+
+    // AI Command Executor loop
+    useEffect(() => {
+        handleAiResponseRef.current = (msg: string) => {
+            const aiOpponent = localOpponents.find(o => o.type === 'ai');
+            if (!aiOpponent) return;
+
+            const aiId = aiOpponent.id || '';
+            const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
+
+            const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
+            let match;
+            while ((match = jsonBlockRegex.exec(msg)) !== null) {
+                try {
+                    const jsonStr = match[1];
+                    const command = JSON.parse(jsonStr);
+                    console.log("AI executing:", command);
+
+                    const state = localPlayerStates.current[aiId];
+                    if (!state) continue;
+
+                    switch (command.action) {
+                        case 'draw_card': {
+                            const amount = command.args.amount || 1;
+                            if (state.library.length < amount) break;
+                            const drawn = state.library.slice(0, amount);
+                            state.library = state.library.slice(amount);
+                            state.hand = [...state.hand, ...drawn];
+
+                            addLog(`${aiOpponent.name} drew ${amount} card(s)`);
+
+                            if (myId === aiId) {
+                                setLibrary(state.library);
+                                setHand(state.hand);
+                            }
+                            sendHandUpdate(aiId, state.hand, gamePhase, state.mulliganCount);
+                            break;
+                        }
+                        case 'move_card': {
+                            const name = command.args.cardName;
+                            const zone = command.args.zone;
+
+                            if (zone === 'battlefield') {
+                                const cardInHand = state.hand.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
+                                if (cardInHand) {
+                                    handleMobilePlayCard({ playerId: aiId, cardId: cardInHand.id });
+                                }
+                            } else if (zone === 'graveyard' || zone === 'exile') {
+                                const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
+                                if (objOnBoard) {
+                                    setBoardObjects(prev => prev.filter(o => o.id !== objOnBoard.id));
+                                    emitAction('REMOVE_OBJECT', { id: objOnBoard.id });
+                                    if (zone === 'graveyard') state.graveyard.unshift(objOnBoard.cardData);
+                                    if (zone === 'exile') state.exile.unshift(objOnBoard.cardData);
+                                    addLog(`${aiOpponent.name} moved ${objOnBoard.cardData.name} to ${zone}`);
+
+                                    if (myId === aiId) {
+                                        if (zone === 'graveyard') setGraveyard(state.graveyard);
+                                        if (zone === 'exile') setExile(state.exile);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                        case 'tap_untap': {
+                            const name = command.args.cardName;
+                            const candidates = boardObjectsRef.current.filter(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
+                            if (candidates.length > 0) {
+                                const myControllerIdx = playersListRef.current.findIndex(p => p.id === aiId);
+                                const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
+                                const objOnBoard = candidates.find(o => o.rotation === defaultRot) || candidates[0];
+                                const isTapped = objOnBoard.rotation !== defaultRot;
+                                const newRot = isTapped ? defaultRot : (defaultRot + 90) % 360;
+
+                                setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, rotation: newRot } : o));
+                                emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { rotation: newRot } });
+                                addLog(`${aiOpponent.name} ${isTapped ? 'untapped' : 'tapped'} ${objOnBoard.cardData.name}`);
+                            }
+                            break;
+                        }
+                        case 'change_life': {
+                            const amount = command.args.amount || 0;
+                            handleMobileUpdateLife({ playerId: aiId, amount });
+                            break;
+                        }
+                        case 'add_counter': {
+                            const name = command.args.cardName;
+                            const amount = command.args.amount;
+                            const cType = command.args.counterType;
+                            const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
+                            if (objOnBoard) {
+                                const newCount = (objOnBoard.counters[cType] || 0) + amount;
+                                setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, counters: { ...o.counters, [cType]: newCount } } : o));
+                                emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { counters: { ...objOnBoard.counters, [cType]: newCount } } });
+                                addLog(`${aiOpponent.name} updated ${cType} counter on ${objOnBoard.cardData.name} by ${amount}`);
+                            }
+                            break;
+                        }
+                        case 'mulligan': {
+                            const keep = command.args.keep;
+                            handleMobileMulligan({ playerId: aiId, keep });
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to parse AI command JSON:", e);
+                }
+            }
+        };
+    });
+
+    // AI Turn Recap Generator
+    useEffect(() => {
+        const aiOpponent = isLocal ? localOpponents.find(o => o.type === 'ai') : undefined;
+        if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
+
+        const aiId = aiOpponent.id || '';
+        if (currentTurnPlayerId !== aiId) return;
+
+        // It is now the AI's turn! Generate a recap of the board state.
+        const state = localPlayerStates.current[aiId];
+        if (!state) return;
+
+        let recap = `--- TURN START RECAP ---\n`;
+        recap += `It is now your turn! (Phase: ${gamePhase}, Step: ${turnStep})\n\n`;
+
+        recap += `Your Hand (${state.hand.filter(c => !c.isToken).length} cards):\n`;
+        state.hand.filter(c => !c.isToken).forEach(c => recap += `- ${c.name}\n`);
+        recap += `\nYour Board:\n`;
+
+        const myBoard = boardObjects.filter(o => o.controllerId === aiId);
+        if (myBoard.length === 0) recap += `(Empty)\n`;
+        myBoard.forEach(o => {
+            const controllerIdx = playersList.findIndex(p => p.id === aiId);
+            const defaultRot = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
+            const isTapped = o.rotation !== defaultRot;
+            recap += `- ${o.cardData.name} ${isTapped ? '(TAPPED)' : '(UNTAPPED)'}\n`;
+        });
+
+        recap += `\nOpponents:\n`;
+        playersList.filter(p => p.id !== aiId).forEach(p => {
+            const isMe = p.id === socket.id || p.id === 'local-player' || p.id === playersList[mySeatIndex]?.id;
+            const oppLife = opponentsLife[p.id] ?? 40;
+            const hpCount = isMe ? life : oppLife;
+            // Get proper hand count for opponent
+            let oppHandCount = 0;
+            if (isLocal && !isMe) {
+                const s = localPlayerStates.current[p.id];
+                oppHandCount = s ? s.hand.filter(c => !c.isToken).length : 0;
+            } else if (isMe) {
+                oppHandCount = hand.filter(c => !c.isToken).length;
+            } else {
+                oppHandCount = opponentsCounts[p.id]?.hand || 0;
+            }
+
+            recap += `${p.name} - Life: ${hpCount}, Hand: ${oppHandCount} cards\n`;
+
+            const oppBoard = boardObjects.filter(o => o.controllerId === p.id);
+            if (oppBoard.length > 0) {
+                recap += `  Board:\n`;
+                oppBoard.forEach(o => {
+                    const oppIdx = playersList.findIndex(x => x.id === p.id);
+                    const defRot = (oppIdx !== -1 && layout[oppIdx]) ? layout[oppIdx].rot : 0;
+                    const isTapped = o.rotation !== defRot;
+                    recap += `  - ${o.cardData.name} ${isTapped ? '(TAPPED)' : '(UNTAPPED)'}\n`;
+                });
+            }
+        });
+        recap += `\nWhat actions will you take? Remember to pass the turn when you are finished.`;
+
+        aiClientRef.current.sendText(recap);
+        console.log("Sent Turn Recap to AI");
+
+    }, [currentTurnPlayerId, turnStep, aiConnected, localOpponents, socket.id, mySeatIndex, playersList, boardObjects, layout, opponentsLife, gamePhase, isLocal, hand, opponentsCounts, localPlayerStates]);
+
 
     const cardsInHand = hand.filter(c => !c.isToken);
     const tokensInHand = hand.filter(c => c.isToken);

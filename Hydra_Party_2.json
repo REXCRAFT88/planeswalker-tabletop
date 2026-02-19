@@ -1,9 +1,9 @@
 {
-  "id": "10db340b-faab-4941-b441-9a358a8438cc",
-  "name": "HYDRA 3",
+  "id": "cdd17f2c-b83f-420c-b9cb-b38705bb8379",
+  "name": "Hydra Party 2",
   "deck": [
     {
-      "id": "204854dc-ab14-411f-a81c-823a84615e7f",
+      "id": "26973d83-8929-440b-89f6-655cce9586a5",
       "scryfallId": "f7e2b0e1-c9ea-4f91-b19e-73b1bd6a0884",
       "name": "Abzan Falconer",
       "imageUrl": "https://cards.scryfall.io/normal/front/f/7/f7e2b0e1-c9ea-4f91-b19e-73b1bd6a0884.jpg?1682208232",
@@ -18,10 +18,23 @@
       "isCommander": false
     },
     {
-      "id": "e98115cf-5bb5-429e-9bef-75125662d2ef",
-      "scryfallId": "aa9e7f3c-e752-4cee-9e9d-fae38ba27dc9",
+      "id": "2cc64da0-5fa5-4fbc-912c-57430b656a09",
+      "scryfallId": "ff681dc2-bc62-4934-b936-49af1da4af6c",
+      "name": "Animist's Awakening",
+      "imageUrl": "https://cards.scryfall.io/normal/front/f/f/ff681dc2-bc62-4934-b936-49af1da4af6c.jpg?1591320765",
+      "typeLine": "Sorcery",
+      "oracleText": "Reveal the top X cards of your library. Put all land cards from among them onto the battlefield tapped and the rest on the bottom of your library in a random order.\nSpell mastery — If there are two or more instant and/or sorcery cards in your graveyard, untap those lands.",
+      "manaCost": "{X}{G}",
+      "cmc": 1,
+      "isLand": false,
+      "isManaSource": false,
+      "isCommander": false
+    },
+    {
+      "id": "84fcd543-b82b-47a2-95b9-449c2c8bd928",
+      "scryfallId": "049ca0ff-0ca4-44f7-b144-731cf453afa9",
       "name": "Arcane Signet",
-      "imageUrl": "https://cards.scryfall.io/normal/front/a/a/aa9e7f3c-e752-4cee-9e9d-fae38ba27dc9.jpg?1767730206",
+      "imageUrl": "https://cards.scryfall.io/normal/front/0/4/049ca0ff-0ca4-44f7-b144-731cf453afa9.jpg?1771424531",
       "typeLine": "Artifact",
       "oracleText": "{T}: Add one mana of any color in your commander's color identity.",
       "manaCost": "{2}",
@@ -39,22 +52,7 @@
       "isCommander": false
     },
     {
-      "id": "9d9a8f50-bcad-40db-9f72-a19b5bba2ce8",
-      "scryfallId": "5b76074c-65ca-40e9-b125-4668d3431820",
-      "name": "Armorcraft Judge",
-      "imageUrl": "https://cards.scryfall.io/normal/front/5/b/5b76074c-65ca-40e9-b125-4668d3431820.jpg?1689998353",
-      "typeLine": "Creature — Elf Artificer",
-      "oracleText": "When this creature enters, draw a card for each creature you control with a +1/+1 counter on it.",
-      "manaCost": "{3}{G}",
-      "cmc": 4,
-      "isLand": false,
-      "isManaSource": false,
-      "power": "3",
-      "toughness": "3",
-      "isCommander": false
-    },
-    {
-      "id": "d60ece6f-46d7-4112-b69c-59b050714fb9",
+      "id": "05927922-55ae-4054-b413-075bb0623a6d",
       "scryfallId": "ccac70d4-6e04-4802-8bb8-021368a40e14",
       "name": "Beast Within",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/c/ccac70d4-6e04-4802-8bb8-021368a40e14.jpg?1752944774",
@@ -67,7 +65,7 @@
       "isCommander": false
     },
     {
-      "id": "a623ce95-e1c1-45a8-9fe2-8e31e67810e2",
+      "id": "dac9299c-ecb0-4319-b3c7-c52f6cb2e688",
       "scryfallId": "c575ed35-6357-4b48-9d20-e4249577142b",
       "name": "Benevolent Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/5/c575ed35-6357-4b48-9d20-e4249577142b.jpg?1763971915",
@@ -82,7 +80,7 @@
       "isCommander": false
     },
     {
-      "id": "4bbe8c1f-72dc-4484-9c78-a5d9abf39fdc",
+      "id": "c9ae8fa7-18d0-46a1-945f-4f35cf918255",
       "scryfallId": "1144014b-f13b-4397-97ed-a8de46371a2c",
       "name": "Boseiju Reaches Skyward // Branch of Boseiju",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/1/1144014b-f13b-4397-97ed-a8de46371a2c.jpg?1656453331",
@@ -95,7 +93,7 @@
       "isCommander": false
     },
     {
-      "id": "8959cc3a-1994-42cf-8366-90f287871756",
+      "id": "7015db8a-5eae-4096-9337-f8296e74fe31",
       "scryfallId": "c2a85a8e-28bb-4899-a922-13a03dec844c",
       "name": "Canopy Vista",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/2/c2a85a8e-28bb-4899-a922-13a03dec844c.jpg?1743207450",
@@ -113,7 +111,7 @@
       "isCommander": false
     },
     {
-      "id": "a035024a-d02e-420d-98f1-8a31ac21daa8",
+      "id": "1ba85c0f-addc-4eb8-b314-554e8185e31e",
       "scryfallId": "46eff31d-f460-48f2-aab7-8b9b89cd87fe",
       "name": "Champion of Lambholt",
       "imageUrl": "https://cards.scryfall.io/normal/front/4/6/46eff31d-f460-48f2-aab7-8b9b89cd87fe.jpg?1682209453",
@@ -128,7 +126,7 @@
       "isCommander": false
     },
     {
-      "id": "02ae117e-991a-4715-87ce-0b2c9d40cd76",
+      "id": "fcdaf0a6-f581-4270-b1fa-75b650b68b30",
       "scryfallId": "9c13bc7c-a536-44d0-8c89-49ff33bee326",
       "name": "Citadel Siege",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/c/9c13bc7c-a536-44d0-8c89-49ff33bee326.jpg?1637629045",
@@ -141,10 +139,23 @@
       "isCommander": false
     },
     {
-      "id": "fc8c7ba6-ffac-47a7-b100-4b7bd23f8462",
-      "scryfallId": "da4d9f44-9079-4144-8dd9-076be04032d4",
+      "id": "9c968d75-f423-49c9-8d1d-a931e33dd24b",
+      "scryfallId": "4836e220-5c89-49fc-8918-a51adf026ab4",
+      "name": "Clever Concealment",
+      "imageUrl": "https://cards.scryfall.io/normal/front/4/8/4836e220-5c89-49fc-8918-a51adf026ab4.jpg?1748705045",
+      "typeLine": "Instant",
+      "oracleText": "Convoke (Your creatures can help cast this spell. Each creature you tap while casting this spell pays for {1} or one mana of that creature's color.)\nAny number of target nonland permanents you control phase out. (Treat them and anything attached to them as though they don't exist until your next turn.)",
+      "manaCost": "{2}{W}{W}",
+      "cmc": 4,
+      "isLand": false,
+      "isManaSource": false,
+      "isCommander": false
+    },
+    {
+      "id": "4b7ab861-778d-4763-a8e4-7f58f47437c1",
+      "scryfallId": "4d51a621-be31-4b74-8e0b-3958180a8bc5",
       "name": "Command Tower",
-      "imageUrl": "https://cards.scryfall.io/normal/front/d/a/da4d9f44-9079-4144-8dd9-076be04032d4.jpg?1767730254",
+      "imageUrl": "https://cards.scryfall.io/normal/front/4/d/4d51a621-be31-4b74-8e0b-3958180a8bc5.jpg?1771424570",
       "typeLine": "Land",
       "oracleText": "{T}: Add one mana of any color in your commander's color identity.",
       "manaCost": "",
@@ -162,7 +173,7 @@
       "isCommander": false
     },
     {
-      "id": "0ea5ca5d-ec25-41e9-bb97-0043b4a7d857",
+      "id": "d5ea0342-44a4-4130-87e5-96380e6fc938",
       "scryfallId": "c6d36786-6e36-4a9b-97ad-ad7d9d2b8d92",
       "name": "Conclave Mentor",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/6/c6d36786-6e36-4a9b-97ad-ad7d9d2b8d92.jpg?1682209691",
@@ -177,20 +188,7 @@
       "isCommander": false
     },
     {
-      "id": "b5e019ce-84fd-4004-8884-544e43431d14",
-      "scryfallId": "4d36559d-3b91-46e4-bc39-c489842adcbf",
-      "name": "Cultivate",
-      "imageUrl": "https://cards.scryfall.io/normal/front/4/d/4d36559d-3b91-46e4-bc39-c489842adcbf.jpg?1767731192",
-      "typeLine": "Sorcery",
-      "oracleText": "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
-      "manaCost": "{2}{G}",
-      "cmc": 3,
-      "isLand": false,
-      "isManaSource": false,
-      "isCommander": false
-    },
-    {
-      "id": "16524a01-9ad7-408d-9137-d23edb7df9b0",
+      "id": "2c7026cf-9f23-4571-bf0d-66fa4da5f015",
       "scryfallId": "5be40c34-6df0-4471-b99b-850ae2be9923",
       "name": "Damning Verdict",
       "imageUrl": "https://cards.scryfall.io/normal/front/5/b/5be40c34-6df0-4471-b99b-850ae2be9923.jpg?1673481768",
@@ -203,7 +201,7 @@
       "isCommander": false
     },
     {
-      "id": "a367e759-93e4-4353-bf7a-108d4a28968c",
+      "id": "a14a3eec-3b9c-4f18-9c7e-e2ecedcd0ceb",
       "scryfallId": "eb39a0c0-668f-4881-957a-3d09c50beaf4",
       "name": "Duskshell Crawler",
       "imageUrl": "https://cards.scryfall.io/normal/front/e/b/eb39a0c0-668f-4881-957a-3d09c50beaf4.jpg?1706240029",
@@ -218,7 +216,7 @@
       "isCommander": false
     },
     {
-      "id": "5ee07f40-d721-43c6-8ccb-5ec3cb6a161c",
+      "id": "8d8e194f-c63d-4515-826d-0070a85c88e9",
       "scryfallId": "1d58d08d-cd62-416d-8d8e-7d9c56d5c4da",
       "name": "Evolution Sage",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/d/1d58d08d-cd62-416d-8d8e-7d9c56d5c4da.jpg?1767731161",
@@ -233,7 +231,22 @@
       "isCommander": false
     },
     {
-      "id": "66c79101-6c82-437b-b537-42fda1a239a9",
+      "id": "94b30272-7e6a-4cfe-9ef5-93c577817dfb",
+      "scryfallId": "4d89283e-9783-4006-9294-4ae0473d2ce6",
+      "name": "Evolution Witness",
+      "imageUrl": "https://cards.scryfall.io/normal/front/4/d/4d89283e-9783-4006-9294-4ae0473d2ce6.jpg?1717012437",
+      "typeLine": "Creature — Elf Shaman Mutant",
+      "oracleText": "{1}{G}: Adapt 2. (If this creature has no +1/+1 counters on it, put two +1/+1 counters on it.)\nWhenever one or more +1/+1 counters are put on this creature, return target permanent card from your graveyard to your hand.",
+      "manaCost": "{2}{G}",
+      "cmc": 3,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "2",
+      "toughness": "1",
+      "isCommander": false
+    },
+    {
+      "id": "26869156-9426-4f58-9598-a1743cfee1a4",
       "scryfallId": "89e3cc09-5057-4c05-88fc-d6cda809fc74",
       "name": "Felidar Retreat",
       "imageUrl": "https://cards.scryfall.io/normal/front/8/9/89e3cc09-5057-4c05-88fc-d6cda809fc74.jpg?1730490783",
@@ -246,7 +259,7 @@
       "isCommander": false
     },
     {
-      "id": "bb10f562-7d26-42a7-8f7c-5abe460243c9",
+      "id": "6dd9eba3-875b-4c5f-b6b7-4379255c5e6b",
       "scryfallId": "d6313ef4-c1a0-4315-8db9-a3666e49daa8",
       "name": "Ferrafor, Young Yew",
       "imageUrl": "https://cards.scryfall.io/normal/front/d/6/d6313ef4-c1a0-4315-8db9-a3666e49daa8.jpg?1768940612",
@@ -261,7 +274,7 @@
       "isCommander": false
     },
     {
-      "id": "4098f81a-f0bf-4ae3-8f2c-8dcc2f542515",
+      "id": "cae51131-21f0-4972-8413-c63fc882ce23",
       "scryfallId": "2d73ea23-52ab-4b92-b263-dc8b9e5a1010",
       "name": "Fertilid",
       "imageUrl": "https://cards.scryfall.io/normal/front/2/d/2d73ea23-52ab-4b92-b263-dc8b9e5a1010.jpg?1682209480",
@@ -276,10 +289,10 @@
       "isCommander": false
     },
     {
-      "id": "4e349fee-8003-44a6-a44c-e5a463339b0e",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "73445294-1f7c-4bef-ae47-1ad4292cde46",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -293,10 +306,10 @@
       "isCommander": false
     },
     {
-      "id": "551c98d4-5b84-4d31-85d0-36793a7cce14",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "ccd274c0-0379-460b-a202-e2081aca42e4",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -310,10 +323,10 @@
       "isCommander": false
     },
     {
-      "id": "fc3c7d75-d9f0-4675-bf57-e1d49e16ec67",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "ac0ad1c1-0742-4c0b-b166-f2b64f5f0a46",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -327,10 +340,10 @@
       "isCommander": false
     },
     {
-      "id": "b68676c2-a280-4cf4-83ba-83de9b31fc6d",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "0fea3ac6-2c89-48ea-8d3b-386254110f23",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -344,10 +357,10 @@
       "isCommander": false
     },
     {
-      "id": "83f055ba-8faa-46bd-b2df-587c46678b44",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "23e4d0ab-a9c3-4f46-91a1-b70398be8e0d",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -361,10 +374,10 @@
       "isCommander": false
     },
     {
-      "id": "1af65506-126b-4dc6-902f-d9d1d554b08f",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "95d82963-7c6c-4edf-bd01-14d91966c68d",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -378,10 +391,10 @@
       "isCommander": false
     },
     {
-      "id": "9875b913-ae86-4c37-b764-909ef47dd5a9",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "81eb34be-aa88-44aa-8203-08fb9f015aff",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -395,10 +408,10 @@
       "isCommander": false
     },
     {
-      "id": "50cec586-b3e2-4487-a2b6-5ab565b637cd",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "5eaab9b7-cff9-42fd-a574-4ff632545fc3",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -412,10 +425,10 @@
       "isCommander": false
     },
     {
-      "id": "57b91b2d-3f93-4def-a6c5-5ae904b8e32e",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "7df1aa59-98e6-449b-b93d-7a50bde8ae70",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -429,10 +442,10 @@
       "isCommander": false
     },
     {
-      "id": "8ce766ec-72b7-4235-98e7-7501df533b43",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "d4d5ff07-4815-4c82-8744-074b6a3f72e3",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -446,10 +459,10 @@
       "isCommander": false
     },
     {
-      "id": "df853eec-a09b-4f90-99ff-f91ad3318fba",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "3b6ca423-c606-42cd-b767-b739aad0dfd1",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -463,10 +476,10 @@
       "isCommander": false
     },
     {
-      "id": "a45db643-a3c6-4313-9849-f6714fc8b561",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "17c13fb4-66a7-45f1-afd6-cbee0110b4fd",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -480,10 +493,10 @@
       "isCommander": false
     },
     {
-      "id": "eb038c40-ed97-49bd-bd75-3f8fbe8fc68d",
-      "scryfallId": "b460f5f7-c7c9-400c-8419-23d614f45bf9",
+      "id": "5eaf5208-8051-4c7c-a62b-11101bd924bf",
+      "scryfallId": "6194850b-d70a-4f3e-be3e-bfb23ce1170b",
       "name": "Forest",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/4/b460f5f7-c7c9-400c-8419-23d614f45bf9.jpg?1767773926",
+      "imageUrl": "https://cards.scryfall.io/normal/front/6/1/6194850b-d70a-4f3e-be3e-bfb23ce1170b.jpg?1771343588",
       "typeLine": "Basic Land — Forest",
       "oracleText": "({T}: Add {G}.)",
       "manaCost": "",
@@ -497,7 +510,7 @@
       "isCommander": false
     },
     {
-      "id": "3f71a3fc-702b-4789-846e-83fa3cc6ffab",
+      "id": "bd3bc0c3-bd03-42a8-8ee7-200667c92dd2",
       "scryfallId": "90fc94d9-b8af-4de8-a42d-ae508f8f1cd5",
       "name": "Forgotten Ancient",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/0/90fc94d9-b8af-4de8-a42d-ae508f8f1cd5.jpg?1682209488",
@@ -512,7 +525,7 @@
       "isCommander": false
     },
     {
-      "id": "c4e42890-cb85-4298-b828-75f7825a5767",
+      "id": "f2c9d0c4-4dd0-437b-9a82-9c3794f84f0e",
       "scryfallId": "4a0aeb3a-923a-4b97-9d27-ea7e0b57de75",
       "name": "Fortified Village",
       "imageUrl": "https://cards.scryfall.io/normal/front/4/a/4a0aeb3a-923a-4b97-9d27-ea7e0b57de75.jpg?1743207579",
@@ -530,7 +543,7 @@
       "isCommander": false
     },
     {
-      "id": "5b8e3291-b87d-4369-89c2-62b8e8cee946",
+      "id": "8288fe5a-af8f-4d77-a0e5-7bc505f10158",
       "scryfallId": "4e446e90-6e31-43ed-bcb1-a01422b503c0",
       "name": "Gargos, Vicious Watcher",
       "imageUrl": "https://cards.scryfall.io/normal/front/4/e/4e446e90-6e31-43ed-bcb1-a01422b503c0.jpg?1592517214",
@@ -545,7 +558,7 @@
       "isCommander": false
     },
     {
-      "id": "dcad6c36-af1a-40dc-b41a-8193442cbd24",
+      "id": "0de708dd-af5a-4a20-ab80-0e6ba6f5dbd8",
       "scryfallId": "b58c4033-f764-42f6-966f-b7202a2babbf",
       "name": "Garruk's Uprising",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/5/b58c4033-f764-42f6-966f-b7202a2babbf.jpg?1767731186",
@@ -558,7 +571,7 @@
       "isCommander": false
     },
     {
-      "id": "0cf69159-0ae9-4cd2-a659-9cb5124b0b9d",
+      "id": "c15c705a-8228-4347-80fc-7fd8732a431f",
       "scryfallId": "fc70e127-ffc8-45ed-9ca3-7f9f926ac4d5",
       "name": "Generous Gift",
       "imageUrl": "https://cards.scryfall.io/normal/front/f/c/fc70e127-ffc8-45ed-9ca3-7f9f926ac4d5.jpg?1700321873",
@@ -571,7 +584,7 @@
       "isCommander": false
     },
     {
-      "id": "c511b824-a548-4a9c-b05f-8fc1591a4c4a",
+      "id": "8626e5af-01d9-4a04-940f-21c867eefca1",
       "scryfallId": "55502dd7-a92b-41bc-b6b1-8e0347649faf",
       "name": "Genesis Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/5/5/55502dd7-a92b-41bc-b6b1-8e0347649faf.jpg?1712354569",
@@ -586,7 +599,7 @@
       "isCommander": false
     },
     {
-      "id": "f26202c1-5292-40b8-973d-f03bb9c08886",
+      "id": "d2b96de6-f4b1-455b-99e0-87aa21062005",
       "scryfallId": "eabbe163-2b15-42e3-89ce-7363e6250d3a",
       "name": "Good-Fortune Unicorn",
       "imageUrl": "https://cards.scryfall.io/normal/front/e/a/eabbe163-2b15-42e3-89ce-7363e6250d3a.jpg?1730489497",
@@ -601,7 +614,7 @@
       "isCommander": false
     },
     {
-      "id": "93e0747e-1141-4303-b956-816f1660a4a9",
+      "id": "3c8c3027-9b0d-47fe-af14-b8773a09b704",
       "scryfallId": "be573ae7-967a-4b98-9058-ec3ff82ff63f",
       "name": "Gyre Sage",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/e/be573ae7-967a-4b98-9058-ec3ff82ff63f.jpg?1682209516",
@@ -620,7 +633,7 @@
       "isCommander": false
     },
     {
-      "id": "8c60d2a4-195a-4f2b-ad84-96a70b5f71da",
+      "id": "33ca92a3-af35-4133-a6f5-99ac93115787",
       "scryfallId": "fc69ad56-9ae2-4eb5-b7e2-558524f6cbcc",
       "name": "Hardened Scales",
       "imageUrl": "https://cards.scryfall.io/normal/front/f/c/fc69ad56-9ae2-4eb5-b7e2-558524f6cbcc.jpg?1698988369",
@@ -633,7 +646,7 @@
       "isCommander": false
     },
     {
-      "id": "b25b2e14-7ae3-4ba9-a82e-4b523c0c3157",
+      "id": "a64493dd-ab28-4005-938e-15fe8fbc68af",
       "scryfallId": "828f752e-cf94-4d0e-913d-aa425a005849",
       "name": "Hooded Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/8/2/828f752e-cf94-4d0e-913d-aa425a005849.jpg?1706240889",
@@ -648,7 +661,7 @@
       "isCommander": false
     },
     {
-      "id": "99577b29-7a50-4369-a0f8-4007be76b188",
+      "id": "48a0699c-b22a-4a9a-ba01-233ede1b3183",
       "scryfallId": "cce0561d-252a-499f-bfa0-9de59e4ea5ba",
       "name": "Hungering Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/c/cce0561d-252a-499f-bfa0-9de59e4ea5ba.jpg?1591320908",
@@ -663,7 +676,7 @@
       "isCommander": false
     },
     {
-      "id": "736b4092-a29f-452a-80b7-8eaf26f18554",
+      "id": "530a352d-0de1-4790-a756-dfb9986e9016",
       "scryfallId": "5b11bb5a-66e3-4dc6-9df4-e1683c57e488",
       "name": "Hydra Broodmaster",
       "imageUrl": "https://cards.scryfall.io/normal/front/5/b/5b11bb5a-66e3-4dc6-9df4-e1683c57e488.jpg?1625194477",
@@ -678,7 +691,7 @@
       "isCommander": false
     },
     {
-      "id": "cac89f68-074c-499d-95c5-568f675f4644",
+      "id": "f8e492bd-3c74-4c30-b27c-6a552d2e7ef7",
       "scryfallId": "b3d8c95e-09b9-46d6-80e9-95adb2c2ea9d",
       "name": "Incubation Druid",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/3/b3d8c95e-09b9-46d6-80e9-95adb2c2ea9d.jpg?1682209534",
@@ -701,7 +714,7 @@
       "isCommander": false
     },
     {
-      "id": "0e393dcc-60ad-4138-9a6d-b5b8824ad25b",
+      "id": "ffa5f2cf-e7ac-4e5c-8d84-bb99785a45fd",
       "scryfallId": "3e241642-5172-4437-b694-f6aa159d5cd9",
       "name": "Inspiring Call",
       "imageUrl": "https://cards.scryfall.io/normal/front/3/e/3e241642-5172-4437-b694-f6aa159d5cd9.jpg?1730489440",
@@ -714,7 +727,7 @@
       "isCommander": false
     },
     {
-      "id": "8af910fa-9fc8-48bb-bb2b-9ace434012b7",
+      "id": "c32c908c-3fa1-4995-90f0-4d18c24f7300",
       "scryfallId": "1d21ae20-2ef5-4dc0-aced-97497e6a8025",
       "name": "Kalonian Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/d/1d21ae20-2ef5-4dc0-aced-97497e6a8025.jpg?1682209560",
@@ -729,7 +742,7 @@
       "isCommander": false
     },
     {
-      "id": "74cf1007-b62c-4799-9728-0581dc7cc2fa",
+      "id": "debf0f03-99ca-489b-a201-b5399d2c65f8",
       "scryfallId": "5c644650-3861-4a78-9e39-a413b073ddac",
       "name": "Kami of Whispered Hopes",
       "imageUrl": "https://cards.scryfall.io/normal/front/5/c/5c644650-3861-4a78-9e39-a413b073ddac.jpg?1682204938",
@@ -752,7 +765,7 @@
       "isCommander": false
     },
     {
-      "id": "a3a15395-182c-4870-a6d3-ac8709379271",
+      "id": "ba7bc6d3-9973-4e1d-b8ce-e7db05f34200",
       "scryfallId": "22017ec2-3552-4865-af76-dba042b141f5",
       "name": "Karn's Bastion",
       "imageUrl": "https://cards.scryfall.io/normal/front/2/2/22017ec2-3552-4865-af76-dba042b141f5.jpg?1752945351",
@@ -769,7 +782,7 @@
       "isCommander": false
     },
     {
-      "id": "a05f620f-13e0-46c5-a8f2-1bfe78606bf5",
+      "id": "a26724b0-e0e1-4e39-995c-94a689ec3464",
       "scryfallId": "99535539-aa73-41ed-86ab-21c97b92620d",
       "name": "Khalni Ambush // Khalni Territory",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/9/99535539-aa73-41ed-86ab-21c97b92620d.jpg?1604337759",
@@ -786,7 +799,7 @@
       "isCommander": false
     },
     {
-      "id": "5105ee1c-51db-4941-a6c2-0e2643f7c5a0",
+      "id": "ee41f294-ebf6-460c-8e34-19876a59fc48",
       "scryfallId": "90c423cc-1264-4067-9c50-e7c88c68ef2d",
       "name": "Kodama's Reach",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/0/90c423cc-1264-4067-9c50-e7c88c68ef2d.jpg?1767731241",
@@ -799,7 +812,7 @@
       "isCommander": false
     },
     {
-      "id": "f1fbf4a2-871a-4ccf-becc-70db6e6fe4e4",
+      "id": "742de824-715a-4d3c-ad2a-ce3936d5982a",
       "scryfallId": "19fc5bec-f877-430c-8e83-e6c5fe97f3c4",
       "name": "Krosan Verge",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/9/19fc5bec-f877-430c-8e83-e6c5fe97f3c4.jpg?1712355058",
@@ -816,7 +829,7 @@
       "isCommander": false
     },
     {
-      "id": "646a1df8-f190-4ea1-9463-01e2f169708a",
+      "id": "afce84f8-a429-461a-874c-d290e0754fa0",
       "scryfallId": "2b726c03-07e8-4a9b-bdac-dc50218626a3",
       "name": "Lifeblood Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/2/b/2b726c03-07e8-4a9b-bdac-dc50218626a3.jpg?1689998666",
@@ -831,7 +844,7 @@
       "isCommander": false
     },
     {
-      "id": "4b8b0c32-9eb0-459c-a644-e979832ca9e8",
+      "id": "be609405-4319-479e-bec3-900bd2d2977c",
       "scryfallId": "284e165e-9ab6-47fc-9685-0fb03de237df",
       "name": "Llanowar Reborn",
       "imageUrl": "https://cards.scryfall.io/normal/front/2/8/284e165e-9ab6-47fc-9685-0fb03de237df.jpg?1698988601",
@@ -848,22 +861,7 @@
       "isCommander": false
     },
     {
-      "id": "43621cd8-a5a4-4246-826d-a23dc02502ae",
-      "scryfallId": "08edd941-5ecc-4015-bd5d-e2eebfbf2ba6",
-      "name": "Loyal Guardian",
-      "imageUrl": "https://cards.scryfall.io/normal/front/0/8/08edd941-5ecc-4015-bd5d-e2eebfbf2ba6.jpg?1689998676",
-      "typeLine": "Creature — Rhino",
-      "oracleText": "Trample\nLieutenant — At the beginning of combat on your turn, if you control your commander, put a +1/+1 counter on each creature you control.",
-      "manaCost": "{4}{G}",
-      "cmc": 5,
-      "isLand": false,
-      "isManaSource": false,
-      "power": "4",
-      "toughness": "4",
-      "isCommander": false
-    },
-    {
-      "id": "ef9b9f97-d9dc-41cf-b6e0-f97f42fcc4b2",
+      "id": "96b00e67-48b0-43aa-97d7-a73b4cdfb1e9",
       "scryfallId": "e9c124d7-b4b1-43cf-9830-1244053cc056",
       "name": "Managorger Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/e/9/e9c124d7-b4b1-43cf-9830-1244053cc056.jpg?1682209577",
@@ -878,7 +876,7 @@
       "isCommander": false
     },
     {
-      "id": "946d5b97-c775-4c4e-9fb5-d11804555c03",
+      "id": "dde55ec9-1bb5-4085-8e0a-30f5d0c8f59d",
       "scryfallId": "fb885d30-c6e5-494a-bc01-3d5085b8e262",
       "name": "Mikaeus, the Lunarch",
       "imageUrl": "https://cards.scryfall.io/normal/front/f/b/fb885d30-c6e5-494a-bc01-3d5085b8e262.jpg?1682208524",
@@ -893,7 +891,7 @@
       "isCommander": false
     },
     {
-      "id": "f4a9209b-bc59-4427-b502-9c12c1447cb4",
+      "id": "ac74a318-3262-4d36-b127-75ff05f2fb6d",
       "scryfallId": "3c844ed7-8ed2-4a39-9134-e14e476ab0c4",
       "name": "Mistcutter Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/3/c/3c844ed7-8ed2-4a39-9134-e14e476ab0c4.jpg?1562816923",
@@ -908,20 +906,7 @@
       "isCommander": false
     },
     {
-      "id": "477f1175-cc9f-44dd-8d9b-58e028515fdc",
-      "scryfallId": "b999eb47-b842-47f1-be91-c79fc46e1896",
-      "name": "Monstrous Emergence",
-      "imageUrl": "https://cards.scryfall.io/normal/front/b/9/b999eb47-b842-47f1-be91-c79fc46e1896.jpg?1726328518",
-      "typeLine": "Sorcery",
-      "oracleText": "As an additional cost to cast this spell, choose a creature you control or reveal a creature card from your hand.\nMonstrous Emergence deals damage equal to the power of the creature you chose or the card you revealed to target creature.",
-      "manaCost": "{1}{G}",
-      "cmc": 2,
-      "isLand": false,
-      "isManaSource": false,
-      "isCommander": false
-    },
-    {
-      "id": "3906dd9b-d43a-4978-9012-67ad319cac94",
+      "id": "3a709eb1-c4f9-4a70-b97d-85c2c029f916",
       "scryfallId": "1490c0dc-06d6-45ee-af3c-2935b0ab1233",
       "name": "Mosswort Bridge",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/4/1490c0dc-06d6-45ee-af3c-2935b0ab1233.jpg?1743207654",
@@ -938,7 +923,7 @@
       "isCommander": false
     },
     {
-      "id": "3bc248ca-274e-41c2-9600-324a6035fa58",
+      "id": "8dd387c9-1a1a-4550-ac68-6edbf26392dc",
       "scryfallId": "3cb8fc57-6c2b-45bf-93d3-c573e31cf158",
       "name": "Oran-Rief, the Vastwood",
       "imageUrl": "https://cards.scryfall.io/normal/front/3/c/3cb8fc57-6c2b-45bf-93d3-c573e31cf158.jpg?1651656510",
@@ -955,7 +940,7 @@
       "isCommander": false
     },
     {
-      "id": "e38f5cc4-a4e9-49fc-ae58-9c8ac474e087",
+      "id": "bc933e11-83ec-4415-948b-7bde17475ea6",
       "scryfallId": "cbb081ca-75ab-40e4-b071-50ed387c90e4",
       "name": "Overwhelming Stampede",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/b/cbb081ca-75ab-40e4-b071-50ed387c90e4.jpg?1726285092",
@@ -968,7 +953,7 @@
       "isCommander": false
     },
     {
-      "id": "2ff92291-6153-45fd-962a-dc2874fd79a5",
+      "id": "bbfd2353-87a2-419b-8c66-ff2afa47fa91",
       "scryfallId": "35649ef0-b2fd-429f-be5f-766d5cea5994",
       "name": "Path to Exile",
       "imageUrl": "https://cards.scryfall.io/normal/front/3/5/35649ef0-b2fd-429f-be5f-766d5cea5994.jpg?1767730335",
@@ -981,10 +966,10 @@
       "isCommander": false
     },
     {
-      "id": "e3e2f24a-7314-427b-8744-f9a905724913",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "830e5045-7f51-405c-8054-78d62e3bb49c",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -998,10 +983,10 @@
       "isCommander": false
     },
     {
-      "id": "64f73aaa-8d45-40cb-b4a2-544b43ed1cf1",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "7087c6d5-dd75-49d2-97b9-e65eac6d1618",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1015,10 +1000,10 @@
       "isCommander": false
     },
     {
-      "id": "2d9626fa-b04d-43f6-9b46-b757be406b36",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "7086de14-4b1a-4081-8cc5-44731c5c828b",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1032,10 +1017,10 @@
       "isCommander": false
     },
     {
-      "id": "e4b6000b-9504-4394-8b69-40ca53044804",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "3308c705-a28e-4773-8d40-b2cd4d7bcd80",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1049,10 +1034,10 @@
       "isCommander": false
     },
     {
-      "id": "24254d6d-8309-4fca-ac26-63efc5dc6df8",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "18923dc1-3174-404e-8aab-a2767b86269e",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1066,10 +1051,10 @@
       "isCommander": false
     },
     {
-      "id": "d2507894-6107-40ae-8eaa-bb78c3b52ebc",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "f1ea54d5-c95e-413c-bf28-2abcce73d4c6",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1083,10 +1068,10 @@
       "isCommander": false
     },
     {
-      "id": "b2b3ff05-fafe-4831-b5b5-6fb9767534f9",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "2973a83b-49c4-4a6c-9ea6-0c963edf42ec",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1100,10 +1085,10 @@
       "isCommander": false
     },
     {
-      "id": "1b964c5d-30cc-42ad-8bbf-e9e65b5ac7fb",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "9dc2a2eb-dfea-4b35-bbe4-f75b355fe078",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1117,10 +1102,10 @@
       "isCommander": false
     },
     {
-      "id": "41f94a7a-64f9-4558-828a-3069c56da239",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
+      "id": "34c270e9-2010-48ad-bcb5-870af53e7c21",
+      "scryfallId": "1b405611-27d4-435a-8e8e-6d528626fd27",
       "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b405611-27d4-435a-8e8e-6d528626fd27.jpg?1771343562",
       "typeLine": "Basic Land — Plains",
       "oracleText": "({T}: Add {W}.)",
       "manaCost": "",
@@ -1134,24 +1119,7 @@
       "isCommander": false
     },
     {
-      "id": "6e717212-ffa6-467d-9414-346a55c3bdc9",
-      "scryfallId": "3a438199-54f8-4702-81cf-a9d42e7cd9f1",
-      "name": "Plains",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/a/3a438199-54f8-4702-81cf-a9d42e7cd9f1.jpg?1767773831",
-      "typeLine": "Basic Land — Plains",
-      "oracleText": "({T}: Add {W}.)",
-      "manaCost": "",
-      "cmc": 0,
-      "isLand": true,
-      "isManaSource": true,
-      "producedMana": [
-        "W"
-      ],
-      "manaAbilityType": "tap",
-      "isCommander": false
-    },
-    {
-      "id": "2cdb0651-157b-4b04-b67c-6b0bc6c144f9",
+      "id": "ddb7b6ee-cffd-4bbc-98f1-1d937ad266d5",
       "scryfallId": "937deb52-8888-4298-9ae5-0361c6fdbba2",
       "name": "Primordial Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/3/937deb52-8888-4298-9ae5-0361c6fdbba2.jpg?1562557233",
@@ -1166,7 +1134,20 @@
       "isCommander": false
     },
     {
-      "id": "260d4de3-97ab-48d0-8d8d-a621611e797a",
+      "id": "1f90122e-0470-4531-a31e-a243f2b8876f",
+      "scryfallId": "1966dbd2-963a-4d37-ab26-c0a0715f523f",
+      "name": "Puca's Covenant",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/9/1966dbd2-963a-4d37-ab26-c0a0715f523f.jpg?1767729860",
+      "typeLine": "Enchantment",
+      "oracleText": "Whenever a creature you control with a counter on it dies, you may return another target permanent card with mana value less than or equal to the number of counters on that creature from your graveyard to your hand. Do this only once each turn.",
+      "manaCost": "{2}{G}",
+      "cmc": 3,
+      "isLand": false,
+      "isManaSource": false,
+      "isCommander": false
+    },
+    {
+      "id": "26116db3-f4a7-4943-901a-e07bfa4bab8b",
       "scryfallId": "bd923b84-067b-4041-a0f8-e2083e0debe9",
       "name": "Rampaging Aetherhood",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/d/bd923b84-067b-4041-a0f8-e2083e0debe9.jpg?1738355351",
@@ -1181,7 +1162,20 @@
       "isCommander": false
     },
     {
-      "id": "497a35c6-6a12-44f5-92d2-f7d450cf0e26",
+      "id": "71bd7338-9a30-4c54-9c9f-48cc3970e25d",
+      "scryfallId": "78743ab3-0289-4799-b139-a37964532b92",
+      "name": "Resourceful Defense",
+      "imageUrl": "https://cards.scryfall.io/normal/front/7/8/78743ab3-0289-4799-b139-a37964532b92.jpg?1752944560",
+      "typeLine": "Enchantment",
+      "oracleText": "Whenever a permanent you control leaves the battlefield, if it had counters on it, put those counters on target permanent you control.\n{4}{W}: Move any number of counters from target permanent you control onto a second target permanent you control.",
+      "manaCost": "{2}{W}",
+      "cmc": 3,
+      "isLand": false,
+      "isManaSource": false,
+      "isCommander": false
+    },
+    {
+      "id": "4d51cba2-dcda-4498-9353-a8b366af1a78",
       "scryfallId": "2fa1dac5-51ba-403e-b48b-d2c0d23a8146",
       "name": "Return of the Wildspeaker",
       "imageUrl": "https://cards.scryfall.io/normal/front/2/f/2fa1dac5-51ba-403e-b48b-d2c0d23a8146.jpg?1767731248",
@@ -1194,7 +1188,7 @@
       "isCommander": false
     },
     {
-      "id": "be16aa50-cdde-408e-bbe7-a8e518b44d7f",
+      "id": "ae38cfa6-d4ef-4f24-b56e-9c611dee511e",
       "scryfallId": "88f4aecc-b728-4960-8131-1e5aa6c3c030",
       "name": "Rishkar, Peema Renegade",
       "imageUrl": "https://cards.scryfall.io/normal/front/8/8/88f4aecc-b728-4960-8131-1e5aa6c3c030.jpg?1690016969",
@@ -1213,7 +1207,7 @@
       "isCommander": false
     },
     {
-      "id": "d0cc5366-a4e7-4093-9211-b683500ceb2f",
+      "id": "33efff8e-309c-4654-9fdf-ea0bb5755d5a",
       "scryfallId": "efa9d2dc-b3b8-4475-bbfc-2db457ee4ffd",
       "name": "Rishkar's Expertise",
       "imageUrl": "https://cards.scryfall.io/normal/front/e/f/efa9d2dc-b3b8-4475-bbfc-2db457ee4ffd.jpg?1698988394",
@@ -1226,7 +1220,7 @@
       "isCommander": false
     },
     {
-      "id": "11cf6ba8-6427-451d-84d5-e2e18d1a47b9",
+      "id": "8d2aa1e5-4de3-4ffb-88d3-e713c1b8a766",
       "scryfallId": "a2a424ea-ef32-4ac5-8f8c-3ea1839f01d4",
       "name": "Rogue's Passage",
       "imageUrl": "https://cards.scryfall.io/normal/front/a/2/a2a424ea-ef32-4ac5-8f8c-3ea1839f01d4.jpg?1730489588",
@@ -1243,7 +1237,7 @@
       "isCommander": false
     },
     {
-      "id": "de1aa31a-6f3a-459b-8389-18b6a0d7b691",
+      "id": "84684228-d830-440a-a942-13495223c3f5",
       "scryfallId": "33ed7ca3-894b-45f4-a15f-51b6bcd3f474",
       "name": "Rustler Rampage",
       "imageUrl": "https://cards.scryfall.io/normal/front/3/3/33ed7ca3-894b-45f4-a15f-51b6bcd3f474.jpg?1712860605",
@@ -1256,7 +1250,7 @@
       "isCommander": false
     },
     {
-      "id": "6ba80877-28a2-41a8-9bbc-6498e766230c",
+      "id": "34e52c84-4418-4ccd-842c-00677f2459be",
       "scryfallId": "8c504c23-1e9a-411b-9cfe-4180d0c744f6",
       "name": "Scavenging Ooze",
       "imageUrl": "https://cards.scryfall.io/normal/front/8/c/8c504c23-1e9a-411b-9cfe-4180d0c744f6.jpg?1730489464",
@@ -1271,37 +1265,7 @@
       "isCommander": false
     },
     {
-      "id": "17476f38-9ce1-4abe-a97a-d14b7821b31c",
-      "scryfallId": "dfaaa58d-89bb-4cb3-96a6-b480e6f6954e",
-      "name": "Scroll Rack",
-      "imageUrl": "https://cards.scryfall.io/normal/front/d/f/dfaaa58d-89bb-4cb3-96a6-b480e6f6954e.jpg?1608911671",
-      "typeLine": "Artifact",
-      "oracleText": "{1}, {T}: Exile any number of cards from your hand face down. Put that many cards from the top of your library into your hand. Then look at the exiled cards and put them on top of your library in any order.",
-      "manaCost": "{2}",
-      "cmc": 2,
-      "isLand": false,
-      "isManaSource": false,
-      "isCommander": false
-    },
-    {
-      "id": "4da391d5-e21d-4df6-bd79-868a036aa0f6",
-      "scryfallId": "f25d56f9-aa54-4657-9ac9-e93fbba3e715",
-      "name": "Sejiri Shelter // Sejiri Glacier",
-      "imageUrl": "https://cards.scryfall.io/normal/front/f/2/f25d56f9-aa54-4657-9ac9-e93fbba3e715.jpg?1604193214",
-      "backImageUrl": "https://cards.scryfall.io/normal/back/f/2/f25d56f9-aa54-4657-9ac9-e93fbba3e715.jpg?1604193214",
-      "typeLine": "Instant // Land",
-      "oracleText": "",
-      "cmc": 2,
-      "isLand": true,
-      "isManaSource": true,
-      "producedMana": [
-        "W"
-      ],
-      "manaAbilityType": "tap",
-      "isCommander": false
-    },
-    {
-      "id": "a278ea38-d5a1-4988-bcfb-c32054a713ee",
+      "id": "7c393e86-7a5e-4288-9150-70919c67c641",
       "scryfallId": "b3784eff-ab7b-4fd4-9a07-fbc852d116bf",
       "name": "Shamanic Revelation",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/3/b3784eff-ab7b-4fd4-9a07-fbc852d116bf.jpg?1673484792",
@@ -1314,7 +1278,7 @@
       "isCommander": false
     },
     {
-      "id": "d46cca1d-9711-40e6-bea9-7dbe47cf02eb",
+      "id": "a977d8f0-ba7d-45da-9016-8366a2706f54",
       "scryfallId": "956a2a42-6a91-45b5-99f1-87c2cf1dd608",
       "name": "Smell Fear",
       "imageUrl": "https://cards.scryfall.io/normal/front/9/5/956a2a42-6a91-45b5-99f1-87c2cf1dd608.jpg?1626097784",
@@ -1327,7 +1291,7 @@
       "isCommander": false
     },
     {
-      "id": "adaf2f56-4ab6-4a38-9ef0-b74809158e2b",
+      "id": "7a3a4a2b-4099-481f-b52c-403c741714d0",
       "scryfallId": "a3d2c692-7566-468e-9c86-47a9f768fde2",
       "name": "Snakeskin Veil",
       "imageUrl": "https://cards.scryfall.io/normal/front/a/3/a3d2c692-7566-468e-9c86-47a9f768fde2.jpg?1743204601",
@@ -1340,10 +1304,10 @@
       "isCommander": false
     },
     {
-      "id": "a3bb959c-9664-4813-baf5-2a3135ba0754",
-      "scryfallId": "04002706-2236-4b79-bdea-4f263e43cb9c",
+      "id": "b3530923-b590-47f9-ab0f-25dccdc98365",
+      "scryfallId": "14dbce79-1fcc-4cc9-bf38-7729e44a411e",
       "name": "Sol Ring",
-      "imageUrl": "https://cards.scryfall.io/normal/front/0/4/04002706-2236-4b79-bdea-4f263e43cb9c.jpg?1767730264",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/4/14dbce79-1fcc-4cc9-bf38-7729e44a411e.jpg?1771424544",
       "typeLine": "Artifact",
       "oracleText": "{T}: Add {C}{C}.",
       "manaCost": "{1}",
@@ -1358,10 +1322,25 @@
       "isCommander": false
     },
     {
-      "id": "d20867b7-5417-4c21-b7d6-9945d88dff2d",
-      "scryfallId": "c091fe70-ade7-43f9-9081-3263a2524d51",
+      "id": "0a720351-3741-498d-ba3d-76009e147cbb",
+      "scryfallId": "70c75aa7-e2f9-4a69-8086-c982019ca714",
+      "name": "Sovereign Okinec Ahau",
+      "imageUrl": "https://cards.scryfall.io/normal/front/7/0/70c75aa7-e2f9-4a69-8086-c982019ca714.jpg?1699044573",
+      "typeLine": "Legendary Creature — Cat Noble",
+      "oracleText": "Ward {2}\nWhenever Sovereign Okinec Ahau attacks, for each creature you control with power greater than that creature's base power, put a number of +1/+1 counters on that creature equal to the difference.",
+      "manaCost": "{2}{G}{W}",
+      "cmc": 4,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "3",
+      "toughness": "4",
+      "isCommander": false
+    },
+    {
+      "id": "377df216-13a4-493e-a4ca-cf4507325703",
+      "scryfallId": "7869df96-ce77-45c0-829f-367819806356",
       "name": "Steelbane Hydra",
-      "imageUrl": "https://cards.scryfall.io/normal/front/c/0/c091fe70-ade7-43f9-9081-3263a2524d51.jpg?1673484812",
+      "imageUrl": "https://cards.scryfall.io/normal/front/7/8/7869df96-ce77-45c0-829f-367819806356.jpg?1771424459",
       "typeLine": "Creature — Turtle Hydra",
       "oracleText": "This creature enters with X +1/+1 counters on it.\n{2}{G}, Remove a +1/+1 counter from this creature: Destroy target artifact or enchantment.",
       "manaCost": "{X}{G}{G}",
@@ -1373,7 +1352,7 @@
       "isCommander": false
     },
     {
-      "id": "868f48c3-e70e-48ff-ab77-67cf7a7ae097",
+      "id": "f44a2fbe-014a-45b3-98e9-13fff2a5c1cd",
       "scryfallId": "8005828b-807a-43fc-98aa-20f76c47662c",
       "name": "Sungrass Prairie",
       "imageUrl": "https://cards.scryfall.io/normal/front/8/0/8005828b-807a-43fc-98aa-20f76c47662c.jpg?1743207757",
@@ -1392,7 +1371,25 @@
       "isCommander": false
     },
     {
-      "id": "7719423f-0423-4b83-9382-76e1c908849a",
+      "id": "a797194e-a4a7-4897-959b-f31e4fc6be3a",
+      "scryfallId": "565b4aaa-1990-4cb2-b519-2c0b1c9d5d18",
+      "name": "Sunpetal Grove",
+      "imageUrl": "https://cards.scryfall.io/normal/front/5/6/565b4aaa-1990-4cb2-b519-2c0b1c9d5d18.jpg?1743207765",
+      "typeLine": "Land",
+      "oracleText": "This land enters tapped unless you control a Forest or a Plains.\n{T}: Add {G} or {W}.",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": true,
+      "isManaSource": true,
+      "producedMana": [
+        "G",
+        "W"
+      ],
+      "manaAbilityType": "tap",
+      "isCommander": false
+    },
+    {
+      "id": "ee7c2bb8-4b21-42d1-96de-71dea0e69562",
       "scryfallId": "1969b151-3192-4d35-80ca-c4e180601ec8",
       "name": "Swiftfoot Boots",
       "imageUrl": "https://cards.scryfall.io/normal/front/1/9/1969b151-3192-4d35-80ca-c4e180601ec8.jpg?1743207367",
@@ -1405,7 +1402,7 @@
       "isCommander": false
     },
     {
-      "id": "6d6df3c9-360d-49cf-9aca-eb6f2a74b8ef",
+      "id": "fc248c1f-c9b1-4c36-9966-c61d2efdb1d5",
       "scryfallId": "0e7ff4dc-af63-4342-9a44-d059e62bd14c",
       "name": "Swords to Plowshares",
       "imageUrl": "https://cards.scryfall.io/normal/front/0/e/0e7ff4dc-af63-4342-9a44-d059e62bd14c.jpg?1752944384",
@@ -1418,7 +1415,7 @@
       "isCommander": false
     },
     {
-      "id": "9b6da1a0-27c0-4c2c-bbe8-f03a1cbcb9e9",
+      "id": "79ef80d3-1f55-4817-863c-8a0eb7e9e1ed",
       "scryfallId": "de1f7e5e-a503-4f99-91a1-2fdabb7d5e89",
       "name": "Temple of Plenty",
       "imageUrl": "https://cards.scryfall.io/normal/front/d/e/de1f7e5e-a503-4f99-91a1-2fdabb7d5e89.jpg?1743207789",
@@ -1436,10 +1433,10 @@
       "isCommander": false
     },
     {
-      "id": "f881d5ef-2ce5-4955-8af1-df21100cd9ba",
-      "scryfallId": "2b22e344-97ae-4e25-9bf9-004ac30c2fd6",
+      "id": "cfaf226c-7abd-45a4-83df-940dce99a095",
+      "scryfallId": "1b19f82a-9724-41b1-934d-a8ec1493587b",
       "name": "Together Forever",
-      "imageUrl": "https://cards.scryfall.io/normal/front/2/b/2b22e344-97ae-4e25-9bf9-004ac30c2fd6.jpg?1682208663",
+      "imageUrl": "https://cards.scryfall.io/normal/front/1/b/1b19f82a-9724-41b1-934d-a8ec1493587b.jpg?1771424400",
       "typeLine": "Enchantment",
       "oracleText": "When this enchantment enters, support 2. (Put a +1/+1 counter on each of up to two target creatures.)\n{1}: Choose target creature with a counter on it. When that creature dies this turn, return that card to its owner's hand.",
       "manaCost": "{W}{W}",
@@ -1449,7 +1446,7 @@
       "isCommander": false
     },
     {
-      "id": "f2a9c89b-e869-46e3-92d9-76e9fbe74d89",
+      "id": "b4b002e5-de3b-4f53-b967-d3dd4c107d24",
       "scryfallId": "c0cdeaba-fc21-44e6-bf99-aa1ff379401b",
       "name": "Tribute to the World Tree",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/0/c0cdeaba-fc21-44e6-bf99-aa1ff379401b.jpg?1682205102",
@@ -1462,7 +1459,22 @@
       "isCommander": false
     },
     {
-      "id": "cf202335-afec-4db8-a3eb-8ad6c9f1c828",
+      "id": "da494352-e128-4c27-89ab-15eee3015b46",
+      "scryfallId": "34ea44f2-cb2f-4b86-83fc-fe507f05bb9d",
+      "name": "Trostani, Selesnya's Voice",
+      "imageUrl": "https://cards.scryfall.io/normal/front/3/4/34ea44f2-cb2f-4b86-83fc-fe507f05bb9d.jpg?1568004834",
+      "typeLine": "Legendary Creature — Dryad",
+      "oracleText": "Whenever another creature you control enters, you gain life equal to that creature's toughness.\n{1}{G}{W}, {T}: Populate. (Create a token that's a copy of a creature token you control.)",
+      "manaCost": "{G}{G}{W}{W}",
+      "cmc": 4,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "2",
+      "toughness": "5",
+      "isCommander": false
+    },
+    {
+      "id": "9a25e07c-02f0-4d77-88bf-be8a3f7b9ae5",
       "scryfallId": "c7b362a5-382a-4016-b4f2-aa7b683354c4",
       "name": "Tyvar's Stand",
       "imageUrl": "https://cards.scryfall.io/normal/front/c/7/c7b362a5-382a-4016-b4f2-aa7b683354c4.jpg?1675957174",
@@ -1475,7 +1487,7 @@
       "isCommander": false
     },
     {
-      "id": "59efbb78-651f-4bfc-97c3-1ea27a61bd8a",
+      "id": "cb7dac4b-49d9-4d23-bd79-f6f332757110",
       "scryfallId": "6f594d07-932e-4fe6-832d-d0a0be3530aa",
       "name": "Unbound Flourishing",
       "imageUrl": "https://cards.scryfall.io/normal/front/6/f/6f594d07-932e-4fe6-832d-d0a0be3530aa.jpg?1562202252",
@@ -1488,7 +1500,7 @@
       "isCommander": false
     },
     {
-      "id": "85deea52-4cbe-49e7-8410-8fe43269293e",
+      "id": "d72caf6b-04e3-4c31-b7fb-1fc7b58bd345",
       "scryfallId": "06e1cc7b-9319-4f6f-88ee-2e6b6d2efbc6",
       "name": "Unbreakable Formation",
       "imageUrl": "https://cards.scryfall.io/normal/front/0/6/06e1cc7b-9319-4f6f-88ee-2e6b6d2efbc6.jpg?1702429305",
@@ -1501,7 +1513,7 @@
       "isCommander": false
     },
     {
-      "id": "f88e38dd-1cc1-4c4d-a6d5-fd730a032b80",
+      "id": "18f185cb-d919-45b8-b416-493e6a185f54",
       "scryfallId": "bfe7139a-3fd5-4574-a26b-75b1b17b2c2f",
       "name": "Vastwood Hydra",
       "imageUrl": "https://cards.scryfall.io/normal/front/b/f/bfe7139a-3fd5-4574-a26b-75b1b17b2c2f.jpg?1591321069",
@@ -1516,7 +1528,7 @@
       "isCommander": false
     },
     {
-      "id": "164fae7e-5b79-40fd-8d3f-4b69c094a5c2",
+      "id": "5cae628c-6000-4d77-85bc-99474d99c01e",
       "scryfallId": "ff857d41-767d-4e99-83cc-444738341b92",
       "name": "Virtue of Strength // Garenbrig Growth",
       "imageUrl": "https://cards.scryfall.io/normal/front/f/f/ff857d41-767d-4e99-83cc-444738341b92.jpg?1692939213",
@@ -1529,39 +1541,115 @@
       "isCommander": false
     },
     {
-      "id": "7fb4c2f2-02ba-4a6e-8a26-905dc400e318",
-      "scryfallId": "36359fb6-fb8c-4382-8555-e348422f116c",
-      "name": "Wildwood Scourge",
-      "imageUrl": "https://cards.scryfall.io/normal/front/3/6/36359fb6-fb8c-4382-8555-e348422f116c.jpg?1730489480",
-      "typeLine": "Creature — Hydra",
-      "oracleText": "This creature enters with X +1/+1 counters on it.\nWhenever one or more +1/+1 counters are put on another non-Hydra creature you control, put a +1/+1 counter on this creature.",
-      "manaCost": "{X}{G}",
-      "cmc": 1,
+      "id": "42c7fb1d-16a5-42d5-bf86-dc9e92bb2453",
+      "scryfallId": "c9f88a40-a6ed-4c1f-a309-011aca1acddd",
+      "name": "Kutzil, Malamet Exemplar",
+      "imageUrl": "https://cards.scryfall.io/normal/front/c/9/c9f88a40-a6ed-4c1f-a309-011aca1acddd.jpg?1699044549",
+      "typeLine": "Legendary Creature — Cat Warrior",
+      "oracleText": "Your opponents can't cast spells during your turn.\nWhenever one or more creatures you control each with power greater than its base power deals combat damage to a player, draw a card.",
+      "manaCost": "{1}{G}{W}",
+      "cmc": 3,
       "isLand": false,
       "isManaSource": false,
-      "power": "0",
-      "toughness": "0",
-      "isCommander": false
-    },
-    {
-      "id": "49c2b99a-f925-466e-894f-962646d9876d",
-      "scryfallId": "adc7f8f3-140d-4dd0-aacc-b81b2b93eb67",
-      "name": "Hamza, Guardian of Arashin",
-      "imageUrl": "https://cards.scryfall.io/normal/front/a/d/adc7f8f3-140d-4dd0-aacc-b81b2b93eb67.jpg?1689999064",
-      "typeLine": "Legendary Creature — Elephant Warrior",
-      "oracleText": "This spell costs {1} less to cast for each creature you control with a +1/+1 counter on it.\nCreature spells you cast cost {1} less to cast for each creature you control with a +1/+1 counter on it.",
-      "manaCost": "{4}{G}{W}",
-      "cmc": 6,
-      "isLand": false,
-      "isManaSource": false,
-      "power": "5",
-      "toughness": "5",
+      "power": "3",
+      "toughness": "3",
       "isCommander": true
     }
   ],
-  "tokens": [],
+  "tokens": [
+    {
+      "id": "8232d55f-76e3-4055-9afc-6a587d0c29a5",
+      "scryfallId": "9bbc253b-6557-47bd-b3f3-9bc9ef6275f7",
+      "name": "Hydra",
+      "imageUrl": "https://cards.scryfall.io/normal/front/9/b/9bbc253b-6557-47bd-b3f3-9bc9ef6275f7.jpg?1717200044",
+      "typeLine": "Token Creature — Hydra",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "*",
+      "toughness": "*",
+      "isToken": true
+    },
+    {
+      "id": "d7b5b647-670b-47a0-957a-8f20a0f7b7f3",
+      "scryfallId": "26614a86-55df-48d2-bb88-9a2895a33458",
+      "name": "Snake",
+      "imageUrl": "https://cards.scryfall.io/normal/front/2/6/26614a86-55df-48d2-bb88-9a2895a33458.jpg?1706129875",
+      "typeLine": "Token Creature — Snake",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "1",
+      "toughness": "1",
+      "isToken": true
+    },
+    {
+      "id": "a46f8c43-c530-415c-b4a1-bb1962c0af52",
+      "scryfallId": "ca697323-bdc8-4fa0-a0ba-c2dd4deff68c",
+      "name": "Beast",
+      "imageUrl": "https://cards.scryfall.io/normal/front/c/a/ca697323-bdc8-4fa0-a0ba-c2dd4deff68c.jpg?1730485687",
+      "typeLine": "Token Creature — Beast",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "3",
+      "toughness": "3",
+      "isToken": true
+    },
+    {
+      "id": "efa195a6-76c2-4b74-b363-7b4a63278472",
+      "scryfallId": "322ef76e-e0f0-48d7-a6ad-5d4c1c9ccb2e",
+      "name": "Cat Beast",
+      "imageUrl": "https://cards.scryfall.io/normal/front/3/2/322ef76e-e0f0-48d7-a6ad-5d4c1c9ccb2e.jpg?1730485673",
+      "typeLine": "Token Creature — Cat Beast",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "2",
+      "toughness": "2",
+      "isToken": true
+    },
+    {
+      "id": "b5046685-f62b-497a-8b66-5aca1c99065a",
+      "scryfallId": "34032448-fe31-44c7-845c-37fea0b8e762",
+      "name": "Saproling",
+      "imageUrl": "https://cards.scryfall.io/normal/front/3/4/34032448-fe31-44c7-845c-37fea0b8e762.jpg?1767955055",
+      "typeLine": "Token Creature — Saproling",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "1",
+      "toughness": "1",
+      "isToken": true
+    },
+    {
+      "id": "2ac5363d-a8d5-4515-8a32-df31f1be3438",
+      "scryfallId": "9f2f4fec-ad7b-4407-b288-615ec40c4980",
+      "name": "Elephant",
+      "imageUrl": "https://cards.scryfall.io/normal/front/9/f/9f2f4fec-ad7b-4407-b288-615ec40c4980.jpg?1717193909",
+      "typeLine": "Token Creature — Elephant",
+      "oracleText": "",
+      "manaCost": "",
+      "cmc": 0,
+      "isLand": false,
+      "isManaSource": false,
+      "power": "3",
+      "toughness": "3",
+      "isToken": true
+    }
+  ],
   "sleeveColor": "#ef4444",
-  "createdAt": 1771045933740,
+  "createdAt": 1771523718845,
   "manaRules": {
     "aa9e7f3c-e752-4cee-9e9d-fae38ba27dc9": {
       "trigger": "tap",
@@ -1763,14 +1851,14 @@
       "genericActivationCost": 0,
       "calcMode": "set",
       "calcMultiplier": 1,
-      "prodMode": "chooseColor",
+      "prodMode": "available",
       "produced": {
-        "W": 0,
+        "W": 1,
         "U": 0,
         "B": 0,
         "R": 0,
         "G": 0,
-        "C": 1,
+        "C": 0,
         "WUBRG": 0,
         "CMD": 0
       },
@@ -1779,7 +1867,50 @@
       "autoTapPriority": 5,
       "hideManaButton": true,
       "isLandOverride": false,
-      "entersTapped": false
+      "entersTapped": false,
+      "alternativeRule": {
+        "trigger": "tap",
+        "activationCost": {
+          "W": 0,
+          "U": 0,
+          "B": 0,
+          "R": 0,
+          "G": 0,
+          "C": 0,
+          "WUBRG": 0,
+          "CMD": 0
+        },
+        "genericActivationCost": 0,
+        "calcMode": "set",
+        "calcMultiplier": 1,
+        "prodMode": "available",
+        "produced": {
+          "W": 3,
+          "U": 0,
+          "B": 0,
+          "R": 0,
+          "G": 0,
+          "C": 0,
+          "WUBRG": 0,
+          "CMD": 0
+        },
+        "manaMultiplier": 1,
+        "autoTap": true,
+        "autoTapPriority": 1,
+        "hideManaButton": false,
+        "isLandOverride": false,
+        "entersTapped": false
+      },
+      "producedAlt": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 3,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      }
     },
     "5c644650-3861-4a78-9e39-a413b073ddac": {
       "trigger": "tap",
@@ -1794,7 +1925,7 @@
         "CMD": 0
       },
       "genericActivationCost": 0,
-      "calcMode": "set",
+      "calcMode": "counters",
       "calcMultiplier": 1,
       "prodMode": "chooseColor",
       "produced": {
@@ -1812,7 +1943,8 @@
       "autoTapPriority": 5,
       "hideManaButton": true,
       "isLandOverride": false,
-      "entersTapped": false
+      "entersTapped": false,
+      "includeBasePower": true
     },
     "22017ec2-3552-4865-af76-dba042b141f5": {
       "trigger": "tap",
@@ -2041,9 +2173,13 @@
       "manaMultiplier": 1,
       "autoTap": true,
       "autoTapPriority": 5,
-      "hideManaButton": true,
+      "hideManaButton": false,
       "isLandOverride": false,
-      "entersTapped": false
+      "entersTapped": false,
+      "appliesTo": [
+        "creatures"
+      ],
+      "appliesToCondition": "counters"
     },
     "a2a424ea-ef32-4ac5-8f8c-3ea1839f01d4": {
       "trigger": "tap",
@@ -2215,6 +2351,148 @@
         "B": 0,
         "R": 0,
         "G": 1,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      }
+    },
+    "049ca0ff-0ca4-44f7-b144-731cf453afa9": {
+      "trigger": "tap",
+      "activationCost": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "genericActivationCost": 0,
+      "calcMode": "set",
+      "calcMultiplier": 1,
+      "prodMode": "standard",
+      "produced": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 4,
+        "CMD": 0
+      },
+      "manaMultiplier": 1,
+      "autoTap": true,
+      "autoTapPriority": 3,
+      "hideManaButton": true,
+      "isLandOverride": false,
+      "entersTapped": false
+    },
+    "4d51a621-be31-4b74-8e0b-3958180a8bc5": {
+      "trigger": "tap",
+      "activationCost": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "genericActivationCost": 0,
+      "calcMode": "set",
+      "calcMultiplier": 1,
+      "prodMode": "standard",
+      "produced": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 2
+      },
+      "manaMultiplier": 1,
+      "autoTap": true,
+      "autoTapPriority": 2,
+      "hideManaButton": true,
+      "isLandOverride": false,
+      "entersTapped": false
+    },
+    "14dbce79-1fcc-4cc9-bf38-7729e44a411e": {
+      "trigger": "tap",
+      "activationCost": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "genericActivationCost": 0,
+      "calcMode": "set",
+      "calcMultiplier": 1,
+      "prodMode": "standard",
+      "produced": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 2,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "manaMultiplier": 1,
+      "autoTap": true,
+      "autoTapPriority": 3,
+      "hideManaButton": true,
+      "isLandOverride": false,
+      "entersTapped": false
+    },
+    "565b4aaa-1990-4cb2-b519-2c0b1c9d5d18": {
+      "trigger": "tap",
+      "activationCost": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "genericActivationCost": 0,
+      "calcMode": "set",
+      "calcMultiplier": 1,
+      "prodMode": "standard",
+      "produced": {
+        "W": 0,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 1,
+        "C": 0,
+        "WUBRG": 0,
+        "CMD": 0
+      },
+      "manaMultiplier": 1,
+      "autoTap": true,
+      "autoTapPriority": 2,
+      "hideManaButton": true,
+      "isLandOverride": false,
+      "entersTapped": false,
+      "producedAlt": {
+        "W": 1,
+        "U": 0,
+        "B": 0,
+        "R": 0,
+        "G": 0,
         "C": 0,
         "WUBRG": 0,
         "CMD": 0
