@@ -1201,6 +1201,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { hoveredCardIdRef.current = hoveredCardId; }, [hoveredCardId]);
     useEffect(() => { lastPlayedCardRef.current = lastPlayedCard; }, [lastPlayedCard]);
 
+    // Stable refs for functions used in window event listeners (avoids stale closures)
+    const handleAutoTapRef = useRef<(card: CardData, xValue?: number) => void>(() => { });
+    const handleKeyDownRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
+    const nextTurnRef = useRef<() => void>(() => { });
+
 
     // --- Persistence & Auto-Restore ---
     useEffect(() => {
@@ -1435,27 +1440,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         window.addEventListener('resize', checkMobile);
 
         const onKeyPress = (e: KeyboardEvent) => {
-            // Convert KeyboardEvent to React.KeyboardEvent-like if needed
-            // or just use e.key
             if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
 
             const key = e.key.toLowerCase();
             if (key === 'tab') {
                 e.preventDefault();
-                const cardToTapFor = hoveredCardId
-                    ? boardObjects.find(o => o.id === hoveredCardId)?.cardData
-                    : lastPlayedCard;
+                // Use refs to get latest values (avoids stale closure)
+                const currentHoveredId = hoveredCardIdRef.current;
+                const currentLastPlayed = lastPlayedCardRef.current;
+                const currentBoardObjects = boardObjectsRef.current;
+
+                const cardToTapFor = currentHoveredId
+                    ? currentBoardObjects.find(o => o.id === currentHoveredId)?.cardData
+                    : currentLastPlayed;
 
                 if (cardToTapFor) {
-                    handleAutoTap(cardToTapFor);
+                    handleAutoTapRef.current(cardToTapFor);
                 }
             } else if (key === 'enter') {
-                nextTurn();
+                nextTurnRef.current();
             } else {
-                // Call handleKeyDown or inline logic
-                // For simplicity, I'll just keep handleKeyDown as a function and call it
-                // and I'll update it to handle the window event
-                handleKeyDown(e as any);
+                // Use ref to call latest handleKeyDown (avoids stale closure)
+                handleKeyDownRef.current(e as any);
             }
         };
 
@@ -3108,7 +3114,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // The showManaCalculator controls UI display, but shouldn't prevent activation
 
         // Check if this source has an activation cost and we need to pay it
-        if (source.activationCost && showManaCalculator) {
+        if (source.activationCost) {
             const cost = parseManaCost(source.activationCost);
             const poolRes = subtractFromPool(floatingMana, cost, (manaInfoRef.current || manaInfo).cmdColors);
 
@@ -3132,11 +3138,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         const produced = source.producedMana;
-        // flexible means you can CHOOSE which color to produce (like Command Tower, WUBRG, CMD)
-        // NOT flexible if it produces multiple fixed colors (like Sungrass Prairie: {G}{W})
-        // OR sources also have multiple colors but are handled separately with their own modal
-        const uniqueColors = new Set(produced);
-        const flexible = (uniqueColors.size > 1 && !source.hasOROption) && source.abilityType === 'tap';
 
         // Check if this source has an alternative rule OR is an OR option (e.g. canopy vista)
         // OR sources must show a modal to choose which branch to use
@@ -3145,14 +3146,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return;
         }
 
-        // Check if this source requires a color choice (flexible mana)
-        // Note: OR sources are handled above with the rule choice modal, not here
-        const hasWUBRG = produced.includes('WUBRG');
+        // Use the pre-computed needsChoice flag from ManaSource
+        // - Standard mode: produces ALL listed colors simultaneously → no choice needed
+        //   EXCEPT: CMD mana always requires a color choice (only WUBRG is wildcard)
+        // - chooseColor/commander/available: user must pick one color → choice needed
+        // - OR sources: handled above with rule choice modal
         const hasCMD = produced.includes('CMD');
-        const actualColorOptions = produced.filter(c => c !== 'WUBRG' && c !== 'CMD' && BASE_COLORS.includes(c as any));
-        const needsColorChoice = (hasWUBRG && !source.hasOROption) ||
-            (hasCMD && (manaInfo.cmdColors?.length || 0) > 1) ||
-            (flexible && !source.hasOROption && actualColorOptions.length > 1);
+        const cmdNeedsChoice = hasCMD && (manaInfo.cmdColors?.length || 0) > 1;
+        const needsColorChoice = (source.needsChoice || cmdNeedsChoice) && !source.hasOROption;
 
         if (!needsColorChoice && produced.length > 0) {
             // Fixed mana production - add directly to pool
@@ -3346,7 +3347,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
 
         // Show mana payment sidebar if it has a cost and calculator is ENABLED
-        if (showManaCalculator && !card.isToken && !card.isLand) {
+        // BUT skip if auto-tap already handled it successfully
+        if (showManaCalculator && !card.isToken && !card.isLand && !(autoTapEnabled)) {
             const cost = parseManaCost(card.manaCost || "");
             if (cost.cmc > 0) {
                 setAllocatedMana(EMPTY_POOL);
@@ -3542,7 +3544,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
         addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
         setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats, autoTapEnabled]);
+    }, [boardObjects, manaInfo.sources, manaInfo.availableSources, manaInfo.potentialSources, manaInfo.cmdColors, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats, autoTapEnabled, showManaCalculator]);
 
     // Handle UI auto-tap for a specific color (from ManaDisplay)
     const handleAutoTapColor = useCallback((color: string) => {
@@ -4111,6 +4113,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const handleKeyUp = (e: React.KeyboardEvent) => {
     };
+
+    // Keep function refs in sync for stable window event listeners
+    useEffect(() => { handleAutoTapRef.current = handleAutoTap; }, [handleAutoTap]);
+    useEffect(() => { handleKeyDownRef.current = handleKeyDown; });
+    useEffect(() => { nextTurnRef.current = nextTurn; });
 
     const requestViewZone = (zone: string, targetPlayerId: string) => {
         const target = playersList.find(p => p.id === targetPlayerId);
@@ -4975,10 +4982,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                     }}
                                                     className="flex items-center justify-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
                                                 >
-                                                    <div className="flex gap-1">
-                                                        {branch.length > 0 ? branch.map((c, i) => (
-                                                            <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
-                                                        )) : <span className="text-gray-400 italic text-xs">No mana</span>}
+                                                    <div className="flex gap-1 items-center">
+                                                        {branch.length > 0 ? (() => {
+                                                            // Group by color and show counts
+                                                            const counts: Record<string, number> = {};
+                                                            branch.forEach(c => { counts[c] = (counts[c] || 0) + 1; });
+                                                            return Object.entries(counts).map(([c, count]) => (
+                                                                <div key={c} className="flex items-center gap-0.5">
+                                                                    {count > 1 && <span className="text-white font-bold text-sm">{count}×</span>}
+                                                                    <img src={getIconPath(c)} className="w-6 h-6 object-contain" />
+                                                                </div>
+                                                            ));
+                                                        })() : <span className="text-gray-400 italic text-xs">No mana</span>}
                                                     </div>
                                                 </button>
                                             ))}
@@ -5471,6 +5486,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             onRemoveMana={handleRemoveMana}
                             onAutoTapColor={handleAutoTapColor}
                         />
+                    </div>
+                )}
+
+                {/* Mana Payment Sidebar — shown independently so activation costs work even with calculator hidden */}
+                {gamePhase === 'PLAYING' && (
+                    <div className="fixed right-2 top-24 flex flex-col items-end gap-2 z-[91] pointer-events-none"
+                        style={{ marginTop: showManaCalculator ? '200px' : '0px' }}>
 
                         {/* New Mana Payment Sidebar */}
                         {pendingPaymentCard && (

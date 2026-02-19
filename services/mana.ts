@@ -113,6 +113,7 @@ export interface ManaSource {
     quantity: number; // Number of objects in the stack
     // Available colors for "available" mode (user must choose one)
     availableColors?: ManaColor[]; // Colors available from lands for this card to produce
+    needsChoice?: boolean; // True if the user must choose a color (chooseColor, commander, available modes)
 }
 
 // NEW: Categorized mana info for the new display
@@ -213,6 +214,7 @@ export const calculateAvailableMana = (
         let hideManaButton = customRule?.hideManaButton ?? false;
         let hasOROption = false;
         let orColors: ManaColor[][] | undefined;
+        let needsChoice = false;
 
         if (customRule && !customRule.disabled) {
             // Custom rule path
@@ -255,11 +257,11 @@ export const calculateAvailableMana = (
                     if (count > 0) {
                         primaryTotal += count;
                         if (color === 'WUBRG') {
-                            primaryColors.push('W', 'U', 'B', 'R', 'G');
+                            for (let i = 0; i < count; i++) primaryColors.push('W', 'U', 'B', 'R', 'G');
                         } else if (color === 'CMD') {
-                            if (commanderColors) primaryColors.push(...commanderColors);
+                            if (commanderColors) for (let i = 0; i < count; i++) primaryColors.push(...commanderColors);
                         } else {
-                            primaryColors.push(color as ManaColor);
+                            for (let i = 0; i < count; i++) primaryColors.push(color as ManaColor);
                         }
                     }
                 }
@@ -273,11 +275,11 @@ export const calculateAvailableMana = (
                         if (count > 0) {
                             altTotal += count;
                             if (color === 'WUBRG') {
-                                altColors.push('W', 'U', 'B', 'R', 'G');
+                                for (let i = 0; i < count; i++) altColors.push('W', 'U', 'B', 'R', 'G');
                             } else if (color === 'CMD') {
-                                if (commanderColors) altColors.push(...commanderColors);
+                                if (commanderColors) for (let i = 0; i < count; i++) altColors.push(...commanderColors);
                             } else {
-                                altColors.push(color as ManaColor);
+                                for (let i = 0; i < count; i++) altColors.push(color as ManaColor);
                             }
                         }
                     }
@@ -298,8 +300,17 @@ export const calculateAvailableMana = (
                     const total = count * amount;
                     if (total <= 0) continue;
                     manaCountScored += total;
-                    if (color === 'WUBRG' || color === 'CMD') {
+                    if (color === 'WUBRG') {
+                        // WUBRG is a true wildcard — add directly
                         for (let i = 0; i < total; i++) produced.push(color);
+                    } else if (color === 'CMD') {
+                        // CMD: if only 1 commander color, convert to that color directly
+                        // If 2+, push as CMD and needsChoice will handle the prompt
+                        if (commanderColors && commanderColors.length === 1) {
+                            for (let i = 0; i < total; i++) produced.push(commanderColors[0]);
+                        } else {
+                            for (let i = 0; i < total; i++) produced.push(color);
+                        }
                     } else {
                         for (let i = 0; i < total; i++) produced.push(color as ManaColor);
                     }
@@ -386,6 +397,26 @@ export const calculateAvailableMana = (
                 customRule.trigger === 'activated' ? 'activated' :
                     customRule.trigger === 'passive' ? 'passive' : 'tap';
             sourcePriority = customRule.autoTap ? customRule.autoTapPriority : 999;
+
+            // Determine if the user needs to choose a color
+            // Standard mode produces ALL listed colors simultaneously (no choice)
+            // chooseColor, commander (2+ colors), available, sameAsCard (2+ colors) require a choice
+            if (customRule.prodMode === 'chooseColor') {
+                needsChoice = true;
+            } else if (customRule.prodMode === 'commander') {
+                needsChoice = (commanderColors?.length || 0) > 1;
+            } else if (customRule.prodMode === 'available') {
+                needsChoice = true;
+            } else if (customRule.prodMode === 'sameAsCard') {
+                const uniqueCardColors = new Set((obj.cardData.producedMana || []).map(c => c.toUpperCase()));
+                needsChoice = uniqueCardColors.size > 1;
+            }
+            // standard and multiplied modes: needsChoice stays false
+            // EXCEPT if produced contains CMD and there are multiple commander colors
+            // (CMD always requires a choice; only WUBRG is a true wildcard)
+            if (!needsChoice && produced.includes('CMD') && (commanderColors?.length || 0) > 1) {
+                needsChoice = true;
+            }
 
             // Calculate Net Mana for Available/Potential counts (subtract activation cost)
             let totalCost = 0;
@@ -510,6 +541,13 @@ export const calculateAvailableMana = (
 
         if (produced.length === 0) return;
 
+        // For default path (no custom rule), determine if user needs to choose
+        // Default sources with multiple unique base colors need a choice
+        if (!customRule) {
+            const uniqueBaseColors = new Set(produced.filter(c => c !== 'WUBRG' && c !== 'CMD' && c !== 'C'));
+            needsChoice = uniqueBaseColors.size > 1;
+        }
+
         // Apply multipliers
         if (multipliers.length > 0 && manaCountScored > 0) {
             const isBas = isBasicLand(obj.cardData.name);
@@ -565,7 +603,8 @@ export const calculateAvailableMana = (
             hasOROption,
             orColors,
             autoTap: customRule ? customRule.autoTap : (sourcePriority < 999),
-            quantity: obj.quantity
+            quantity: obj.quantity,
+            needsChoice
         };
 
         allSources.push(source);

@@ -233,11 +233,12 @@ const ManaRuleEditor: React.FC<{
 
                 <RadioGroup
                     options={[
-                        { value: 'standard', label: 'Standard', desc: 'Produces specific mana types' },
+                        { value: 'standard', label: 'Standard', desc: 'Produces specific mana types (use CMD counter for commander identity)' },
                         { value: 'sameAsCard', label: '🎴 Same as Card', desc: 'Produces colors this card produces by default' },
                         { value: 'available', label: '🌊 Available', desc: 'Choose one color from lands you control' },
                         { value: 'chooseColor', label: '🎨 Choose Color', desc: 'Player picks a color when triggered' },
-                        { value: 'commander', label: '👑 Commander', desc: 'Produces mana of any color in your commander\'s identity' },
+                        // Show Commander option only if rule already uses it (backward compatibility)
+                        ...(rule.prodMode === 'commander' ? [{ value: 'commander', label: '👑 Commander', desc: 'Produces mana of any color in your commander\'s identity (use CMD counter in Standard instead)' }] : []),
                     ]}
                     selected={rule.prodMode}
                     onChange={(v) => updateRule('prodMode', v)}
@@ -560,7 +561,7 @@ const ManaRuleEditor: React.FC<{
                                             .map(s => (
                                                 <div
                                                     key={s.id}
-                                                    ref={s.name === currentCardName ? (el) => el?.scrollIntoView({ block: 'center', behavior: 'smooth' }) : undefined}
+                                                    // No auto-scroll to prevent modal jumping on re-render
                                                     className={`text-[10px] flex justify-between py-0.5 border-b border-gray-800/50 last:border-0 ${s.name === currentCardName ? 'bg-green-900/10' : ''}`}
                                                 >
                                                     <span className={`truncate max-w-[120px] ${s.name === currentCardName ? 'text-green-400 font-bold' : Math.abs(s.priority - rule.autoTapPriority) < 0.01 ? 'text-blue-400' : 'text-gray-500'}`}>
