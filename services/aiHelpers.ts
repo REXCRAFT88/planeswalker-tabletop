@@ -138,3 +138,43 @@ At the start of your turn, you will be given a summary of your hand, the board s
 When it is your turn, tell the player what you are doing, then use the JSON commands to execute it!
 `;
 }
+
+export function generateAiTurnRecap(
+    aiPlayerId: string,
+    players: any[],
+    boardObjects: any[],
+    recentLogs: any[],
+    aiState: any
+): string {
+    const aiPlayer = players.find(p => p.id === aiPlayerId);
+    if (!aiPlayer) return "Error: AI Player not found.";
+
+    let recap = `### AI TURN RECAP (${aiPlayer.name}) ###\n`;
+    recap += `**Your Current Status:**\n`;
+    recap += `- HP: ${aiState.life}\n`;
+    recap += `- Library: ${aiState.library.length} cards\n`;
+    recap += `- Graveyard: ${aiState.graveyard.length} cards\n`;
+    recap += `- Exile: ${aiState.exile.length} cards\n`;
+    recap += `- Hand: ${aiState.hand.map((c: any) => c.name).join(', ') || 'Empty'}\n\n`;
+
+    recap += `**Battlefield Items (Your Control):**\n`;
+    const myPermanents = boardObjects.filter(obj => obj.controllerId === aiPlayerId);
+    if (myPermanents.length === 0) recap += `- You have no permanents on the battlefield.\n`;
+    else myPermanents.forEach(obj => {
+        recap += `- ${obj.cardData.name} (${obj.rotation !== 0 ? 'Tapped' : 'Untapped'})\n`;
+    });
+
+    recap += `\n**Opponents:**\n`;
+    players.filter(p => p.id !== aiPlayerId).forEach(p => {
+        recap += `- ${p.name} (Socket: ${p.id})\n`;
+    });
+
+    recap += `\n**Recent Activity:**\n`;
+    recentLogs.slice(0, 10).reverse().forEach(log => {
+        recap += `- ${log.playerName}: ${log.message}\n`;
+    });
+
+    recap += `\nIt is now your turn. Evaluate the board and take your actions using JSON commands.`;
+
+    return recap;
+}
