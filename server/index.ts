@@ -290,6 +290,24 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('add_ai_player', ({ room, name, color, aiId }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return;
+
+        const newPlayer: Player = {
+            id: aiId,
+            userId: aiId,
+            name: sanitizeName(name) + ' (AI)',
+            room,
+            color,
+            disconnected: false
+        };
+
+        rooms[room].push(newPlayer);
+        io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
+        io.to(room).emit('notification', { message: `${newPlayer.name} was added to the room.` });
+    });
+
     socket.on('leave_room', ({ room }) => {
         if (room) room = room.trim().toUpperCase();
         if (rooms[room]) {

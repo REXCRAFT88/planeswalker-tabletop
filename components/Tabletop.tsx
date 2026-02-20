@@ -14,10 +14,11 @@ import {
 } from '../services/mana';
 import { GeminiLiveClient } from '../services/geminiVoice';
 import { generateAiSystemPrompt, generateDeckMarkdown } from '../services/aiHelpers';
+import { SavedDeck } from '../App';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -31,6 +32,7 @@ interface TabletopProps {
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
     manaRules?: Record<string, ManaRule>;
+    savedDecks?: SavedDeck[];
     geminiApiKey?: string;
     onExit: () => void;
 }
@@ -834,7 +836,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, savedDecks, geminiApiKey, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -887,6 +889,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // UI State
     const [isLogOpen, setIsLogOpen] = useState(false);
+    const [isMicActive, setIsMicActive] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [view, setView] = useState<ViewState>({ x: window.innerWidth / 2, y: window.innerHeight / 2, scale: 0.5 });
 
@@ -918,6 +921,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const healingReceivedThisTurn = useRef(0);
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
+
+    const [showAiConfigModal, setShowAiConfigModal] = useState(false);
+    const [aiConfig, setAiConfig] = useState({ name: 'Gemini AI', deckId: savedDecks?.[0]?.id || '' });
+    const [aiOpponentsData, setAiOpponentsData] = useState<Record<string, { name: string, deck: CardData[], tokens: CardData[], color: string }>>({});
 
     const [autoTapEnabled, setAutoTapEnabled] = useState(false); // Disabled by default
     const [soundsEnabled, setSoundsEnabled] = useState(() => localStorage.getItem('planeswalker_sounds_enabled') !== 'false');
@@ -2528,6 +2535,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setHand([...initialHand, ...initialTokens]);
                 setLibrary(remaining);
             }
+
+            // Also initialize state for any AI opponents the host added
+            if (isHost && Object.keys(aiOpponentsData).length > 0) {
+                const states: Record<string, LocalPlayerState> = {};
+                for (const [aiId, aiData] of Object.entries(aiOpponentsData)) {
+                    const st = createInitialState(aiId, aiData.deck, aiData.tokens);
+                    if (st.library.length >= 7) {
+                        const initHand = st.library.slice(0, 7);
+                        st.library = st.library.slice(7);
+                        st.hand = [...initHand, ...st.hand.filter(c => c.isToken)];
+                    }
+                    states[aiId] = st;
+                }
+                localPlayerStates.current = { ...localPlayerStates.current, ...states };
+            }
         }
 
         setTurnStartTime(Date.now());
@@ -2965,11 +2987,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const playSound = useCallback((type: 'TURN' | 'PLAY' | 'DRAW' | 'REQUEST' | 'JOIN_LEAVE') => {
         if (!soundsEnabled) return;
         const sounds = {
-            TURN: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Simple notify
-            PLAY: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Card flip
-            DRAW: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Draw/Flip
-            REQUEST: 'https://cdn.pixabay.com/audio/2022/01/21/audio_4eb6046e7f.mp3', // Chime
-            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b325ef01.mp3' // Pop
+            TURN: 'https://actions.google.com/sounds/v1/ui/button_click.ogg',
+            PLAY: 'https://actions.google.com/sounds/v1/foley/paper_rustle.ogg',
+            DRAW: 'https://actions.google.com/sounds/v1/foley/paper_rustle.ogg',
+            REQUEST: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+            JOIN_LEAVE: 'https://actions.google.com/sounds/v1/ui/pop_up_short.ogg'
         };
         try {
             const audio = new Audio(sounds[type]);
@@ -4663,9 +4685,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         </div>
     );
 
+    const getAiOpponentData = useCallback(() => {
+        if (isLocal) {
+            return localOpponents.find(o => o.type === 'ai');
+        } else if (isHost) {
+            const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
+            if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
+                const data = aiOpponentsData[aiPlayer.id];
+                return { id: aiPlayer.id, name: data.name, deck: data.deck, tokens: data.tokens, type: 'ai' as const };
+            }
+        }
+        return undefined;
+    }, [isLocal, isHost, localOpponents, playersList, aiOpponentsData]);
+
     // AI Initialization
     useEffect(() => {
-        const aiOpponent = isLocal ? localOpponents.find(o => o.type === 'ai') : undefined;
+        const aiOpponent = getAiOpponentData();
         if (!aiOpponent || !geminiApiKey) return;
 
         let active = true;
@@ -4730,12 +4765,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setAiConnected(false);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens]);
+    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens, getAiOpponentData]);
 
     // AI Command Executor loop
     useEffect(() => {
         handleAiResponseRef.current = (msg: string) => {
-            const aiOpponent = localOpponents.find(o => o.type === 'ai');
+            const aiOpponent = getAiOpponentData();
             if (!aiOpponent) return;
 
             const aiId = aiOpponent.id || '';
@@ -4844,7 +4879,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // AI Turn Recap Generator
     useEffect(() => {
-        const aiOpponent = isLocal ? localOpponents.find(o => o.type === 'ai') : undefined;
+        const aiOpponent = getAiOpponentData();
         if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
 
         const aiId = aiOpponent.id || '';
@@ -4943,9 +4978,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4 flex justify-between items-center">
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
-                                    <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                        <Shuffle size={12} /> Shuffle Order
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setShowAiConfigModal(true)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                            <Crown size={12} /> Add AI
+                                        </button>
+                                        <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                            <Shuffle size={12} /> Shuffle Order
+                                        </button>
+                                    </div>
                                 )}
                             </h3>
                             <div className="space-y-2">
@@ -5037,6 +5077,59 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             )}
                         </div>
                     </div>
+
+                    {/* AI Config Modal for Host */}
+                    {showAiConfigModal && (
+                        <div className="absolute inset-0 z-[200] bg-black/80 flex items-center justify-center p-4" onClick={() => setShowAiConfigModal(false)}>
+                            <div className="bg-gray-800 p-6 rounded-xl border border-gray-600 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-xl font-bold text-white mb-4">Add AI Opponent</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-400 mb-1">AI Name</label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
+                                            value={aiConfig.name}
+                                            onChange={e => setAiConfig({ ...aiConfig, name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-400 mb-1">Select Deck</label>
+                                        <select
+                                            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
+                                            value={aiConfig.deckId}
+                                            onChange={e => setAiConfig({ ...aiConfig, deckId: e.target.value })}
+                                        >
+                                            <option value="" disabled>Select a deck...</option>
+                                            {savedDecks?.map(d => (
+                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="flex justify-end gap-2 mt-6">
+                                        <button onClick={() => setShowAiConfigModal(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm font-bold">Cancel</button>
+                                        <button
+                                            onClick={() => {
+                                                if (aiConfig.deckId) {
+                                                    const deckToUse = savedDecks?.find(d => d.id === aiConfig.deckId);
+                                                    if (deckToUse) {
+                                                        const aiId = `ai-player-${Date.now()}`;
+                                                        setAiOpponentsData(prev => ({ ...prev, [aiId]: { name: aiConfig.name, deck: deckToUse.deck, tokens: deckToUse.tokens, color: '#9333ea' } }));
+                                                        socket.emit('add_ai_player', { room: roomId, name: aiConfig.name, color: '#9333ea', aiId });
+                                                        setShowAiConfigModal(false);
+                                                    }
+                                                }
+                                            }}
+                                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-white text-sm font-bold disabled:opacity-50"
+                                            disabled={!aiConfig.deckId}
+                                        >
+                                            Add AI
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -5506,6 +5599,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <History size={20} />
                     </button>
+                    {aiConnected && aiClientRef.current && (
+                        <button
+                            onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
+                            onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); }}
+                            onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
+                            className={`p-2 rounded-lg transition-colors ${isMicActive ? 'bg-red-600 text-white animate-pulse' : 'hover:bg-gray-800 text-gray-400'}`}
+                            title="Hold to talk to AI"
+                        >
+                            <Mic size={20} />
+                        </button>
+                    )}
                     <button
                         onClick={() => setShowStatsModal(true)}
                         className={`p-2 rounded-lg transition-colors ${showStatsModal ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
@@ -5596,6 +5700,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     <div className="mt-auto space-y-3">
                         {!isLandscape && (
                             <button onClick={() => { setShowSettingsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings /> Settings</button>
+                        )}
+                        {aiConnected && aiClientRef.current && (
+                            <button
+                                onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
+                                onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); }}
+                                onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
+                                className={`w-full py-3 ${isMicActive ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 text-white'} rounded-xl font-bold flex items-center justify-center gap-2 touch-none select-none`}
+                            >
+                                <Mic /> {isMicActive ? 'Listening...' : 'Hold to Talk to AI'}
+                            </button>
                         )}
                         <button onClick={() => { setIsLogOpen(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><History /> Game Log</button>
                         <button onClick={() => { setShowStatsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><BarChart3 /> Stats</button>
