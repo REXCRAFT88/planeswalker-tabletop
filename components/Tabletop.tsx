@@ -12,7 +12,7 @@ import {
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
-import { GeminiLiveClient } from '../services/geminiVoice';
+import { GeminiAIManager, AIOptions, GameCommand } from '../services/geminiAI';
 import { generateAiSystemPrompt, generateDeckMarkdown } from '../services/aiHelpers';
 import { SavedDeck } from '../App';
 import {
@@ -940,7 +940,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
 
     // AI State
-    const aiClientRef = useRef<GeminiLiveClient | null>(null);
+    const aiManagerRef = useRef<GeminiAIManager | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const [aiConnected, setAiConnected] = useState(false);
     const [isAiThinking, setIsAiThinking] = useState(false);
@@ -4791,25 +4791,32 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const audioCtx = new AudioContextClass({ sampleRate: 16000 });
                 audioContextRef.current = audioCtx;
 
-                const client = new GeminiLiveClient({
+                const aiOptions: AIOptions = {
                     apiKey: geminiApiKey,
-                    systemInstruction: systemPrompt,
-                    enableVoice: true, // Enable dual-connection for voice feedback
-                    onText: (msg) => {
-                        if (!active) return;
-                        console.log("AI Message received:", msg);
-                        if (handleAiResponseRef.current) {
-                            handleAiResponseRef.current(msg);
-                        }
+                    playerName: playerName,
+                    aiDeckMarkdown: generateDeckMarkdown('Gemini AI', aiOpponent.deck, aiOpponent.tokens),
+                    opponentDeckMarkdown: generateDeckMarkdown(playerName, initialDeck, initialTokens),
+                    magicRulesMarkdown: "", // Magic rules placeholder - can add later if needed
+                    onGameCommand: (command: GameCommand) => {
+                        // Handle game commands from AI
+                        console.log("AI Game Command:", command);
+                        handleGameCommand(command);
                     },
-                    onAudio: (audioData) => {
-                        // Played internally by GeminiLiveClient, but we can log or handle state here
+                    onConnected: () => {
+                        setAiConnected(true);
+                        addLog("AI connected to voice api!", "SYSTEM");
+                    },
+                    onError: (error) => {
+                        console.error("AI Error:", error);
+                        if (active) addLog("Failed to connect AI opponent", "SYSTEM");
                     }
-                });
+                };
 
-                aiClientRef.current = client;
+                const aiManager = new GeminiAIManager(aiOptions);
 
-                await client.connect();
+                aiManagerRef.current = aiManager;
+
+                await aiManager.connectAll();
                 if (active) {
                     setAiConnected(true);
                     addLog("AI connected to voice api!", "SYSTEM");
