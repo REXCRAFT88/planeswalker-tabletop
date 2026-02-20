@@ -945,7 +945,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [aiConnected, setAiConnected] = useState(false);
     const [isAiThinking, setIsAiThinking] = useState(false);
     const hasSentTurnRecapRef = useRef<string>('');
-    const handleAiResponseRef = useRef<(msg: string) => void>(() => { });
+    const handleGameCommandRef = useRef<(command: GameCommand) => void>(() => { });
 
     // Sync state with prop initially or if prop changes (but allow internal override)
     useEffect(() => {
@@ -1853,8 +1853,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         // Feed actions to AI Opponent
-        if (aiConnected && aiClientRef.current && type === 'ACTION') {
-            aiClientRef.current.sendText(`Game Event Log: ${displayMsg}`);
+        if (aiConnected && aiManagerRef.current && type === 'ACTION') {
+            aiManagerRef.current.sendGameEvent(`Game Event Log: ${displayMsg}`);
         }
     };
 
@@ -4101,8 +4101,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         switch (e.key.toLowerCase()) {
             case 'shift':
-                if (aiConnected && aiClientRef.current && !isMicActive) {
-                    aiClientRef.current.startMic();
+                if (aiConnected && aiManagerRef.current && !isMicActive) {
+                    aiManagerRef.current.startMic();
                     setIsMicActive(true);
                 }
                 break;
@@ -4230,8 +4230,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         switch (e.key.toLowerCase()) {
             case 'shift':
-                if (aiConnected && aiClientRef.current && isMicActive) {
-                    aiClientRef.current.stopMic();
+                if (aiConnected && aiManagerRef.current && isMicActive) {
+                    aiManagerRef.current.stopMic();
                     setIsMicActive(false);
                     setIsAiThinking(true);
                 }
@@ -4765,9 +4765,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     useEffect(() => {
         if (!aiPlayerIdStr || !geminiApiKey || isLocal) {
-            if (aiClientRef.current) {
-                aiClientRef.current.disconnect();
-                aiClientRef.current = null;
+            if (aiManagerRef.current) {
+                aiManagerRef.current.disconnect();
+                aiManagerRef.current = null;
                 setAiConnected(false);
             }
             return;
@@ -4800,7 +4800,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     onGameCommand: (command: GameCommand) => {
                         // Handle game commands from AI
                         console.log("AI Game Command:", command);
-                        handleGameCommand(command);
+                        handleGameCommandRef.current(command);
                     },
                     onConnected: () => {
                         setAiConnected(true);
@@ -4828,16 +4828,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
 
-        if (!aiConnected && !aiClientRef.current) {
+        if (!aiConnected && !aiManagerRef.current) {
             initAi();
         }
 
         return () => {
             active = false;
             // We ONLY teardown when we unmount or when the aiPlayerIdStr changes (i.e. AI is removed)
-            if (aiClientRef.current) {
-                aiClientRef.current.disconnect();
-                aiClientRef.current = null;
+            if (aiManagerRef.current) {
+                aiManagerRef.current.disconnect();
+                aiManagerRef.current = null;
             }
             if (audioContextRef.current) {
                 audioContextRef.current.close().catch(() => { });
@@ -4850,7 +4850,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // AI Command Executor loop
     useEffect(() => {
-        handleAiResponseRef.current = (msg: string) => {
+        handleGameCommandRef.current = (command: GameCommand) => {
             setIsAiThinking(false);
             const aiOpponent = getAiOpponentData();
             if (!aiOpponent) return;
@@ -4858,104 +4858,98 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const aiId = aiOpponent.id || '';
             const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
 
-            const jsonBlockRegex = /```json\n([\s\S]*?)\n```/g;
-            let match;
-            while ((match = jsonBlockRegex.exec(msg)) !== null) {
-                try {
-                    const jsonStr = match[1];
-                    const command = JSON.parse(jsonStr);
-                    console.log(`[AI COMMAND] ${aiOpponent.name} executing:`, command);
-                    addLog(`${aiOpponent.name} is thinking: ${command.action}`, 'SYSTEM');
+            try {
+                console.log(`[AI COMMAND] ${aiOpponent.name} executing:`, command);
+                addLog(`${aiOpponent.name} is thinking: ${command.action}`, 'SYSTEM');
 
-                    const state = localPlayerStates.current[aiId];
-                    if (!state) continue;
+                const state = localPlayerStates.current[aiId];
+                if (!state) return;
 
-                    switch (command.action) {
-                        case 'draw_card': {
-                            const amount = command.args.amount || 1;
-                            if (state.library.length < amount) break;
-                            const drawn = state.library.slice(0, amount);
-                            state.library = state.library.slice(amount);
-                            state.hand = [...state.hand, ...drawn];
+                switch (command.action) {
+                    case 'draw_card': {
+                        const amount = command.args.amount || 1;
+                        if (state.library.length < amount) break;
+                        const drawn = state.library.slice(0, amount);
+                        state.library = state.library.slice(amount);
+                        state.hand = [...state.hand, ...drawn];
 
-                            addLog(`${aiOpponent.name} drew ${amount} card(s)`);
+                        addLog(`${aiOpponent.name} drew ${amount} card(s)`);
 
-                            if (myId === aiId) {
-                                setLibrary(state.library);
-                                setHand(state.hand);
+                        if (myId === aiId) {
+                            setLibrary(state.library);
+                            setHand(state.hand);
+                        }
+                        sendHandUpdate(aiId, state.hand, gamePhase, state.mulliganCount);
+                        break;
+                    }
+                    case 'move_card': {
+                        const name = command.args.cardName;
+                        const zone = command.args.zone;
+
+                        if (zone === 'battlefield') {
+                            const cardInHand = state.hand.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
+                            if (cardInHand) {
+                                handleMobilePlayCard({ playerId: aiId, cardId: cardInHand.id });
                             }
-                            sendHandUpdate(aiId, state.hand, gamePhase, state.mulliganCount);
-                            break;
-                        }
-                        case 'move_card': {
-                            const name = command.args.cardName;
-                            const zone = command.args.zone;
-
-                            if (zone === 'battlefield') {
-                                const cardInHand = state.hand.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
-                                if (cardInHand) {
-                                    handleMobilePlayCard({ playerId: aiId, cardId: cardInHand.id });
-                                }
-                            } else if (zone === 'graveyard' || zone === 'exile') {
-                                const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
-                                if (objOnBoard) {
-                                    setBoardObjects(prev => prev.filter(o => o.id !== objOnBoard.id));
-                                    emitAction('REMOVE_OBJECT', { id: objOnBoard.id });
-                                    if (zone === 'graveyard') state.graveyard.unshift(objOnBoard.cardData);
-                                    if (zone === 'exile') state.exile.unshift(objOnBoard.cardData);
-                                    addLog(`${aiOpponent.name} moved ${objOnBoard.cardData.name} to ${zone}`);
-
-                                    if (myId === aiId) {
-                                        if (zone === 'graveyard') setGraveyard(state.graveyard);
-                                        if (zone === 'exile') setExile(state.exile);
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        case 'tap_untap': {
-                            const name = command.args.cardName;
-                            const candidates = boardObjectsRef.current.filter(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
-                            if (candidates.length > 0) {
-                                const myControllerIdx = playersListRef.current.findIndex(p => p.id === aiId);
-                                const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
-                                const objOnBoard = candidates.find(o => o.rotation === defaultRot) || candidates[0];
-                                const isTapped = objOnBoard.rotation !== defaultRot;
-                                const newRot = isTapped ? defaultRot : (defaultRot + 90) % 360;
-
-                                setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, rotation: newRot } : o));
-                                emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { rotation: newRot } });
-                                addLog(`${aiOpponent.name} ${isTapped ? 'untapped' : 'tapped'} ${objOnBoard.cardData.name}`);
-                            }
-                            break;
-                        }
-                        case 'change_life': {
-                            const amount = command.args.amount || 0;
-                            handleMobileUpdateLife({ playerId: aiId, amount });
-                            break;
-                        }
-                        case 'add_counter': {
-                            const name = command.args.cardName;
-                            const amount = command.args.amount;
-                            const cType = command.args.counterType;
+                        } else if (zone === 'graveyard' || zone === 'exile') {
                             const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
                             if (objOnBoard) {
-                                const newCount = (objOnBoard.counters[cType] || 0) + amount;
-                                setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, counters: { ...o.counters, [cType]: newCount } } : o));
-                                emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { counters: { ...objOnBoard.counters, [cType]: newCount } } });
-                                addLog(`${aiOpponent.name} updated ${cType} counter on ${objOnBoard.cardData.name} by ${amount}`);
+                                setBoardObjects(prev => prev.filter(o => o.id !== objOnBoard.id));
+                                emitAction('REMOVE_OBJECT', { id: objOnBoard.id });
+                                if (zone === 'graveyard') state.graveyard.unshift(objOnBoard.cardData);
+                                if (zone === 'exile') state.exile.unshift(objOnBoard.cardData);
+                                addLog(`${aiOpponent.name} moved ${objOnBoard.cardData.name} to ${zone}`);
+
+                                if (myId === aiId) {
+                                    if (zone === 'graveyard') setGraveyard(state.graveyard);
+                                    if (zone === 'exile') setExile(state.exile);
+                                }
                             }
-                            break;
                         }
-                        case 'mulligan': {
-                            const keep = command.args.keep;
-                            handleMobileMulligan({ playerId: aiId, keep });
-                            break;
-                        }
+                        break;
                     }
-                } catch (e) {
-                    console.error("Failed to parse AI command JSON:", e);
+                    case 'tap_untap': {
+                        const name = command.args.cardName;
+                        const candidates = boardObjectsRef.current.filter(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
+                        if (candidates.length > 0) {
+                            const myControllerIdx = playersListRef.current.findIndex(p => p.id === aiId);
+                            const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
+                            const objOnBoard = candidates.find(o => o.rotation === defaultRot) || candidates[0];
+                            const isTapped = objOnBoard.rotation !== defaultRot;
+                            const newRot = isTapped ? defaultRot : (defaultRot + 90) % 360;
+
+                            setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, rotation: newRot } : o));
+                            emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { rotation: newRot } });
+                            addLog(`${aiOpponent.name} ${isTapped ? 'untapped' : 'tapped'} ${objOnBoard.cardData.name}`);
+                        }
+                        break;
+                    }
+                    case 'change_life': {
+                        const amount = command.args.amount || 0;
+                        handleMobileUpdateLife({ playerId: aiId, amount });
+                        break;
+                    }
+                    case 'add_counter': {
+                        const name = command.args.cardName;
+                        const amount = command.args.amount;
+                        const cType = command.args.counterType;
+                        const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
+                        if (objOnBoard) {
+                            const newCount = (objOnBoard.counters[cType] || 0) + amount;
+                            setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, counters: { ...o.counters, [cType]: newCount } } : o));
+                            emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { counters: { ...objOnBoard.counters, [cType]: newCount } } });
+                            addLog(`${aiOpponent.name} updated ${cType} counter on ${objOnBoard.cardData.name} by ${amount}`);
+                        }
+                        break;
+                    }
+                    case 'mulligan': {
+                        const keep = command.args.keep;
+                        handleMobileMulligan({ playerId: aiId, keep });
+                        break;
+                    }
                 }
+            } catch (e) {
+                console.error("Failed to execute AI command:", e);
             }
         };
     });
@@ -4963,7 +4957,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // AI Initial Game State & Mulligan Prompt
     useEffect(() => {
         const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
+        if (!aiOpponent || !aiConnected || !aiManagerRef.current) return;
         if (gamePhase === 'SETUP') return;
 
         // Ensure we only prompt this once per game start
@@ -4988,7 +4982,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             recap += `\nMulligans are disabled. You will keep this hand. Wait for your turn.`;
         }
 
-        aiClientRef.current.sendText(recap);
+        aiManagerRef.current.sendGameState(recap);
         setIsAiThinking(true);
         console.log("Sent Initial Start/Mulligan prompt to AI");
     }, [gamePhase, aiConnected, currentTurnPlayerId, playersList, aiOpponentsData, getAiOpponentData]);
@@ -4996,7 +4990,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // AI Turn Recap Generator
     useEffect(() => {
         const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
+        if (!aiOpponent || !aiConnected || !aiManagerRef.current) return;
 
         const aiId = aiOpponent.id || '';
         // Guard against infinite recap loop
@@ -5055,7 +5049,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
         recap += `\nWhat actions will you take? Remember to pass the turn when you are finished.`;
 
-        aiClientRef.current.sendText(recap);
+        aiManagerRef.current.sendGameState(recap);
         setIsAiThinking(true);
         console.log("Sent Turn Recap to AI. Recap content length:", recap.length);
         console.log("RECAP SENT TO AI:\n", recap);
@@ -5763,11 +5757,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <History size={20} />
                     </button>
-                    {aiConnected && aiClientRef.current && (
+                    {aiConnected && aiManagerRef.current && (
                         <button
-                            onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
-                            onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
-                            onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
+                            onPointerDown={() => { aiManagerRef.current?.startMic(); setIsMicActive(true); }}
+                            onPointerUp={() => { aiManagerRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
+                            onPointerLeave={() => { if (isMicActive) { aiManagerRef.current?.stopMic(); setIsMicActive(false); } }}
                             className={`p-2 rounded-lg transition-colors ${isMicActive ? 'bg-red-600 text-white animate-pulse' : 'hover:bg-gray-800 text-gray-400'}`}
                             title="Hold to talk to AI"
                         >
@@ -5865,11 +5859,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         {!isLandscape && (
                             <button onClick={() => { setShowSettingsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings /> Settings</button>
                         )}
-                        {aiConnected && aiClientRef.current && (
+                        {aiConnected && aiManagerRef.current && (
                             <button
-                                onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
-                                onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
-                                onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
+                                onPointerDown={() => { aiManagerRef.current?.startMic(); setIsMicActive(true); }}
+                                onPointerUp={() => { aiManagerRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
+                                onPointerLeave={() => { if (isMicActive) { aiManagerRef.current?.stopMic(); setIsMicActive(false); } }}
                                 className={`w-full py-3 ${isMicActive ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 text-white'} rounded-xl font-bold flex items-center justify-center gap-2 touch-none select-none`}
                             >
                                 <Mic /> {isMicActive ? 'Listening...' : 'Hold to Talk to AI'}

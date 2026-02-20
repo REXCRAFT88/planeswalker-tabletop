@@ -5,11 +5,13 @@
  */
 
 import { GeminiStrategyClient, GameCommand, GeminiStrategyOptions } from './geminiStrategy';
+export type { GameCommand };
 import { GeminiConversationClient, GeminiConversationOptions } from './geminiConversation';
 
 export interface AIOptions {
     apiKey: string;
     playerName: string;
+    aiName?: string;
     aiDeckMarkdown: string;
     opponentDeckMarkdown: string;
     magicRulesMarkdown: string;
