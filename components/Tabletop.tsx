@@ -4794,6 +4794,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const client = new GeminiLiveClient({
                     apiKey: geminiApiKey,
                     systemInstruction: systemPrompt,
+                    enableVoice: true, // Enable dual-connection for voice feedback
                     onText: (msg) => {
                         if (!active) return;
                         console.log("AI Message received:", msg);

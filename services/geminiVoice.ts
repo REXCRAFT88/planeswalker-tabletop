@@ -6,10 +6,12 @@ export interface GeminiLiveOptions {
     onConnected?: () => void;
     onDisconnected?: (reason: string) => void;
     onError?: (error: any) => void;
+    enableVoice?: boolean; // New: Enable voice responses for conversational feedback
 }
 
 export class GeminiLiveClient {
     private ws: WebSocket | null = null;
+    private wsVoice: WebSocket | null = null; // New: Second connection for voice
     private options: GeminiLiveOptions;
     private audioContext: AudioContext | null = null;
     private mediaStream: MediaStream | null = null;
@@ -18,6 +20,7 @@ export class GeminiLiveClient {
     private processor: ScriptProcessorNode | AudioWorkletNode | null = null;
     private micSource: MediaStreamAudioSourceNode | null = null;
     private isMicActive: boolean = false;
+    private currentConversation: Array<{role: string, content: string}> = []; // Track conversation for voice
 
     constructor(options: GeminiLiveOptions) {
         this.options = options;
@@ -26,15 +29,15 @@ export class GeminiLiveClient {
     public async connect(): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
+                // Main text connection for game commands
                 const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.options.apiKey}`;
-                console.log("Connecting to Gemini Live WebSocket...");
+                console.log("Connecting to Gemini Live WebSocket (Text)...");
                 this.ws = new WebSocket(url);
 
                 this.ws.onopen = () => {
-                    console.log("Gemini Live WebSocket connected.");
+                    console.log("Gemini Live WebSocket connected (Text).");
                     this.sendSetup();
-                    this.options.onConnected?.();
-                    this.initAudioOutput();
+                    this.initAudioOutput(); // Initialize audio output for voice responses
                     resolve();
                 };
 
@@ -52,8 +55,49 @@ export class GeminiLiveClient {
                     this.options.onError?.(error);
                     reject(error);
                 };
+
+                // Optional voice connection for conversational responses
+                if (this.options.enableVoice) {
+                    this.connectVoiceConnection();
+                } else {
+                    this.options.onConnected?.();
+                }
             } catch (err) {
                 console.error("Gemini Live connection attempt failed:", err);
+                reject(err);
+            }
+        });
+    }
+
+    private async connectVoiceConnection(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            try {
+                const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.options.apiKey}`;
+                console.log("Connecting to Gemini Live WebSocket (Voice)...");
+                this.wsVoice = new WebSocket(url);
+
+                this.wsVoice.onopen = () => {
+                    console.log("Gemini Live WebSocket connected (Voice).");
+                    this.sendVoiceSetup();
+                    this.options.onConnected?.();
+                    resolve();
+                };
+
+                this.wsVoice.onmessage = (event) => {
+                    this.handleVoiceMessage(event);
+                };
+
+                this.wsVoice.onclose = (event) => {
+                    console.log(`Gemini Voice WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
+                };
+
+                this.wsVoice.onerror = (error) => {
+                    console.error("Gemini Voice WebSocket error:", error);
+                    this.options.onError?.(error);
+                    reject(error);
+                };
+            } catch (err) {
+                console.error("Gemini Voice connection attempt failed:", err);
                 reject(err);
             }
         });
@@ -62,10 +106,19 @@ export class GeminiLiveClient {
     public disconnect() {
         console.log("Disconnecting Gemini Live...");
         this.stopMic();
+
+        // Close text connection
         if (this.ws) {
             this.ws.close();
             this.ws = null;
         }
+
+        // Close voice connection
+        if (this.wsVoice) {
+            this.wsVoice.close();
+            this.wsVoice = null;
+        }
+
         if (this.audioContextOutput) {
             this.audioContextOutput.close();
             this.audioContextOutput = null;
@@ -92,28 +145,49 @@ export class GeminiLiveClient {
         this.ws.send(JSON.stringify(setupMessage));
     }
 
+    private sendVoiceSetup() {
+        if (!this.wsVoice || this.wsVoice.readyState !== WebSocket.OPEN) return;
+
+        console.log("Sending Gemini Voice Setup message...");
+        const setupMessage = {
+            setup: {
+                model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+                generationConfig: {
+                    responseModalities: ["AUDIO"], // AUDIO for voice responses
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: {
+                                voiceName: "Aoede" // Friendly, conversational voice
+                            }
+                        }
+                    }
+                },
+                systemInstruction: {
+                    parts: [{
+                        text: "You are a friendly, conversational AI assistant for a Magic: The Gathering game. Your role is to provide encouraging comments and brief strategic insights based on game events. Keep responses conversational and natural. Do not issue game commands or JSON - that's handled by the text connection."
+                    }]
+                }
+            }
+        };
+        this.wsVoice.send(JSON.stringify(setupMessage));
+    }
+
     private handleMessage(event: MessageEvent) {
         if (typeof event.data === "string") {
             try {
                 const data = JSON.parse(event.data);
 
-                // Handle text responses
+                // Handle text responses from main game connection
                 if (data.serverContent?.modelTurn?.parts) {
                     for (const part of data.serverContent.modelTurn.parts) {
                         if (part.text) {
                             console.log("Gemini Response Text:", part.text);
                             this.options.onText(part.text);
-                        }
-                    }
-                }
 
-                // Handle audio responses (if enabled in future)
-                if (data.serverContent?.modelTurn?.parts) {
-                    for (const part of data.serverContent.modelTurn.parts) {
-                        if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
-                            const buffer = this.base64ToArrayBuffer(part.inlineData.data) as ArrayBuffer;
-                            this.playAudioChunk(new Uint8Array(buffer));
-                            this.options.onAudio(new Uint8Array(buffer));
+                            // If voice is enabled, also send this to voice connection for conversational feedback
+                            if (this.options.enableVoice && this.wsVoice?.readyState === WebSocket.OPEN) {
+                                this.sendToVoiceConnection(part.text);
+                            }
                         }
                     }
                 }
@@ -149,6 +223,63 @@ export class GeminiLiveClient {
             };
             reader.readAsText(event.data);
         }
+    }
+
+    private handleVoiceMessage(event: MessageEvent) {
+        if (typeof event.data === "string") {
+            try {
+                const data = JSON.parse(event.data);
+
+                // Handle audio responses from voice connection
+                if (data.serverContent?.modelTurn?.parts) {
+                    for (const part of data.serverContent.modelTurn.parts) {
+                        if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
+                            const buffer = this.base64ToArrayBuffer(part.inlineData.data) as ArrayBuffer;
+                            this.playAudioChunk(new Uint8Array(buffer));
+                            this.options.onAudio(new Uint8Array(buffer));
+                        }
+                    }
+                }
+
+                // Handle text from voice connection (for logging/conversation tracking)
+                if (data.serverContent?.modelTurn?.parts) {
+                    for (const part of data.serverContent.modelTurn.parts) {
+                        if (part.text) {
+                            console.log("Voice Conversation:", part.text);
+                            // Track conversation for context
+                            this.currentConversation.push({ role: 'model', content: part.text });
+                            // Keep conversation manageable
+                            if (this.currentConversation.length > 10) {
+                                this.currentConversation.shift();
+                            }
+                        }
+                    }
+                }
+
+                if (data.error) {
+                    console.error("Gemini Voice Error:", data.error);
+                    this.options.onError?.(data.error);
+                }
+            } catch (e) {
+                console.warn("Failed to parse Gemini voice message", e);
+            }
+        }
+    }
+
+    private sendToVoiceConnection(text: string) {
+        if (!this.wsVoice || this.wsVoice.readyState !== WebSocket.OPEN) return;
+
+        // Send game events to voice connection for conversational responses
+        const msg = {
+            clientContent: {
+                turns: [{
+                    role: "user",
+                    parts: [{ text: `Game Event: ${text}` }]
+                }],
+                turnComplete: true
+            }
+        };
+        this.wsVoice.send(JSON.stringify(msg));
     }
 
     public sendText(text: string) {

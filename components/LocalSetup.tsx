@@ -237,6 +237,32 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                 )}
                             </div>
 
+                            {/* AI Voice Toggle */}
+                            {isAiOpponent && (
+                                <div className="bg-gray-900 p-3 rounded-lg border border-gray-700">
+                                    <label className="flex items-center gap-3 cursor-pointer">
+                                        <div className="flex items-center gap-2 flex-1">
+                                            <Bot size={16} className="text-purple-400" />
+                                            <span className="text-sm font-medium text-gray-300">Enable AI Voice Feedback</span>
+                                        </div>
+                                        <div className="relative">
+                                            <input
+                                                type="checkbox"
+                                                className="sr-only"
+                                                checked={true} // Enable by default for AI opponents
+                                                readOnly // Keep enabled by default for better UX
+                                            />
+                                            <div className="w-10 h-6 rounded-full bg-purple-600">
+                                                <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full translate-x-4" />
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <p className="text-xs text-gray-400 mt-2">
+                                        AI will provide voice commentary on game events in addition to text commands
+                                    </p>
+                                </div>
+                            )}
+
                             <div className="flex items-center gap-2 my-2">
                                 <div className="h-px bg-gray-700 flex-1" /> <span className="text-xs text-gray-500">OR ADD BOT/LOCAL DECK</span> <div className="h-px bg-gray-700 flex-1" />
                             </div>
