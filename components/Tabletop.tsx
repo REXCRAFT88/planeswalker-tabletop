@@ -4749,22 +4749,32 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     );
 
     const getAiOpponentData = useCallback(() => {
-        if (isHost && !isLocal) {
-            const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
-            if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
-                const data = aiOpponentsData[aiPlayer.id];
-                return { id: aiPlayer.id, name: data.name, deck: data.deck, tokens: data.tokens, type: 'ai' as const };
+        if (isHost) {
+            if (isLocal) {
+                const aiPlayer = playersList.find(p => p.id?.startsWith('ai-'));
+                if (aiPlayer) {
+                    const localData = localOpponents.find(opp => opp.id === aiPlayer.id);
+                    if (localData) {
+                        return { id: aiPlayer.id, name: localData.name, deck: localData.deck || [], tokens: localData.tokens || [], type: 'ai' as const };
+                    }
+                }
+            } else {
+                const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
+                if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
+                    const data = aiOpponentsData[aiPlayer.id];
+                    return { id: aiPlayer.id, name: data.name, deck: data.deck, tokens: data.tokens, type: 'ai' as const };
+                }
             }
         }
         return undefined;
-    }, [isLocal, isHost, playersList, aiOpponentsData]);
+    }, [isLocal, isHost, playersList, aiOpponentsData, localOpponents]);
 
     // AI Initialization
     // We compute a stable primitive ID so the useEffect doesn't tear down on every playersList sync
-    const aiPlayerIdStr = isHost && !isLocal ? (playersList.find(p => aiOpponentsData[p.id])?.id) : undefined;
+    const aiPlayerIdStr = isHost ? (isLocal ? playersList.find(p => p.id?.startsWith('ai-'))?.id : playersList.find(p => aiOpponentsData[p.id])?.id) : undefined;
 
     useEffect(() => {
-        if (!aiPlayerIdStr || !geminiApiKey || isLocal) {
+        if (!aiPlayerIdStr || !geminiApiKey) {
             if (aiManagerRef.current) {
                 aiManagerRef.current.disconnect();
                 aiManagerRef.current = null;

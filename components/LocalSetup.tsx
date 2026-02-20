@@ -11,7 +11,7 @@ interface LocalOpponent {
     deck: CardData[];
     tokens: CardData[];
     color: string;
-    type: 'human_local' | 'open_slot';
+    type: 'human_local' | 'open_slot' | 'ai';
 }
 
 interface LocalSetupProps {
@@ -136,6 +136,19 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
         setOpponents([...opponents, newOpponent]);
     };
 
+    const addAiSlot = () => {
+        if (opponents.length >= 5) return;
+        const newOpponent: LocalOpponent = {
+            id: `ai-${Date.now()}`,
+            name: `Gemini AI`,
+            deck: [], // AI deck will be injected later or random
+            tokens: [],
+            color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
+            type: 'ai'
+        };
+        setOpponents([...opponents, newOpponent]);
+    };
+
     return (
         <div className="flex flex-col h-full p-4 md:p-8 max-w-4xl mx-auto animate-in fade-in pb-20 overflow-y-auto">
             <div className="flex items-center justify-between mb-8">
@@ -187,6 +200,13 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                     <Plus size={20} /> Add Open Slot (For Mobile Join)
                                 </button>
                             )}
+                            <button
+                                onClick={addAiSlot}
+                                disabled={opponents.length >= 5}
+                                className="w-full py-3 bg-blue-500 hover:bg-blue-400 disabled:bg-gray-700 disabled:text-gray-500 text-white font-bold rounded-lg flex items-center justify-center gap-2"
+                            >
+                                <Plus size={20} /> Add AI Opponent
+                            </button>
 
                             <div className="flex items-center gap-2 my-2">
                                 <div className="h-px bg-gray-700 flex-1" /> <span className="text-xs text-gray-500">ADD LOCAL DECK</span> <div className="h-px bg-gray-700 flex-1" />
