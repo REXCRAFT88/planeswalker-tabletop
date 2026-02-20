@@ -4700,7 +4700,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
             setAiConnected(false);
         };
-    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens, aiConnected]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens]);
 
     // AI Command Executor loop
     useEffect(() => {
