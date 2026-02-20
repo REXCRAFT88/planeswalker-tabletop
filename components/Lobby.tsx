@@ -25,6 +25,8 @@ interface LobbyProps {
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
     onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
+    geminiApiKey?: string;
+    setGeminiApiKey?: (key: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -32,7 +34,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     playerSleeve, setPlayerSleeve,
     onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
-    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
+    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck,
+    geminiApiKey, setGeminiApiKey
 }) => {
 
     const [roomCode, setRoomCode] = useState('');
@@ -344,6 +347,26 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     />
                                 </div>
                             </div>
+
+                            {/* Gemini API Key Input */}
+                            {setGeminiApiKey && (
+                                <div>
+                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+                                        <span>Gemini API Key (For AI Opponent)</span>
+                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 normal-case underline">Get Key</a>
+                                    </label>
+                                    <div className="relative">
+                                        <Zap className="absolute left-3 top-3 text-gray-500" size={18} />
+                                        <input
+                                            type="password"
+                                            value={geminiApiKey || ''}
+                                            onChange={(e) => setGeminiApiKey(e.target.value)}
+                                            placeholder="Optional..."
+                                            className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 text-white focus:ring-2 focus:ring-purple-500 focus:outline-none transition-all text-xs"
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="pt-4 border-t border-gray-700">
 
