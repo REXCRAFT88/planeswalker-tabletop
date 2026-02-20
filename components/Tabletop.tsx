@@ -13,12 +13,12 @@ import {
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
 import { GeminiLiveClient } from '../services/geminiVoice';
-import { generateAiSystemPrompt, generateDeckMarkdown, generateAiTurnRecap } from '../services/aiHelpers';
+import { generateAiSystemPrompt, generateDeckMarkdown } from '../services/aiHelpers';
 import { SavedDeck } from '../App';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, Bot
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -743,8 +743,7 @@ const PlayerManagerModal: React.FC<{
     onAssignState: (playerId: string, seatIdx: number) => void;
     onResetGame: () => void;
     onRestoreBackup: () => void;
-    onAddAi: () => void;
-}> = ({ isOpen, onClose, players, onKick, onReorder, onAssignState, onResetGame, onRestoreBackup, onAddAi }) => {
+}> = ({ isOpen, onClose, players, onKick, onReorder, onAssignState, onResetGame, onRestoreBackup }) => {
     if (!isOpen) return null;
 
     const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -790,10 +789,9 @@ const PlayerManagerModal: React.FC<{
                     </div>
                 </div>
 
-                <div className="pt-4 border-t border-gray-700 grid grid-cols-3 gap-3">
-                    <button onClick={onResetGame} className="py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center justify-center gap-2 text-sm"><RotateCcw size={16} /> Reset</button>
-                    <button onClick={onRestoreBackup} className="py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2 text-sm"><History size={16} /> Restore</button>
-                    <button onClick={onAddAi} className="py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold flex items-center justify-center gap-2 text-sm"><Bot size={16} /> Add AI</button>
+                <div className="pt-4 border-t border-gray-700 flex gap-3">
+                    <button onClick={onResetGame} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><RotateCcw size={18} /> Reset Table</button>
+                    <button onClick={onRestoreBackup} className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2"><History size={18} /> Restore Backup</button>
                 </div>
             </div>
         </div>
@@ -2161,17 +2159,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setTurnStep(data.turnStep);
             }
             else if (action === 'UPDATE_LIFE') {
-                const targetId = data.playerId || playerId;
-                if (targetId && targetId !== socket.id) {
-                    setOpponentsLife(prev => ({ ...prev, [targetId]: data.life }));
+                if (sender && sender.id !== socket.id) {
+                    setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
                 }
             }
             else if (action === 'UPDATE_COUNTS') {
-                const targetId = data.playerId || playerId;
-                if (targetId && targetId !== socket.id) {
+                if (sender && sender.id !== socket.id) {
                     setOpponentsCounts(prev => ({
                         ...prev,
-                        [targetId]: {
+                        [sender.id]: {
                             library: data.library,
                             graveyard: data.graveyard,
                             exile: data.exile,
@@ -2180,7 +2176,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         }
                     }));
                     if (data.commanders) {
-                        setOpponentsCommanders(prev => ({ ...prev, [targetId]: data.commanders }));
+                        setOpponentsCommanders(prev => ({ ...prev, [sender.id]: data.commanders }));
                     }
                 }
             }
@@ -2519,9 +2515,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         opp = localOpponents[idx - 1];
                     }
 
+                    const aiData = aiOpponentsData[p.id];
+
                     if (opp) {
                         states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
+                    } else if (aiData) {
+                        console.log(`Initializing AI state for ${p.name} using aiOpponentsData`);
+                        states[p.id] = createInitialState(p.id, aiData.deck, aiData.tokens);
                     } else {
+                        console.warn(`No deck found for player ${p.name} (id: ${p.id})`);
                         states[p.id] = createInitialState(p.id, [], []);
                     }
                 }
@@ -2780,7 +2782,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // --- Mobile Event Handlers ---
     const handleMobilePlayCard = ({ playerId, cardId }: { playerId: string, cardId: string }) => {
-        if (!isLocal) return;
+        if (!isLocal && !aiOpponentsData[playerId]) return;
 
         // Find player state
         const state = localPlayerStates.current[playerId];
@@ -2828,7 +2830,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileMulligan = ({ playerId, keep }: { playerId: string, keep: boolean }) => {
-        if (!isLocal) return;
+        if (!isLocal && !aiOpponentsData[playerId]) return;
 
         const state = localPlayerStates.current[playerId];
         if (!state) return;
@@ -2868,7 +2870,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileUpdateLife = ({ playerId, amount }: { playerId: string, amount: number }) => {
-        if (!isLocal) return;
+        if (!isLocal && !aiOpponentsData[playerId]) return;
         const state = localPlayerStates.current[playerId];
         if (!state) return;
 
@@ -2887,7 +2889,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileUpdateCounter = ({ playerId, type, amount, targetId }: { playerId: string, type: string, amount: number, targetId?: string }) => {
-        if (!isLocal) return;
+        if (!isLocal && !aiOpponentsData[playerId]) return;
         const state = localPlayerStates.current[playerId];
         if (!state) return;
 
@@ -3023,13 +3025,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [soundsEnabled]);
 
     const nextTurn = () => {
+        setIsAiThinking(false);
         // Restriction: Only current player can advance turn/step
         const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
-        const isAiTurn = !!aiOpponentsData[currentTurnPlayerId] || (isLocal && localOpponents?.find(o => o.id === currentTurnPlayerId)?.type === 'ai');
-        const amIHost = isHost || isLocal;
+        const isAiTurn = !!(getAiOpponentData() && currentTurnPlayerId === getAiOpponentData()?.id);
 
-        // Allow host to pass turn for AI
-        if (currentTurnPlayerId !== myId && (!amIHost || !isAiTurn)) return;
+        if (currentTurnPlayerId !== myId) {
+            // If it's an AI's turn and we are the host, allow passing
+            if (isHost && isAiTurn) {
+                console.log("Host is force-passing AI turn");
+            } else {
+                return;
+            }
+        }
 
         // Advantage sub-phases
         const currentStepIndex = TURN_STEPS.indexOf(turnStep);
@@ -4728,10 +4736,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     );
 
     const getAiOpponentData = useCallback(() => {
-        if (isLocal) {
-            const ai = localOpponents.find(o => o.type === 'ai');
-            if (ai) return { id: ai.id, name: ai.name, deck: ai.deck, tokens: ai.tokens, type: 'ai' as const };
-        }
         if (isHost && !isLocal) {
             const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
             if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
@@ -4744,10 +4748,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // AI Initialization
     // We compute a stable primitive ID so the useEffect doesn't tear down on every playersList sync
-    const aiPlayerIdStr = isLocal ? localOpponents.find(o => o.type === 'ai')?.id : (isHost ? playersList.find(p => aiOpponentsData[p.id])?.id : undefined);
+    const aiPlayerIdStr = isHost && !isLocal ? playersList.find(p => aiOpponentsData[p.id])?.id : undefined;
 
     useEffect(() => {
-        if (!aiPlayerIdStr || !geminiApiKey) {
+        if (!aiPlayerIdStr || !geminiApiKey || isLocal) {
             if (aiClientRef.current) {
                 aiClientRef.current.disconnect();
                 aiClientRef.current = null;
@@ -4756,7 +4760,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return;
         }
 
-        const aiData = isLocal ? localOpponents.find(o => o.id === aiPlayerIdStr) : aiOpponentsData[aiPlayerIdStr];
+        const aiData = aiOpponentsData[aiPlayerIdStr];
         if (!aiData) return;
 
         let active = true;
@@ -4824,88 +4828,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [aiPlayerIdStr, geminiApiKey, isLocal, playerName, initialDeck, initialTokens]);
 
-    // AI Thinking Timeout - reset if AI takes too long to respond
-    useEffect(() => {
-        if (!isAiThinking) return;
-        const timer = setTimeout(() => {
-            console.log("AI thinking timed out - resetting indicator");
-            setIsAiThinking(false);
-        }, 30000); // 30 second timeout
-        return () => clearTimeout(timer);
-    }, [isAiThinking]);
-
-    // Host: Sync AI player counts to other players
-    useEffect(() => {
-        if (!isHost || !aiConnected) return;
-        const aiOpponent = getAiOpponentData();
-        if (!aiOpponent) return;
-
-        const aiId = aiOpponent.id || '';
-        const state = localPlayerStates.current[aiId];
-        if (!state) return;
-
-        if (isLocal) {
-            // In local mode, update the opponent state directly for UI display
-            setOpponentsCounts(prev => ({
-                ...prev,
-                [aiId]: {
-                    library: state.library.length,
-                    graveyard: state.graveyard.length,
-                    exile: state.exile.length,
-                    hand: state.hand.length,
-                    command: state.commandZone.length,
-                }
-            }));
-            setOpponentsLife(prev => ({ ...prev, [aiId]: state.life }));
-        } else {
-            // Online mode: broadcast counts to others
-            emitAction('UPDATE_COUNTS', {
-                playerId: aiId,
-                library: state.library.length,
-                graveyard: state.graveyard.length,
-                exile: state.exile.length,
-                hand: state.hand.length,
-                command: state.commandZone.length,
-                commanders: state.commandZone
-            });
-
-            // Also sync life
-            emitAction('UPDATE_LIFE', { playerId: aiId, life: state.life });
-        }
-    }, [isHost, isLocal, aiConnected, turn, turnStep, gamePhase, isAiThinking]);
-
-    // AI Turn Recap Generator
-    useEffect(() => {
-        if (!aiConnected || !aiClientRef.current || !isHost) return;
-
-        const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || currentTurnPlayerId !== aiOpponent.id) return;
-
-        // Prevent spamming recap in same turn/phase
-        const recapKey = `${turn}-${turnStep}-${gamePhase}`;
-        if (hasSentTurnRecapRef.current === recapKey) return;
-        hasSentTurnRecapRef.current = recapKey;
-
-        const generateRecap = async () => {
-            const aiId = aiOpponent.id || '';
-            const state = localPlayerStates.current[aiId];
-            if (!state) return;
-
-            const recapMsg = generateAiTurnRecap(
-                aiId,
-                playersListRef.current,
-                boardObjectsRef.current,
-                logsRef.current.slice(0, 10),
-                state
-            );
-
-            setIsAiThinking(true);
-            aiClientRef.current?.sendText(recapMsg);
-        };
-
-        generateRecap();
-    }, [currentTurnPlayerId, turn, turnStep, gamePhase, aiConnected, isHost]);
-
     // AI Command Executor loop
     useEffect(() => {
         handleAiResponseRef.current = (msg: string) => {
@@ -4922,7 +4844,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 try {
                     const jsonStr = match[1];
                     const command = JSON.parse(jsonStr);
-                    console.log("AI executing:", command);
+                    console.log(`[AI COMMAND] ${aiOpponent.name} executing:`, command);
+                    addLog(`${aiOpponent.name} is thinking: ${command.action}`, 'SYSTEM');
 
                     const state = localPlayerStates.current[aiId];
                     if (!state) continue;
@@ -5056,10 +4979,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
 
         const aiId = aiOpponent.id || '';
-        if (currentTurnPlayerId !== aiId) return; // Only recap on AI's turn
-
         // Guard against infinite recap loop
-        const recapKey = `${turn}-${turnStep}-${aiId}-${gamePhase}`;
+        const recapKey = `${turn}-${turnStep}-${aiId}`;
         if (hasSentTurnRecapRef.current === recapKey) return;
         hasSentTurnRecapRef.current = recapKey;
 
@@ -5116,7 +5037,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         aiClientRef.current.sendText(recap);
         setIsAiThinking(true);
-        console.log("Sent Turn Recap to AI");
+        console.log("Sent Turn Recap to AI. Recap content length:", recap.length);
+        console.log("RECAP SENT TO AI:\n", recap);
 
     }, [turn, currentTurnPlayerId, turnStep, aiConnected, localOpponents, socket.id, mySeatIndex, playersList, boardObjects, layout, opponentsLife, gamePhase, isLocal, hand, opponentsCounts, localPlayerStates]);
 
@@ -6357,77 +6279,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 onAssignState={handleAssignState}
                 onResetGame={handleRestartGame}
                 onRestoreBackup={restoreGameFromBackup}
-                onAddAi={() => setShowAiConfigModal(true)}
             />
-
-            {showAiConfigModal && (
-                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full">
-                        <h3 className="text-xl font-bold text-white mb-4">Add AI Bot</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Bot Name</label>
-                                <input
-                                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                    value={aiConfig.name}
-                                    onChange={e => setAiConfig(prev => ({ ...prev, name: e.target.value }))}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Bot Deck</label>
-                                <select
-                                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white"
-                                    value={aiConfig.deckId}
-                                    onChange={e => setAiConfig(prev => ({ ...prev, deckId: e.target.value }))}
-                                >
-                                    {savedDecks?.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                                    {(!savedDecks || savedDecks.length === 0) && <option disabled>No decks available</option>}
-                                </select>
-                            </div>
-                            <div className="flex gap-3 pt-4">
-                                <button onClick={() => setShowAiConfigModal(false)} className="flex-1 py-2 bg-gray-700 text-white rounded-lg font-bold">Cancel</button>
-                                <button
-                                    onClick={() => {
-                                        const deck = savedDecks?.find(d => d.id === aiConfig.deckId);
-                                        if (!deck) return;
-                                        const aiId = `ai-${Date.now()}`;
-                                        const aiColor = PLAYER_COLORS[playersList.length % PLAYER_COLORS.length];
-
-                                        // Update local data
-                                        const st = createInitialState(aiId, deck.deck, deck.tokens);
-                                        // Draw initial hand if game is already started
-                                        if (gamePhase !== 'SETUP') {
-                                            const initHand = st.library.slice(0, 7);
-                                            st.library = st.library.slice(7);
-                                            st.hand = [...initHand, ...st.hand.filter(c => c.isToken)];
-                                            st.hasKeptHand = true;
-                                        }
-                                        localPlayerStates.current[aiId] = st;
-
-                                        setAiOpponentsData(prev => ({
-                                            ...prev,
-                                            [aiId]: { name: aiConfig.name, deck: deck.deck, tokens: deck.tokens, color: aiColor }
-                                        }));
-
-                                        socket.emit('game_action', {
-                                            room: roomId,
-                                            action: 'ADD_PLAYER',
-                                            data: { id: aiId, name: aiConfig.name, color: aiColor, isAi: true }
-                                        });
-
-                                        setShowAiConfigModal(false);
-                                        setShowPlayerManager(false);
-                                        addLog(`${aiConfig.name} (AI) was added to the room.`, "SYSTEM");
-                                    }}
-                                    className="flex-1 py-2 bg-purple-600 text-white rounded-lg font-bold"
-                                >
-                                    Add Bot
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
 
 
             <DamageReportModal

@@ -34,16 +34,14 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     const [importError, setImportError] = useState<string | null>(null);
 
     // Staging state for commander selection
-    const [stagedOpponent, setStagedOpponent] = useState<{ name: string, deck: CardData[], tokens: CardData[], isAi?: boolean } | null>(null);
-    const [selectingForAi, setSelectingForAi] = useState(false);
+    const [stagedOpponent, setStagedOpponent] = useState<{ name: string, deck: CardData[], tokens: CardData[] } | null>(null);
     const [showLibrary, setShowLibrary] = useState(false);
 
-    const handleSelectFromLibrary = (saved: SavedDeck, isAi: boolean = false) => {
+    const handleSelectFromLibrary = (saved: SavedDeck) => {
         setStagedOpponent({
-            name: saved.name + (isAi ? " (AI)" : ""),
+            name: saved.name,
             deck: saved.deck,
-            tokens: saved.tokens,
-            isAi
+            tokens: saved.tokens
         });
         setShowLibrary(false);
     };
@@ -116,7 +114,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
             deck: stagedOpponent.deck,
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
-            type: stagedOpponent.isAi ? 'ai' : 'human_local'
+            type: 'human_local'
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
@@ -230,22 +228,13 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                             <div className="flex items-center gap-2 my-2">
                                 <div className="h-px bg-gray-700 flex-1" /> <span className="text-xs text-gray-500">OR</span> <div className="h-px bg-gray-700 flex-1" />
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button
-                                    onClick={() => { setSelectingForAi(false); setShowLibrary(true); }}
-                                    disabled={opponents.length >= 5}
-                                    className="py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold rounded-lg text-sm"
-                                >
-                                    Select Deck
-                                </button>
-                                <button
-                                    onClick={() => { setSelectingForAi(true); setShowLibrary(true); }}
-                                    disabled={opponents.length >= 5}
-                                    className="py-3 bg-purple-700 hover:bg-purple-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold rounded-lg text-sm flex items-center justify-center gap-1"
-                                >
-                                    Add AI Opponent
-                                </button>
-                            </div>
+                            <button
+                                onClick={() => setShowLibrary(true)}
+                                disabled={opponents.length >= 5}
+                                className="w-full py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold rounded-lg"
+                            >
+                                Select from Library
+                            </button>
                             {opponents.length >= 5 && <p className="text-xs text-center text-gray-500">Max 5 opponents reached.</p>}
                         </div>
                     ) : (
@@ -329,7 +318,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                         </div>
                         <div className="p-4 overflow-y-auto grid grid-cols-1 gap-2">
                             {savedDecks.map(deck => (
-                                <button key={deck.id} onClick={() => handleSelectFromLibrary(deck, selectingForAi)} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600 hover:bg-gray-600 hover:border-blue-500 transition text-left">
+                                <button key={deck.id} onClick={() => handleSelectFromLibrary(deck)} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600 hover:bg-gray-600 hover:border-blue-500 transition text-left">
                                     <div className="font-bold text-white flex-1">{deck.name}</div>
                                     <div className="text-xs text-gray-400">{deck.deck.length} cards</div>
                                 </button>

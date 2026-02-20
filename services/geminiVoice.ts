@@ -15,7 +15,7 @@ export class GeminiLiveClient {
     private mediaStream: MediaStream | null = null;
     private audioContextOutput: AudioContext | null = null;
     private nextPlayTime: number = 0;
-    private processor: ScriptProcessorNode | null = null;
+    private processor: ScriptProcessorNode | AudioWorkletNode | null = null;
     private micSource: MediaStreamAudioSourceNode | null = null;
     private isMicActive: boolean = false;
 
@@ -27,9 +27,11 @@ export class GeminiLiveClient {
         return new Promise((resolve, reject) => {
             try {
                 const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${this.options.apiKey}`;
+                console.log("Connecting to Gemini Live WebSocket...");
                 this.ws = new WebSocket(url);
 
                 this.ws.onopen = () => {
+                    console.log("Gemini Live WebSocket connected.");
                     this.sendSetup();
                     this.options.onConnected?.();
                     this.initAudioOutput();
@@ -41,20 +43,24 @@ export class GeminiLiveClient {
                 };
 
                 this.ws.onclose = (event) => {
+                    console.log(`Gemini Live WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
                     this.options.onDisconnected?.(`Closed with code ${event.code}: ${event.reason}`);
                 };
 
                 this.ws.onerror = (error) => {
+                    console.error("Gemini Live WebSocket error:", error);
                     this.options.onError?.(error);
                     reject(error);
                 };
             } catch (err) {
+                console.error("Gemini Live connection attempt failed:", err);
                 reject(err);
             }
         });
     }
 
     public disconnect() {
+        console.log("Disconnecting Gemini Live...");
         this.stopMic();
         if (this.ws) {
             this.ws.close();
@@ -69,6 +75,7 @@ export class GeminiLiveClient {
     private sendSetup() {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
+        console.log("Sending Gemini Setup message...");
         const setupMessage = {
             setup: {
                 model: "models/gemini-2.0-flash",
@@ -94,9 +101,13 @@ export class GeminiLiveClient {
         if (typeof event.data === "string") {
             try {
                 const data = JSON.parse(event.data);
+                // Log the keys present in the response for debugging
+                console.log("Gemini Message Keys:", Object.keys(data));
+
                 if (data.serverContent?.modelTurn?.parts) {
                     for (const part of data.serverContent.modelTurn.parts) {
                         if (part.text) {
+                            console.log("Gemini Response Text:", part.text);
                             this.options.onText(part.text);
                         }
                         if (part.inlineData && part.inlineData.mimeType.startsWith('audio/pcm')) {
@@ -106,11 +117,14 @@ export class GeminiLiveClient {
                         }
                     }
                 }
+                if (data.serverContent?.turnComplete) {
+                    console.log("Gemini Turn Complete");
+                }
             } catch (e) {
                 console.warn("Failed to parse Gemini message", e);
             }
         } else if (event.data instanceof Blob) {
-            // Unlikely with the current API format (usually JSON string), but handle if binary
+            console.log("Gemini Message: Received Blob");
             const reader = new FileReader();
             reader.onload = () => {
                 const text = reader.result as string;
@@ -121,7 +135,11 @@ export class GeminiLiveClient {
     }
 
     public sendText(text: string) {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            console.warn("Cannot send text: Gemini WebSocket not open");
+            return;
+        }
+        console.log("Sending text to Gemini:", text);
         const msg = {
             clientContent: {
                 turns: [{
@@ -152,17 +170,38 @@ export class GeminiLiveClient {
         if (this.isMicActive) return;
 
         try {
+            console.log("Initializing Microphone with AudioWorklet...");
             this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+            // Re-use or create AudioContext for 16kHz
             this.audioContext = new AudioContext({ sampleRate: 16000 });
             await this.audioContext.resume();
+
             this.micSource = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-            // Use ScriptProcessorNode (deprecated but highly compatible) or AudioWorklet for simplicity here
-            this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+            // AudioWorklet approach to replace deprecated ScriptProcessorNode
+            const workletCode = `
+                class MicProcessor extends AudioWorkletProcessor {
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0];
+                        if (input.length > 0 && input[0].length > 0) {
+                            this.port.postMessage(input[0]);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('mic-processor', MicProcessor);
+            `;
 
-            this.processor.onaudioprocess = (e) => {
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const workletUrl = URL.createObjectURL(blob);
+
+            await this.audioContext.audioWorklet.addModule(workletUrl);
+            const workletNode = new AudioWorkletNode(this.audioContext, 'mic-processor');
+
+            workletNode.port.onmessage = (e) => {
                 if (!this.isMicActive) return;
-                const inputData = e.inputBuffer.getChannelData(0);
+                const inputData = e.data as Float32Array;
                 const pcm16 = new Int16Array(inputData.length);
                 for (let i = 0; i < inputData.length; i++) {
                     const s = Math.max(-1, Math.min(1, inputData[i]));
@@ -171,9 +210,12 @@ export class GeminiLiveClient {
                 this.sendAudioChunk(new Uint8Array(pcm16.buffer));
             };
 
+            this.processor = workletNode;
             this.micSource.connect(this.processor);
             this.processor.connect(this.audioContext.destination);
+
             this.isMicActive = true;
+            console.log("Microphone active.");
         } catch (e) {
             console.error("Failed to start mic:", e);
             this.options.onError?.(e);
@@ -181,7 +223,10 @@ export class GeminiLiveClient {
     }
 
     public stopMic() {
+        if (!this.isMicActive) return;
+        console.log("Stopping microphone.");
         this.isMicActive = false;
+
         if (this.processor) {
             this.processor.disconnect();
             this.processor = null;
@@ -191,7 +236,7 @@ export class GeminiLiveClient {
             this.micSource = null;
         }
         if (this.audioContext) {
-            this.audioContext.close();
+            this.audioContext.close().catch(() => { });
             this.audioContext = null;
         }
         if (this.mediaStream) {
