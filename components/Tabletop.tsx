@@ -3019,9 +3019,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setTurnStartTime(Date.now());
             playSound('TURN');
 
-            // Switch View to Next Player
-            setMySeatIndex(nextIndex);
-            loadLocalPlayerState(nextPlayer.id);
+            // Switch View to Next Player only if they are human
+            const isNextAI = localOpponents?.find(o => o.id === nextPlayer.id)?.type === 'ai';
+            if (!isNextAI) {
+                setMySeatIndex(nextIndex);
+                loadLocalPlayerState(nextPlayer.id);
+            }
             return;
         }
 
@@ -4691,7 +4694,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             handleAiResponseRef.current(msg);
                         }
                     },
-                    onAudio: (audioData) => { }
+                    onAudio: (audioData) => {
+                        // Played internally by GeminiLiveClient, but we can log or handle state here
+                    }
                 });
 
                 aiClientRef.current = client;
