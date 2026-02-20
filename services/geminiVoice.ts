@@ -26,7 +26,7 @@ export class GeminiLiveClient {
     public async connect(): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
-                const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${this.options.apiKey}`;
+                const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${this.options.apiKey}`;
                 console.log("Connecting to Gemini Live WebSocket...");
                 this.ws = new WebSocket(url);
 
@@ -78,7 +78,7 @@ export class GeminiLiveClient {
         console.log("Sending Gemini Setup message...");
         const setupMessage = {
             setup: {
-                model: "models/gemini-2.0-flash-live-001",
+                model: "models/gemini-2.0-flash-exp",
                 generationConfig: {
                     responseModalities: ["AUDIO", "TEXT"],
                     speechConfig: {
@@ -101,8 +101,6 @@ export class GeminiLiveClient {
         if (typeof event.data === "string") {
             try {
                 const data = JSON.parse(event.data);
-                // Log the keys present in the response for debugging
-                console.log("Gemini Message Keys:", Object.keys(data));
 
                 if (data.serverContent?.modelTurn?.parts) {
                     for (const part of data.serverContent.modelTurn.parts) {

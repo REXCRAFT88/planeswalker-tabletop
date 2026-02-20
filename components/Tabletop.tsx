@@ -4748,7 +4748,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // AI Initialization
     // We compute a stable primitive ID so the useEffect doesn't tear down on every playersList sync
-    const aiPlayerIdStr = isHost && !isLocal ? playersList.find(p => aiOpponentsData[p.id])?.id : undefined;
+    const aiPlayerIdStr = isHost && !isLocal ? (playersList.find(p => aiOpponentsData[p.id])?.id) : undefined;
 
     useEffect(() => {
         if (!aiPlayerIdStr || !geminiApiKey || isLocal) {
@@ -4760,20 +4760,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return;
         }
 
-        const aiData = aiOpponentsData[aiPlayerIdStr];
-        if (!aiData) return;
-
         let active = true;
-
         const initAi = async () => {
             try {
-                const rulesRes = await fetch('/magic_rules_context.md');
-                const rulesText = await rulesRes.text();
+                const aiOpponent = getAiOpponentData();
+                if (!aiOpponent) return;
 
-                const aiDeckMd = generateDeckMarkdown(aiData.name || 'AI', aiData.deck || [], aiData.tokens || []);
-                const localPlayerDeckMd = generateDeckMarkdown(playerName, initialDeck, initialTokens);
-
-                const systemPrompt = generateAiSystemPrompt(aiData.name || 'AI', aiDeckMd, localPlayerDeckMd, rulesText);
+                // Generating prompt...
+                const systemPrompt = generateAiSystemPrompt(
+                    aiOpponent.name,
+                    generateDeckMarkdown(aiOpponent.name, aiOpponent.deck, aiOpponent.tokens),
+                    generateDeckMarkdown(playerName, initialDeck, initialTokens),
+                    "" // Magic rules placeholder
+                );
 
                 const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
                 const audioCtx = new AudioContextClass({ sampleRate: 16000 });
@@ -4826,7 +4825,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setAiConnected(false);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [aiPlayerIdStr, geminiApiKey, isLocal, playerName, initialDeck, initialTokens]);
+    }, [aiPlayerIdStr, geminiApiKey, isLocal, playerName, initialDeck, initialTokens, getAiOpponentData]);
 
     // AI Command Executor loop
     useEffect(() => {
