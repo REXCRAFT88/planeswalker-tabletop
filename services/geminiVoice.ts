@@ -78,7 +78,7 @@ export class GeminiLiveClient {
         console.log("Sending Gemini Setup message...");
         const setupMessage = {
             setup: {
-                model: "models/gemini-2.0-flash-exp",
+                model: "models/gemini-2.0-flash-live-001",
                 generationConfig: {
                     responseModalities: ["AUDIO", "TEXT"],
                     speechConfig: {
