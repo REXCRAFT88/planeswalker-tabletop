@@ -4686,9 +4686,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     );
 
     const getAiOpponentData = useCallback(() => {
-        if (isLocal) {
-            return localOpponents.find(o => o.type === 'ai');
-        } else if (isHost) {
+        if (isHost && !isLocal) {
             const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
             if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
                 const data = aiOpponentsData[aiPlayer.id];
@@ -4696,12 +4694,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         }
         return undefined;
-    }, [isLocal, isHost, localOpponents, playersList, aiOpponentsData]);
+    }, [isLocal, isHost, playersList, aiOpponentsData]);
 
     // AI Initialization
+    // We compute a stable primitive ID so the useEffect doesn't tear down on every playersList sync
+    const aiPlayerIdStr = isHost && !isLocal ? playersList.find(p => aiOpponentsData[p.id])?.id : undefined;
+
     useEffect(() => {
-        const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || !geminiApiKey) return;
+        if (!aiPlayerIdStr || !geminiApiKey || isLocal) {
+            if (aiClientRef.current) {
+                aiClientRef.current.disconnect();
+                aiClientRef.current = null;
+                setAiConnected(false);
+            }
+            return;
+        }
+
+        const aiData = aiOpponentsData[aiPlayerIdStr];
+        if (!aiData) return;
 
         let active = true;
 
@@ -4710,10 +4720,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const rulesRes = await fetch('/magic_rules_context.md');
                 const rulesText = await rulesRes.text();
 
-                const aiDeckMd = generateDeckMarkdown(aiOpponent.name || 'AI', aiOpponent.deck || [], aiOpponent.tokens || []);
+                const aiDeckMd = generateDeckMarkdown(aiData.name || 'AI', aiData.deck || [], aiData.tokens || []);
                 const localPlayerDeckMd = generateDeckMarkdown(playerName, initialDeck, initialTokens);
 
-                const systemPrompt = generateAiSystemPrompt(aiOpponent.name || 'AI', aiDeckMd, localPlayerDeckMd, rulesText);
+                const systemPrompt = generateAiSystemPrompt(aiData.name || 'AI', aiDeckMd, localPlayerDeckMd, rulesText);
 
                 const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
                 const audioCtx = new AudioContextClass({ sampleRate: 16000 });
@@ -4754,6 +4764,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         return () => {
             active = false;
+            // We ONLY teardown when we unmount or when the aiPlayerIdStr changes (i.e. AI is removed)
             if (aiClientRef.current) {
                 aiClientRef.current.disconnect();
                 aiClientRef.current = null;
@@ -4765,7 +4776,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setAiConnected(false);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLocal, localOpponents, geminiApiKey, playerName, initialDeck, initialTokens, getAiOpponentData]);
+    }, [aiPlayerIdStr, geminiApiKey, isLocal, playerName, initialDeck, initialTokens]);
 
     // AI Command Executor loop
     useEffect(() => {
