@@ -292,7 +292,6 @@ function App() {
                     initialGameStarted={isGameStarted}
                     manaRules={activeManaRules}
                     savedDecks={savedDecks}
-                    geminiApiKey={geminiApiKey}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}
