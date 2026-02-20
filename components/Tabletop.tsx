@@ -2673,13 +2673,37 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
                     addLog(`${currentPlayer.name} kept hand`);
 
-                    // Check if all kept
-                    const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                    let allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
                     if (allKept) {
                         setGamePhase('PLAYING');
-                        // Switch back to P1 view if needed, or stay. Usually P1 starts.
                     } else {
-                        nextTurn(); // Switch to next player for mulligan
+                        // Recursively or iteratively keep for AI players until human is found
+                        let nextIndex = (mySeatIndex + 1) % playersList.length;
+                        while (true) {
+                            const nextPlayer = playersList[nextIndex];
+                            if (nextPlayer.disconnected || localPlayerStates.current[nextPlayer.id]?.hasKeptHand) {
+                                nextIndex = (nextIndex + 1) % playersList.length;
+                                continue;
+                            }
+
+                            const isAI = localOpponents.find(o => o.id === nextPlayer.id)?.type === 'ai';
+                            if (isAI) {
+                                // AI auto-keeps hand for now
+                                localPlayerStates.current[nextPlayer.id].hasKeptHand = true;
+                                addLog(`${nextPlayer.name} kept hand`);
+
+                                allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                                if (allKept) {
+                                    setGamePhase('PLAYING');
+                                    break;
+                                }
+                                nextIndex = (nextIndex + 1) % playersList.length;
+                            } else {
+                                // Found next human
+                                nextTurn();
+                                break;
+                            }
+                        }
                     }
                 } else {
                     setGamePhase('PLAYING');
