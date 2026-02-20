@@ -5080,9 +5080,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
                                     <div className="flex gap-2">
-                                        <button onClick={() => setShowAiConfigModal(true)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                            <Crown size={12} /> Add AI
-                                        </button>
+                                        {Object.keys(aiOpponentsData).length === 0 && (
+                                            <button onClick={() => setShowAiConfigModal(true)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                                <Crown size={12} /> Add AI
+                                            </button>
+                                        )}
                                         <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
                                             <Shuffle size={12} /> Shuffle Order
                                         </button>
@@ -5216,6 +5218,42 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                     if (deckToUse) {
                                                         const aiId = `ai-player-${Date.now()}`;
                                                         setAiOpponentsData(prev => ({ ...prev, [aiId]: { name: aiConfig.name, deck: deckToUse.deck, tokens: deckToUse.tokens, color: '#9333ea' } }));
+
+                                                        // Initialize opponentsCounts and opponentsCommanders for the AI
+                                                        setOpponentsCounts(prev => ({
+                                                            ...prev,
+                                                            [aiId]: {
+                                                                library: deckToUse.deck.filter(c => !c.isCommander).length,
+                                                                graveyard: 0,
+                                                                exile: 0,
+                                                                hand: 7,
+                                                                command: deckToUse.deck.filter(c => c.isCommander).length
+                                                            }
+                                                        }));
+                                                        setOpponentsCommanders(prev => ({
+                                                            ...prev,
+                                                            [aiId]: deckToUse.deck.filter(c => c.isCommander)
+                                                        }));
+                                                        setOpponentsLife(prev => ({
+                                                            ...prev,
+                                                            [aiId]: 40
+                                                        }));
+
+                                                        // Initialize AI's local player state
+                                                        localPlayerStates.current[aiId] = {
+                                                            id: aiId,
+                                                            hand: [],
+                                                            library: deckToUse.deck.filter(c => !c.isCommander),
+                                                            graveyard: [],
+                                                            exile: [],
+                                                            commandZone: deckToUse.deck.filter(c => c.isCommander),
+                                                            life: 40,
+                                                            counters: {},
+                                                            commanderDamage: {},
+                                                            mulliganCount: 0,
+                                                            hasKeptHand: false
+                                                        };
+
                                                         socket.emit('add_ai_player', { room: roomId, name: aiConfig.name, color: '#9333ea', aiId });
                                                         setShowAiConfigModal(false);
                                                     }
