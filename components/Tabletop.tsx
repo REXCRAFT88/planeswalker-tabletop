@@ -1191,6 +1191,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mobileActionCardId, setMobileActionCardId] = useState<string | null>(null);
     const [isHandVisible, setIsHandVisible] = useState(true);
     const hasCenteredHand = useRef(false);
+    const hasPromptedAiMulliganRef = useRef(false);
     const touchStartRef = useRef<number | null>(null);
 
     const currentRadius = (playersList.length === 2 || (isLocal && localOpponents.length === 1)) ? 210 : 625;
@@ -1220,6 +1221,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // Stable refs for functions used in window event listeners (avoids stale closures)
     const handleAutoTapRef = useRef<(card: CardData, xValue?: number) => void>(() => { });
     const handleKeyDownRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
+    const handleKeyUpRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
     const nextTurnRef = useRef<() => void>(() => { });
 
 
@@ -1481,11 +1483,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
 
+        const onKeyRelease = (e: KeyboardEvent) => {
+            if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+            handleKeyUpRef.current(e as any);
+        };
+
         window.addEventListener('keydown', onKeyPress);
+        window.addEventListener('keyup', onKeyRelease);
 
         return () => {
             window.removeEventListener('resize', checkMobile);
             window.removeEventListener('keydown', onKeyPress);
+            window.removeEventListener('keyup', onKeyRelease);
         };
     }, [controlMode]);
 
@@ -1510,7 +1519,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [hand.length, gamePhase, handScale]);
 
     // Reset centering flag when game restarts
-    useEffect(() => { if (gamePhase === 'SETUP') hasCenteredHand.current = false; }, [gamePhase]);
+    useEffect(() => {
+        if (gamePhase === 'SETUP') {
+            hasCenteredHand.current = false;
+            hasPromptedAiMulliganRef.current = false;
+        }
+    }, [gamePhase]);
 
     useEffect(() => {
         if (isLocal) {
@@ -4055,6 +4069,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
 
         switch (e.key.toLowerCase()) {
+            case 'shift':
+                if (aiConnected && aiClientRef.current && !isMicActive) {
+                    aiClientRef.current.startMic();
+                    setIsMicActive(true);
+                }
+                break;
             case 'd': drawCard(1); break;
             case 'u': untapAll(); break;
             case 's': shuffleLibrary(); break;
@@ -4175,11 +4195,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleKeyUp = (e: React.KeyboardEvent) => {
+        if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+        switch (e.key.toLowerCase()) {
+            case 'shift':
+                if (aiConnected && aiClientRef.current && isMicActive) {
+                    aiClientRef.current.stopMic();
+                    setIsMicActive(false);
+                }
+                break;
+        }
     };
 
     // Keep function refs in sync for stable window event listeners
     useEffect(() => { handleAutoTapRef.current = handleAutoTap; }, [handleAutoTap]);
     useEffect(() => { handleKeyDownRef.current = handleKeyDown; });
+    useEffect(() => { handleKeyUpRef.current = handleKeyUp; });
     useEffect(() => { nextTurnRef.current = nextTurn; });
 
     const requestViewZone = (zone: string, targetPlayerId: string) => {
@@ -4887,6 +4918,38 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
     });
+
+    // AI Initial Game State & Mulligan Prompt
+    useEffect(() => {
+        const aiOpponent = getAiOpponentData();
+        if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
+        if (gamePhase === 'SETUP') return;
+
+        // Ensure we only prompt this once per game start
+        if (hasPromptedAiMulliganRef.current) return;
+        hasPromptedAiMulliganRef.current = true;
+
+        const aiId = aiOpponent.id || '';
+        const state = localPlayerStates.current[aiId];
+        if (!state) return;
+
+        let recap = `--- GAME STARTED ---\n`;
+        recap += `The game has started! Turn order has been decided.\n`;
+        const firstPlayer = playersList.find(p => p.id === currentTurnPlayerId);
+        if (firstPlayer) recap += `The first player to go is: ${firstPlayer.name}\n\n`;
+
+        recap += `Your Starting Hand (${state.hand.filter(c => !c.isToken).length} cards):\n`;
+        state.hand.filter(c => !c.isToken).forEach(c => recap += `- ${c.name}\n`);
+
+        if (gamePhase === 'MULLIGAN') {
+            recap += `\nWould you like to keep this hand or take a mulligan? Output your JSON command now. Example:\n\`\`\`json\n{"action": "mulligan", "args": {"keep": true}}\n\`\`\``;
+        } else {
+            recap += `\nMulligans are disabled. You will keep this hand. Wait for your turn.`;
+        }
+
+        aiClientRef.current.sendText(recap);
+        console.log("Sent Initial Start/Mulligan prompt to AI");
+    }, [gamePhase, aiConnected, currentTurnPlayerId, playersList, aiOpponentsData, getAiOpponentData]);
 
     // AI Turn Recap Generator
     useEffect(() => {
@@ -6266,6 +6329,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Help / Shortcuts</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">?</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space (Hold) + Drag</kbd></div>
+                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Talk to AI</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Shift (Hold)</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Zoom Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Mouse Wheel</kbd></div>
 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Play Commander</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">C</kbd></div>
