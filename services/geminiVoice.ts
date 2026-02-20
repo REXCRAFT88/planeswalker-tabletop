@@ -80,14 +80,9 @@ export class GeminiLiveClient {
             setup: {
                 model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
                 generationConfig: {
-                    responseModalities: ["AUDIO", "TEXT"],
-                    speechConfig: {
-                        voiceConfig: {
-                            prebuiltVoiceConfig: {
-                                voiceName: "Aoede" // Other options: "Puck", "Charon", etc.
-                            }
-                        }
-                    }
+                    responseModalities: ["TEXT"], // Only TEXT for text-based interaction
+                    temperature: 0.7,
+                    maxOutputTokens: 4096
                 },
                 systemInstruction: {
                     parts: [{ text: this.options.systemInstruction }]
@@ -102,21 +97,45 @@ export class GeminiLiveClient {
             try {
                 const data = JSON.parse(event.data);
 
+                // Handle text responses
                 if (data.serverContent?.modelTurn?.parts) {
                     for (const part of data.serverContent.modelTurn.parts) {
                         if (part.text) {
                             console.log("Gemini Response Text:", part.text);
                             this.options.onText(part.text);
                         }
-                        if (part.inlineData && part.inlineData.mimeType.startsWith('audio/pcm')) {
+                    }
+                }
+
+                // Handle audio responses (if enabled in future)
+                if (data.serverContent?.modelTurn?.parts) {
+                    for (const part of data.serverContent.modelTurn.parts) {
+                        if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
                             const buffer = this.base64ToArrayBuffer(part.inlineData.data) as ArrayBuffer;
                             this.playAudioChunk(new Uint8Array(buffer));
                             this.options.onAudio(new Uint8Array(buffer));
                         }
                     }
                 }
+
+                // Handle function calls (game actions)
+                if (data.serverContent?.modelTurn?.parts) {
+                    for (const part of data.serverContent.modelTurn.parts) {
+                        if (part.functionCall) {
+                            console.log("Gemini Function Call:", part.functionCall);
+                            // This would be handled by the calling component
+                        }
+                    }
+                }
+
                 if (data.serverContent?.turnComplete) {
                     console.log("Gemini Turn Complete");
+                }
+
+                // Handle errors
+                if (data.error) {
+                    console.error("Gemini Error:", data.error);
+                    this.options.onError?.(data.error);
                 }
             } catch (e) {
                 console.warn("Failed to parse Gemini message", e);

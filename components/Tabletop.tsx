@@ -1133,6 +1133,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     mulliganCount: 0,
                     hasKeptHand: false
                 };
+
+                // Initialize AI opponent data if this is an AI
+                if (opp.type === 'ai' && opp.deck) {
+                    setAiOpponentsData(prev => ({
+                        ...prev,
+                        [id]: {
+                            name: opp.name,
+                            deck: opp.deck,
+                            tokens: opp.tokens || [],
+                            color: opp.color
+                        }
+                    }));
+                }
             });
 
             setOpponentsCounts(prev => ({ ...prev, ...newCounts }));
@@ -1437,7 +1450,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const idx = opponents.findIndex(p => p.id === currentTurnPlayerId);
             if (idx !== -1) {
                 setSelectedOpponentIndex(idx);
-                setIsOpponentViewOpen(true);
+                // setIsOpponentViewOpen(true); // Disabled: Don't automatically open opponent view in multiplayer
             }
         } else if (currentTurnPlayerId === socket.id) {
             setIsOpponentViewOpen(false);

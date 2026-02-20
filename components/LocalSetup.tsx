@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CardData } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
-import { Plus, Trash2, Play, Loader2, User, ArrowLeft, Crown, Check } from 'lucide-react';
+import { Plus, Trash2, Play, Loader2, User, ArrowLeft, Crown, Check, Key, Bot } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { SavedDeck } from '../App';
 
@@ -32,6 +32,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     const [newName, setNewName] = useState('');
     const [deckText, setDeckText] = useState('');
     const [importError, setImportError] = useState<string | null>(null);
+    const [isAiOpponent, setIsAiOpponent] = useState(false);
 
     // Staging state for commander selection
     const [stagedOpponent, setStagedOpponent] = useState<{ name: string, deck: CardData[], tokens: CardData[] } | null>(null);
@@ -114,12 +115,13 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
             deck: stagedOpponent.deck,
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
-            type: 'human_local'
+            type: isAiOpponent ? 'ai' : 'human_local'
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
         setNewName('');
         setDeckText('');
+        setIsAiOpponent(false);
     };
 
     const removeOpponent = (index: number) => {
@@ -163,13 +165,31 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                 <div
                     onClick={() => {
                         setIsLocalTable(!isLocalTable);
-                        // Optional: Clear opponents or convert them if switching modes? 
+                        // Optional: Clear opponents or convert them if switching modes?
                         // For now, let's keep them but maybe warn or just handle it.
                     }}
                     className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors ${isLocalTable ? 'bg-green-500' : 'bg-gray-600'}`}
                 >
                     <div className={`w-4 h-4 bg-white rounded-full transition-transform ${isLocalTable ? 'translate-x-6' : 'translate-x-0'}`} />
                 </div>
+            </div>
+
+            {/* Gemini API Key Input */}
+            <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-6">
+                <div className="flex items-center gap-2 mb-2">
+                    <Key size={18} className="text-yellow-500" />
+                    <h3 className="text-white font-bold">Gemini API Key</h3>
+                </div>
+                <p className="text-xs text-gray-400 mb-3">
+                    Required for AI opponents. Get your API key from <a href="https://ai.google.dev/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">ai.google.dev</a>
+                </p>
+                <input
+                    type="password"
+                    className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-sm focus:border-blue-500 outline-none font-mono"
+                    value={geminiApiKey}
+                    onChange={e => onGeminiApiKeyChange(e.target.value)}
+                    placeholder="Enter your Gemini API key..."
+                />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8 flex-1">
@@ -190,6 +210,32 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                     <Plus size={20} /> Add Open Slot (For Mobile Join)
                                 </button>
                             )}
+
+                            {/* AI Opponent Toggle */}
+                            <div className="bg-gray-900 p-3 rounded-lg border border-gray-700">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <div className="flex items-center gap-2 flex-1">
+                                        <Bot size={16} className="text-blue-400" />
+                                        <span className="text-sm font-medium text-gray-300">AI Opponent</span>
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only"
+                                            checked={isAiOpponent}
+                                            onChange={e => setIsAiOpponent(e.target.checked)}
+                                        />
+                                        <div className={`w-10 h-6 rounded-full transition-colors ${isAiOpponent ? 'bg-blue-600' : 'bg-gray-600'}`}>
+                                            <div className={`absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform ${isAiOpponent ? 'translate-x-4' : 'translate-x-0'}`} />
+                                        </div>
+                                    </div>
+                                </label>
+                                {isAiOpponent && !geminiApiKey && (
+                                    <p className="text-xs text-red-400 mt-2 flex items-center gap-1">
+                                        <Key size={12} /> API key required for AI opponents
+                                    </p>
+                                )}
+                            </div>
 
                             <div className="flex items-center gap-2 my-2">
                                 <div className="h-px bg-gray-700 flex-1" /> <span className="text-xs text-gray-500">OR ADD BOT/LOCAL DECK</span> <div className="h-px bg-gray-700 flex-1" />
@@ -275,13 +321,22 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                             <div key={opp.id} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full border-2 border-white/20 flex items-center justify-center font-bold text-white" style={{ backgroundColor: opp.color }}>
-                                        {opp.name.charAt(0).toUpperCase()}
+                                        {opp.type === 'ai' ? <Bot size={16} /> : opp.name.charAt(0).toUpperCase()}
                                     </div>
                                     <div>
-                                        <div className="font-bold text-white">{opp.name}</div>
+                                        <div className="font-bold text-white flex items-center gap-2">
+                                            {opp.name}
+                                            {opp.type === 'ai' && <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">AI</span>}
+                                        </div>
                                         <div className="text-xs text-gray-400 flex gap-2">
                                             {opp.type === 'open_slot' ? (
                                                 <span className="text-indigo-400 font-bold animate-pulse">Waiting for player...</span>
+                                            ) : opp.type === 'ai' ? (
+                                                <>
+                                                    <span>{opp.deck.length} cards</span>
+                                                    {opp.deck.some(c => c.isCommander) && <span className="text-amber-500 flex items-center gap-0.5"><Crown size={10} /> Commander</span>}
+                                                    <span className="text-blue-400 flex items-center gap-0.5"><Bot size={10} /> Powered by Gemini</span>
+                                                </>
                                             ) : (
                                                 <>
                                                     <span>{opp.deck.length} cards</span>
