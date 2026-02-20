@@ -154,6 +154,7 @@ export class GeminiLiveClient {
         try {
             this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             this.audioContext = new AudioContext({ sampleRate: 16000 });
+            await this.audioContext.resume();
             this.micSource = this.audioContext.createMediaStreamSource(this.mediaStream);
 
             // Use ScriptProcessorNode (deprecated but highly compatible) or AudioWorklet for simplicity here
@@ -204,8 +205,12 @@ export class GeminiLiveClient {
         this.nextPlayTime = this.audioContextOutput.currentTime;
     }
 
-    private playAudioChunk(pcmData: Uint8Array) {
+    private async playAudioChunk(pcmData: Uint8Array) {
         if (!this.audioContextOutput) return;
+
+        if (this.audioContextOutput.state === 'suspended') {
+            await this.audioContextOutput.resume();
+        }
 
         const int16Array = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength / 2);
         const audioBuffer = this.audioContextOutput.createBuffer(1, int16Array.length, 24000);

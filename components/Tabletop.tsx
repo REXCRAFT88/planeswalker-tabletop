@@ -943,6 +943,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const aiClientRef = useRef<GeminiLiveClient | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const [aiConnected, setAiConnected] = useState(false);
+    const [isAiThinking, setIsAiThinking] = useState(false);
+    const hasSentTurnRecapRef = useRef<string>('');
     const handleAiResponseRef = useRef<(msg: string) => void>(() => { });
 
     // Sync state with prop initially or if prop changes (but allow internal override)
@@ -4202,6 +4204,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 if (aiConnected && aiClientRef.current && isMicActive) {
                     aiClientRef.current.stopMic();
                     setIsMicActive(false);
+                    setIsAiThinking(true);
                 }
                 break;
         }
@@ -4812,6 +4815,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // AI Command Executor loop
     useEffect(() => {
         handleAiResponseRef.current = (msg: string) => {
+            setIsAiThinking(false);
             const aiOpponent = getAiOpponentData();
             if (!aiOpponent) return;
 
@@ -4948,6 +4952,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         aiClientRef.current.sendText(recap);
+        setIsAiThinking(true);
         console.log("Sent Initial Start/Mulligan prompt to AI");
     }, [gamePhase, aiConnected, currentTurnPlayerId, playersList, aiOpponentsData, getAiOpponentData]);
 
@@ -4957,7 +4962,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!aiOpponent || !aiConnected || !aiClientRef.current) return;
 
         const aiId = aiOpponent.id || '';
-        if (currentTurnPlayerId !== aiId) return;
+        // Guard against infinite recap loop
+        const recapKey = `${turn}-${turnStep}-${aiId}`;
+        if (hasSentTurnRecapRef.current === recapKey) return;
+        hasSentTurnRecapRef.current = recapKey;
 
         // It is now the AI's turn! Generate a recap of the board state.
         const state = localPlayerStates.current[aiId];
@@ -5011,9 +5019,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         recap += `\nWhat actions will you take? Remember to pass the turn when you are finished.`;
 
         aiClientRef.current.sendText(recap);
+        setIsAiThinking(true);
         console.log("Sent Turn Recap to AI");
 
-    }, [currentTurnPlayerId, turnStep, aiConnected, localOpponents, socket.id, mySeatIndex, playersList, boardObjects, layout, opponentsLife, gamePhase, isLocal, hand, opponentsCounts, localPlayerStates]);
+    }, [turn, currentTurnPlayerId, turnStep, aiConnected, localOpponents, socket.id, mySeatIndex, playersList, boardObjects, layout, opponentsLife, gamePhase, isLocal, hand, opponentsCounts, localPlayerStates]);
 
 
     const cardsInHand = hand.filter(c => !c.isToken);
@@ -5553,7 +5562,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         {p.name.charAt(0).toUpperCase()}
                                     </div>
                                     <div className="flex flex-col leading-none justify-center">
-                                        <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
+                                        <div className="flex items-center gap-1">
+                                            <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
+                                            {isTurn && isAiThinking && aiOpponentsData[p.id] && (
+                                                <Loader className="animate-spin text-yellow-400" size={10} />
+                                            )}
+                                        </div>
                                         <span className="text-white font-mono text-[10px]">{pLife} HP</span>
                                     </div>
                                     {takenDamage.length > 0 && (
@@ -5676,7 +5690,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     {aiConnected && aiClientRef.current && (
                         <button
                             onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
-                            onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); }}
+                            onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
                             onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
                             className={`p-2 rounded-lg transition-colors ${isMicActive ? 'bg-red-600 text-white animate-pulse' : 'hover:bg-gray-800 text-gray-400'}`}
                             title="Hold to talk to AI"
@@ -5778,7 +5792,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         {aiConnected && aiClientRef.current && (
                             <button
                                 onPointerDown={() => { aiClientRef.current?.startMic(); setIsMicActive(true); }}
-                                onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); }}
+                                onPointerUp={() => { aiClientRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
                                 onPointerLeave={() => { if (isMicActive) { aiClientRef.current?.stopMic(); setIsMicActive(false); } }}
                                 className={`w-full py-3 ${isMicActive ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 text-white'} rounded-xl font-bold flex items-center justify-center gap-2 touch-none select-none`}
                             >
