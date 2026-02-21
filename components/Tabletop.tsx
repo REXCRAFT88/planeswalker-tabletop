@@ -6,20 +6,20 @@ import { GameStatsModal } from './GameStatsModal';
 import { ManaDisplay, ManaPaymentSidebar, getIconPath } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
+import { GeminiAIManager, generateDeckMarkdown } from '../services/geminiAI';
 import { CARD_WIDTH, CARD_HEIGHT, PLAYER_COLORS } from '../constants';
 import {
     calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
-import { GeminiAIManager, AIOptions, GameCommand } from '../services/geminiAI';
-import { generateAiSystemPrompt, generateDeckMarkdown } from '../services/aiHelpers';
-import { SavedDeck } from '../App';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
     Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic
 } from 'lucide-react';
+
+import { GameCommand } from '../services/geminiAI';
 
 interface TabletopProps {
     initialDeck: CardData[];
@@ -32,7 +32,6 @@ interface TabletopProps {
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
     manaRules?: Record<string, ManaRule>;
-    savedDecks?: SavedDeck[];
     geminiApiKey?: string;
     onExit: () => void;
 }
@@ -836,7 +835,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, savedDecks, geminiApiKey, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -845,6 +844,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mulliganCount, setMulliganCount] = useState(0);
     const [mulliganSelectionMode, setMulliganSelectionMode] = useState(false);
     const [cardsToBottom, setCardsToBottom] = useState<CardData[]>([]);
+
+    const aiManagerRef = useRef<GeminiAIManager | null>(null);
+    const [magicRulesText, setMagicRulesText] = useState<string>('');
+
+    useEffect(() => {
+        if (isLocal && localOpponents?.some(o => o.type === 'ai')) {
+            fetch('/magic_rules_context.md')
+                .then(r => r.text())
+                .then(text => setMagicRulesText(text))
+                .catch(err => console.error("Failed to load magic rules:", err));
+        }
+    }, [isLocal, localOpponents]);
 
     const [turnStartTime, setTurnStartTime] = useState(Date.now());
     const [elapsedTime, setElapsedTime] = useState(0);
@@ -889,7 +900,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // UI State
     const [isLogOpen, setIsLogOpen] = useState(false);
-    const [isMicActive, setIsMicActive] = useState(false);
     const [showShortcuts, setShowShortcuts] = useState(false);
     const [view, setView] = useState<ViewState>({ x: window.innerWidth / 2, y: window.innerHeight / 2, scale: 0.5 });
 
@@ -922,10 +932,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    const [showAiConfigModal, setShowAiConfigModal] = useState(false);
-    const [aiConfig, setAiConfig] = useState({ name: 'Gemini AI', deckId: savedDecks?.[0]?.id || '' });
-    const [aiOpponentsData, setAiOpponentsData] = useState<Record<string, { name: string, deck: CardData[], tokens: CardData[], color: string }>>({});
-
     const [autoTapEnabled, setAutoTapEnabled] = useState(false); // Disabled by default
     const [soundsEnabled, setSoundsEnabled] = useState(() => localStorage.getItem('planeswalker_sounds_enabled') !== 'false');
     const [searchCardSize, setSearchCardSize] = useState(() => Number(localStorage.getItem('planeswalker_search_card_size')) || 200);
@@ -938,14 +944,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
     const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
     const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
-
-    // AI State
-    const aiManagerRef = useRef<GeminiAIManager | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const [aiConnected, setAiConnected] = useState(false);
-    const [isAiThinking, setIsAiThinking] = useState(false);
-    const hasSentTurnRecapRef = useRef<string>('');
-    const handleGameCommandRef = useRef<(command: GameCommand) => void>(() => { });
 
     // Sync state with prop initially or if prop changes (but allow internal override)
     useEffect(() => {
@@ -1133,19 +1131,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     mulliganCount: 0,
                     hasKeptHand: false
                 };
-
-                // Initialize AI opponent data if this is an AI
-                if (opp.type === 'ai' && opp.deck) {
-                    setAiOpponentsData(prev => ({
-                        ...prev,
-                        [id]: {
-                            name: opp.name,
-                            deck: opp.deck,
-                            tokens: opp.tokens || [],
-                            color: opp.color
-                        }
-                    }));
-                }
             });
 
             setOpponentsCounts(prev => ({ ...prev, ...newCounts }));
@@ -1206,7 +1191,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mobileActionCardId, setMobileActionCardId] = useState<string | null>(null);
     const [isHandVisible, setIsHandVisible] = useState(true);
     const hasCenteredHand = useRef(false);
-    const hasPromptedAiMulliganRef = useRef(false);
     const touchStartRef = useRef<number | null>(null);
 
     const currentRadius = (playersList.length === 2 || (isLocal && localOpponents.length === 1)) ? 210 : 625;
@@ -1236,7 +1220,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // Stable refs for functions used in window event listeners (avoids stale closures)
     const handleAutoTapRef = useRef<(card: CardData, xValue?: number) => void>(() => { });
     const handleKeyDownRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
-    const handleKeyUpRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
     const nextTurnRef = useRef<() => void>(() => { });
 
 
@@ -1450,7 +1433,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const idx = opponents.findIndex(p => p.id === currentTurnPlayerId);
             if (idx !== -1) {
                 setSelectedOpponentIndex(idx);
-                // setIsOpponentViewOpen(true); // Disabled: Don't automatically open opponent view in multiplayer
+                setIsOpponentViewOpen(true);
             }
         } else if (currentTurnPlayerId === socket.id) {
             setIsOpponentViewOpen(false);
@@ -1498,18 +1481,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
 
-        const onKeyRelease = (e: KeyboardEvent) => {
-            if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
-            handleKeyUpRef.current(e as any);
-        };
-
         window.addEventListener('keydown', onKeyPress);
-        window.addEventListener('keyup', onKeyRelease);
 
         return () => {
             window.removeEventListener('resize', checkMobile);
             window.removeEventListener('keydown', onKeyPress);
-            window.removeEventListener('keyup', onKeyRelease);
         };
     }, [controlMode]);
 
@@ -1534,12 +1510,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [hand.length, gamePhase, handScale]);
 
     // Reset centering flag when game restarts
-    useEffect(() => {
-        if (gamePhase === 'SETUP') {
-            hasCenteredHand.current = false;
-            hasPromptedAiMulliganRef.current = false;
-        }
-    }, [gamePhase]);
+    useEffect(() => { if (gamePhase === 'SETUP') hasCenteredHand.current = false; }, [gamePhase]);
 
     useEffect(() => {
         if (isLocal) {
@@ -1851,11 +1822,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!overrideName) {
             emitAction('LOG', { message });
         }
-
-        // Feed actions to AI Opponent
-        if (aiConnected && aiManagerRef.current && type === 'ACTION') {
-            aiManagerRef.current.sendGameEvent(`Game Event Log: ${displayMsg}`);
-        }
     };
 
     const handleLifeChange = (amount: number) => {
@@ -1910,6 +1876,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // Determine if I am the host
             let amIHost = hostId ? socket.id === hostId : false;
             if (hostId) setIsHost(amIHost);
+
+            // If we are the host, verify AI players are in the room
+            if (amIHost && localOpponents) {
+                localOpponents.forEach(opp => {
+                    if (opp.type === 'ai' && !roomPlayers.find(rp => rp.id === opp.id)) {
+                        socket.emit('add_ai_player', {
+                            room: roomId,
+                            name: opp.name,
+                            color: opp.color,
+                            aiId: opp.id
+                        });
+                    }
+                });
+            }
 
             // Only remove board objects for players who have truly left (not just disconnected)
             // Disconnected players keep their objects so they can reconnect
@@ -2509,15 +2489,189 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         sendHandUpdate(currentId, hand, gamePhase, mulliganCount);
     }, [hand, gamePhase, mulliganCount, isLocal, mySeatIndex, playersList]);
 
+    const handleAIGameCommand = (cmd: GameCommand, aiPlayerId: string) => {
+        console.log(`[Gemini AI] executing command: ${cmd.action}`, cmd.args);
+        const aiName = localOpponents?.find(o => o.id === aiPlayerId)?.name || 'AI';
+        try {
+            switch (cmd.action) {
+                case 'draw_card': {
+                    const amount = cmd.args.amount || 1;
+                    const state = localPlayerStates.current[aiPlayerId];
+                    if (!state) return;
+                    let drawn = 0;
+                    for (let i = 0; i < amount; i++) {
+                        if (state.library.length > 0) {
+                            const card = state.library.shift()!;
+                            state.hand.push(card);
+                            drawn++;
+                        }
+                    }
+                    sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+                    addLog(`drew ${drawn} card(s)`, 'ACTION', aiName);
+                    break;
+                }
+                case 'move_card': {
+                    const { cardName, zone } = cmd.args;
+                    const state = localPlayerStates.current[aiPlayerId];
+                    if (!state) return;
+
+                    if (zone === 'battlefield') {
+                        const idx = state.hand.findIndex(c => c.name.toLowerCase() === cardName.toLowerCase());
+                        if (idx !== -1) {
+                            const card = state.hand[idx];
+                            state.hand.splice(idx, 1);
+                            sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+
+                            const seatIdx = playersList.findIndex(p => p.id === aiPlayerId);
+                            const mat = layout[seatIdx] || { x: 0, y: 0, rot: 0 };
+
+                            const obj: BoardObject = {
+                                id: crypto.randomUUID(),
+                                type: 'CARD',
+                                cardData: card,
+                                x: mat.x + MAT_W / 2 + (Math.random() * 50 - 25),
+                                y: mat.y + MAT_H / 2 + (Math.random() * 50 - 25),
+                                z: Date.now(),
+                                rotation: mat.rot || 0,
+                                isFaceDown: false,
+                                isTransformed: false,
+                                counters: {},
+                                commanderDamage: {},
+                                controllerId: aiPlayerId,
+                                quantity: 1,
+                                tappedQuantity: 0
+                            };
+                            socket.emit('game_action', { room: roomId, action: 'ADD_OBJECT', data: obj });
+                            addLog(`played ${card.name}`, 'ACTION', aiName);
+                        }
+                    }
+                    else if (zone === 'graveyard') {
+                        addLog(`discarded ${cardName} to graveyard`, 'ACTION', aiName);
+                        // Similar to user hitting delete
+                    }
+                    break;
+                }
+                case 'pass_turn': {
+                    addLog(`passed the turn`, 'ACTION', aiName);
+                    socket.emit('game_action', { room: roomId, action: 'END_TURN', data: { playerId: aiPlayerId } });
+                    break;
+                }
+                case 'tap_untap': {
+                    const { cardName } = cmd.args;
+                    // Find object on board belonging to ai
+                    let obj = boardObjects.find(o => o.controllerId === aiPlayerId && o.cardData.name.toLowerCase() === cardName.toLowerCase() && o.rotation === 0);
+                    if (!obj) obj = boardObjects.find(o => o.controllerId === aiPlayerId && o.cardData.name.toLowerCase() === cardName.toLowerCase()); // fallback to any
+
+                    if (obj) {
+                        const newRot = obj.rotation === 0 ? 90 : 0;
+                        socket.emit('game_action', {
+                            room: roomId, action: 'UPDATE_OBJECT', data: {
+                                id: obj.id, updates: { rotation: newRot, tappedQuantity: newRot === 90 ? obj.quantity : 0 }
+                            }
+                        });
+                        addLog(`${newRot === 90 ? 'tapped' : 'untapped'} ${cardName}`, 'ACTION', aiName);
+                    }
+                    break;
+                }
+                case 'change_life': {
+                    const { amount } = cmd.args;
+                    socket.emit('game_action', { room: roomId, action: 'CHANGE_LIFE', data: { playerId: aiPlayerId, amount: amount } });
+                    break;
+                }
+                case 'mulligan': {
+                    const { keep } = cmd.args;
+                    if (keep) {
+                        addLog(`kept their hand`, 'ACTION', aiName);
+                        // Emit set hand kept
+                        socket.emit('game_action', { room: roomId, action: 'KEEP_HAND', data: { playerId: aiPlayerId } });
+                    } else {
+                        addLog(`took a mulligan`, 'ACTION', aiName);
+                        // For AI mulligan, just simplify:
+                        const state = localPlayerStates.current[aiPlayerId];
+                        if (state) {
+                            state.library = [...state.library, ...state.hand].sort(() => Math.random() - 0.5);
+                            state.hand = [];
+                            state.mulliganCount++;
+                            for (let i = 0; i < 7; i++) state.hand.push(state.library.shift()!);
+                            sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+                        }
+                    }
+                    break;
+                }
+            }
+        } catch (e) {
+            console.error("AI command failed:", e);
+        }
+    };
+
+    // AI Mulligan Hook
+    useEffect(() => {
+        if (!aiManagerRef.current || gamePhase !== 'MULLIGAN') return;
+        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+        if (aiOpponent) {
+            const aiState = localPlayerStates.current[aiOpponent.id];
+            if (aiState) {
+                const prompt = `It is the mulligan phase. You go ${playersList[0].id === aiOpponent.id ? 'first' : 'second'}. Your hand is: ${aiState.hand.map(c => c.name).join(', ')}. Do you want to keep or mulligan? Reply with action "mulligan" and args { "keep": true/false }.`;
+                aiManagerRef.current.sendGameState(prompt);
+            }
+        }
+    }, [gamePhase, localOpponents, playersList]);
+
+    // AI Conversational Hook
+    useEffect(() => {
+        if (!aiManagerRef.current || logs.length === 0) return;
+        const lastLog = logs[0];
+        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+        if (aiOpponent && lastLog.playerName !== aiOpponent.name && lastLog.type === 'ACTION') {
+            aiManagerRef.current.sendGameEvent(`Player ${lastLog.playerName} just did the following: ${lastLog.message}`);
+        }
+    }, [logs, localOpponents]);
+
+    // AI Strategy Hook
+    useEffect(() => {
+        if (!aiManagerRef.current || gamePhase !== 'PLAYING') return;
+        const aiOpponent = localOpponents?.find(o => o.id === currentTurnPlayerId && o.type === 'ai');
+
+        if (aiOpponent && turnStep === 'UNTAP') {
+            const aiState = localPlayerStates.current[aiOpponent.id];
+            const p1Id = playersList[0].id;
+            const p1State = localPlayerStates.current[p1Id];
+
+            const getBoard = (pid: string) => {
+                const objs = boardObjects.filter(o => o.controllerId === pid);
+                if (objs.length === 0) return "Board is empty.";
+                return `Board: ${objs.map(o => `${o.quantity}x ${o.cardData.name} ${o.rotation === 90 ? '(Tapped)' : '(Untapped)'}`).join(', ')}`;
+            };
+
+            const prompt = `It is now your turn! Turn ${round}, Step: ${turnStep}.
+Your Status:
+Life: ${aiState?.life || 40}
+Hand: ${aiState?.hand.length || 0} cards. ${(aiState?.hand || []).map(c => c.name).join(', ')}
+${getBoard(aiOpponent.id)}
+
+Opponent Status (${playersList[0].name}):
+Life: ${p1State?.life || 40}
+Hand: ${p1State?.hand.length || 0} cards.
+${getBoard(p1Id)}
+
+Please decide your plays and issue JSON commands. When you are done taking actions, issue a "pass_turn" action command to end your turn!`;
+
+            console.log("Sending Strategy Prompt to AI...");
+            aiManagerRef.current.sendGameState(prompt);
+        }
+    }, [currentTurnPlayerId, turnStep, gamePhase, round, boardObjects, localOpponents, playersList]);
+
     // --- Game Flow Methods ---
     const handleStartGameLogic = (options?: { mulligansAllowed: boolean, trackDamage?: boolean }) => {
         const shouldUseMulligans = options?.mulligansAllowed ?? true;
         setMulligansAllowed(shouldUseMulligans);
         if (options?.trackDamage !== undefined) setTrackDamage(options.trackDamage);
 
+        // Always ensure we have states ready, even in multiplayer for AI
+        const states: Record<string, LocalPlayerState> = {};
+
         if (isLocal) {
-            // Re-initialize states to ensure fresh deck data
-            const states: Record<string, LocalPlayerState> = {};
+            // Local game populates everyone's state
             playersList.forEach((p, idx) => {
                 if (p.id === 'player-0' || p.id === 'local-player') {
                     states[p.id] = createInitialState(p.id, initialDeck, initialTokens);
@@ -2528,15 +2682,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         opp = localOpponents[idx - 1];
                     }
 
-                    const aiData = aiOpponentsData[p.id];
-
                     if (opp) {
                         states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
-                    } else if (aiData) {
-                        console.log(`Initializing AI state for ${p.name} using aiOpponentsData`);
-                        states[p.id] = createInitialState(p.id, aiData.deck, aiData.tokens);
                     } else {
-                        console.warn(`No deck found for player ${p.name} (id: ${p.id})`);
                         states[p.id] = createInitialState(p.id, [], []);
                     }
                 }
@@ -2552,8 +2700,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const tokens = state.hand.filter(c => c.isToken);
                     state.hand = [...initialHand, ...tokens];
                 }
-                // Send update to mobile if applicable
-                sendHandUpdate(state.id, state.hand, 'MULLIGAN', state.mulliganCount);
             });
 
             // Ensure P1 state exists before loading
@@ -2563,6 +2709,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // Load P1 state
             loadLocalPlayerState(playersList[0].id);
         } else {
+            // Normal Multiplayer
             const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
             if (lib.length >= 7) {
                 const initialHand = lib.slice(0, 7);
@@ -2571,19 +2718,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setLibrary(remaining);
             }
 
-            // Also initialize state for any AI opponents the host added
-            if (isHost && Object.keys(aiOpponentsData).length > 0) {
-                const states: Record<string, LocalPlayerState> = {};
-                for (const [aiId, aiData] of Object.entries(aiOpponentsData)) {
-                    const st = createInitialState(aiId, aiData.deck, aiData.tokens);
-                    if (st.library.length >= 7) {
-                        const initHand = st.library.slice(0, 7);
-                        st.library = st.library.slice(7);
-                        st.hand = [...initHand, ...st.hand.filter(c => c.isToken)];
-                    }
-                    states[aiId] = st;
+            // Populate AI state for host if there is an AI
+            const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+            if (aiOpponent && isHost) {
+                // The AI needs its library ready
+                const aiState = createInitialState(aiOpponent.id || '', aiOpponent.deck, aiOpponent.tokens);
+                if (aiState.library.length >= 7) {
+                    const aiStartHand = aiState.library.slice(0, 7);
+                    aiState.library = aiState.library.slice(7);
+                    const aiStartTokens = aiState.hand.filter(c => c.isToken);
+                    aiState.hand = [...aiStartHand, ...aiStartTokens];
                 }
-                localPlayerStates.current = { ...localPlayerStates.current, ...states };
+                states[aiOpponent.id || ''] = aiState;
+                Object.assign(localPlayerStates.current, states);
             }
         }
 
@@ -2596,6 +2743,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // In local mode, set turn order based on players list
             setTurnOrder(playersList.map(p => p.id));
             setCurrentTurnPlayerId(playersList[0].id);
+        }
+
+        // Initialize AI Manager if an AI exists and we are the host
+        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+        if (aiOpponent && geminiApiKey && !aiManagerRef.current && (isLocal || isHost)) {
+            aiManagerRef.current = new GeminiAIManager({
+                apiKey: geminiApiKey,
+                playerName: playerName,
+                aiName: aiOpponent.name,
+                aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck),
+                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
+                magicRulesMarkdown: magicRulesText,
+                onGameCommand: (cmd) => {
+                    handleAIGameCommand(cmd, aiOpponent.id || '');
+                },
+                onConnected: () => {
+                    addLog(`${aiOpponent.name} (Gemini AI) Connected!`, 'SYSTEM', aiOpponent.name);
+                },
+                onError: (err) => console.error(err)
+            });
+            aiManagerRef.current.connectAll();
         }
 
         addLog("Game Started", "SYSTEM", "Host");
@@ -2730,37 +2898,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
                     addLog(`${currentPlayer.name} kept hand`);
 
-                    let allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                    // Check if all kept
+                    const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
                     if (allKept) {
                         setGamePhase('PLAYING');
+                        // Switch back to P1 view if needed, or stay. Usually P1 starts.
                     } else {
-                        // Recursively or iteratively keep for AI players until human is found
-                        let nextIndex = (mySeatIndex + 1) % playersList.length;
-                        while (true) {
-                            const nextPlayer = playersList[nextIndex];
-                            if (nextPlayer.disconnected || localPlayerStates.current[nextPlayer.id]?.hasKeptHand) {
-                                nextIndex = (nextIndex + 1) % playersList.length;
-                                continue;
-                            }
-
-                            const isAI = localOpponents.find(o => o.id === nextPlayer.id)?.type === 'ai';
-                            if (isAI) {
-                                // AI auto-keeps hand for now
-                                localPlayerStates.current[nextPlayer.id].hasKeptHand = true;
-                                addLog(`${nextPlayer.name} kept hand`);
-
-                                allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
-                                if (allKept) {
-                                    setGamePhase('PLAYING');
-                                    break;
-                                }
-                                nextIndex = (nextIndex + 1) % playersList.length;
-                            } else {
-                                // Found next human
-                                nextTurn();
-                                break;
-                            }
-                        }
+                        nextTurn(); // Switch to next player for mulligan
                     }
                 } else {
                     setGamePhase('PLAYING');
@@ -2795,7 +2939,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // --- Mobile Event Handlers ---
     const handleMobilePlayCard = ({ playerId, cardId }: { playerId: string, cardId: string }) => {
-        if (!isLocal && !aiOpponentsData[playerId]) return;
+        if (!isLocal) return;
 
         // Find player state
         const state = localPlayerStates.current[playerId];
@@ -2843,7 +2987,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileMulligan = ({ playerId, keep }: { playerId: string, keep: boolean }) => {
-        if (!isLocal && !aiOpponentsData[playerId]) return;
+        if (!isLocal) return;
 
         const state = localPlayerStates.current[playerId];
         if (!state) return;
@@ -2883,7 +3027,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileUpdateLife = ({ playerId, amount }: { playerId: string, amount: number }) => {
-        if (!isLocal && !aiOpponentsData[playerId]) return;
+        if (!isLocal) return;
         const state = localPlayerStates.current[playerId];
         if (!state) return;
 
@@ -2902,7 +3046,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleMobileUpdateCounter = ({ playerId, type, amount, targetId }: { playerId: string, type: string, amount: number, targetId?: string }) => {
-        if (!isLocal && !aiOpponentsData[playerId]) return;
+        if (!isLocal) return;
         const state = localPlayerStates.current[playerId];
         if (!state) return;
 
@@ -3022,11 +3166,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const playSound = useCallback((type: 'TURN' | 'PLAY' | 'DRAW' | 'REQUEST' | 'JOIN_LEAVE') => {
         if (!soundsEnabled) return;
         const sounds = {
-            TURN: 'https://actions.google.com/sounds/v1/ui/button_click.ogg',
-            PLAY: 'https://actions.google.com/sounds/v1/foley/paper_rustle.ogg',
-            DRAW: 'https://actions.google.com/sounds/v1/foley/paper_rustle.ogg',
-            REQUEST: 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
-            JOIN_LEAVE: 'https://actions.google.com/sounds/v1/ui/pop_up_short.ogg'
+            TURN: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Simple notify
+            PLAY: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Card flip
+            DRAW: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Draw/Flip
+            REQUEST: 'https://cdn.pixabay.com/audio/2022/01/21/audio_4eb6046e7f.mp3', // Chime
+            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b325ef01.mp3' // Pop
         };
         try {
             const audio = new Audio(sounds[type]);
@@ -3038,19 +3182,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [soundsEnabled]);
 
     const nextTurn = () => {
-        setIsAiThinking(false);
         // Restriction: Only current player can advance turn/step
         const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
-        const isAiTurn = !!(getAiOpponentData() && currentTurnPlayerId === getAiOpponentData()?.id);
-
-        if (currentTurnPlayerId !== myId) {
-            // If it's an AI's turn and we are the host, allow passing
-            if (isHost && isAiTurn) {
-                console.log("Host is force-passing AI turn");
-            } else {
-                return;
-            }
-        }
+        if (currentTurnPlayerId !== myId) return;
 
         // Advantage sub-phases
         const currentStepIndex = TURN_STEPS.indexOf(turnStep);
@@ -3086,12 +3220,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setTurnStartTime(Date.now());
             playSound('TURN');
 
-            // Switch View to Next Player only if they are human
-            const isNextAI = localOpponents?.find(o => o.id === nextPlayer.id)?.type === 'ai';
-            if (!isNextAI) {
-                setMySeatIndex(nextIndex);
-                loadLocalPlayerState(nextPlayer.id);
-            }
+            // Switch View to Next Player
+            setMySeatIndex(nextIndex);
+            loadLocalPlayerState(nextPlayer.id);
             return;
         }
 
@@ -4100,12 +4231,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
 
         switch (e.key.toLowerCase()) {
-            case 'shift':
-                if (aiConnected && aiManagerRef.current && !isMicActive) {
-                    aiManagerRef.current.startMic();
-                    setIsMicActive(true);
-                }
-                break;
             case 'd': drawCard(1); break;
             case 'u': untapAll(); break;
             case 's': shuffleLibrary(); break;
@@ -4226,23 +4351,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const handleKeyUp = (e: React.KeyboardEvent) => {
-        if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
-
-        switch (e.key.toLowerCase()) {
-            case 'shift':
-                if (aiConnected && aiManagerRef.current && isMicActive) {
-                    aiManagerRef.current.stopMic();
-                    setIsMicActive(false);
-                    setIsAiThinking(true);
-                }
-                break;
-        }
     };
 
     // Keep function refs in sync for stable window event listeners
     useEffect(() => { handleAutoTapRef.current = handleAutoTap; }, [handleAutoTap]);
     useEffect(() => { handleKeyDownRef.current = handleKeyDown; });
-    useEffect(() => { handleKeyUpRef.current = handleKeyUp; });
     useEffect(() => { nextTurnRef.current = nextTurn; });
 
     const requestViewZone = (zone: string, targetPlayerId: string) => {
@@ -4748,325 +4861,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         </div>
     );
 
-    const getAiOpponentData = useCallback(() => {
-        if (isHost) {
-            if (isLocal) {
-                const aiPlayer = playersList.find(p => p.id?.startsWith('ai-'));
-                if (aiPlayer) {
-                    const localData = localOpponents.find(opp => opp.id === aiPlayer.id);
-                    if (localData) {
-                        return { id: aiPlayer.id, name: localData.name, deck: localData.deck || [], tokens: localData.tokens || [], type: 'ai' as const };
-                    }
-                }
-            } else {
-                const aiPlayer = playersList.find(p => aiOpponentsData[p.id]);
-                if (aiPlayer && aiOpponentsData[aiPlayer.id]) {
-                    const data = aiOpponentsData[aiPlayer.id];
-                    return { id: aiPlayer.id, name: data.name, deck: data.deck, tokens: data.tokens, type: 'ai' as const };
-                }
-            }
-        }
-        return undefined;
-    }, [isLocal, isHost, playersList, aiOpponentsData, localOpponents]);
-
-    // AI Initialization
-    // We compute a stable primitive ID so the useEffect doesn't tear down on every playersList sync
-    const aiPlayerIdStr = isHost ? (isLocal ? playersList.find(p => p.id?.startsWith('ai-'))?.id : playersList.find(p => aiOpponentsData[p.id])?.id) : undefined;
-
-    useEffect(() => {
-        if (!aiPlayerIdStr || !geminiApiKey) {
-            if (aiManagerRef.current) {
-                aiManagerRef.current.disconnect();
-                aiManagerRef.current = null;
-                setAiConnected(false);
-            }
-            return;
-        }
-
-        let active = true;
-        const initAi = async () => {
-            try {
-                const aiOpponent = getAiOpponentData();
-                if (!aiOpponent) return;
-
-                // Generating prompt...
-                const systemPrompt = generateAiSystemPrompt(
-                    aiOpponent.name,
-                    generateDeckMarkdown(aiOpponent.name, aiOpponent.deck, aiOpponent.tokens),
-                    generateDeckMarkdown(playerName, initialDeck, initialTokens),
-                    "" // Magic rules placeholder
-                );
-
-                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-                const audioCtx = new AudioContextClass({ sampleRate: 16000 });
-                audioContextRef.current = audioCtx;
-
-                const aiOptions: AIOptions = {
-                    apiKey: geminiApiKey,
-                    playerName: playerName,
-                    aiDeckMarkdown: generateDeckMarkdown('Gemini AI', aiOpponent.deck, aiOpponent.tokens),
-                    opponentDeckMarkdown: generateDeckMarkdown(playerName, initialDeck, initialTokens),
-                    magicRulesMarkdown: "", // Magic rules placeholder - can add later if needed
-                    onGameCommand: (command: GameCommand) => {
-                        // Handle game commands from AI
-                        console.log("AI Game Command:", command);
-                        handleGameCommandRef.current(command);
-                    },
-                    onConnected: () => {
-                        setAiConnected(true);
-                        addLog("AI connected to voice api!", "SYSTEM");
-                    },
-                    onError: (error) => {
-                        console.error("AI Error:", error);
-                        if (active) addLog("Failed to connect AI opponent", "SYSTEM");
-                    }
-                };
-
-                const aiManager = new GeminiAIManager(aiOptions);
-
-                aiManagerRef.current = aiManager;
-
-                await aiManager.connectAll();
-                if (active) {
-                    setAiConnected(true);
-                    addLog("AI connected to voice api!", "SYSTEM");
-                    // client.sendText("Hello! Let's start the game. It is currently the SETUP phase.");
-                }
-            } catch (err) {
-                console.error("AI Init failed", err);
-                if (active) addLog("Failed to connect AI opponent", "SYSTEM");
-            }
-        };
-
-        if (!aiConnected && !aiManagerRef.current) {
-            initAi();
-        }
-
-        return () => {
-            active = false;
-            // We ONLY teardown when we unmount or when the aiPlayerIdStr changes (i.e. AI is removed)
-            if (aiManagerRef.current) {
-                aiManagerRef.current.disconnect();
-                aiManagerRef.current = null;
-            }
-            if (audioContextRef.current) {
-                audioContextRef.current.close().catch(() => { });
-                audioContextRef.current = null;
-            }
-            setAiConnected(false);
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [aiPlayerIdStr, geminiApiKey, isLocal, playerName, initialDeck, initialTokens, getAiOpponentData]);
-
-    // AI Command Executor loop
-    useEffect(() => {
-        handleGameCommandRef.current = (command: GameCommand) => {
-            setIsAiThinking(false);
-            const aiOpponent = getAiOpponentData();
-            if (!aiOpponent) return;
-
-            const aiId = aiOpponent.id || '';
-            const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
-
-            try {
-                console.log(`[AI COMMAND] ${aiOpponent.name} executing:`, command);
-                addLog(`${aiOpponent.name} is thinking: ${command.action}`, 'SYSTEM');
-
-                const state = localPlayerStates.current[aiId];
-                if (!state) return;
-
-                switch (command.action) {
-                    case 'draw_card': {
-                        const amount = command.args.amount || 1;
-                        if (state.library.length < amount) break;
-                        const drawn = state.library.slice(0, amount);
-                        state.library = state.library.slice(amount);
-                        state.hand = [...state.hand, ...drawn];
-
-                        addLog(`${aiOpponent.name} drew ${amount} card(s)`);
-
-                        if (myId === aiId) {
-                            setLibrary(state.library);
-                            setHand(state.hand);
-                        }
-                        sendHandUpdate(aiId, state.hand, gamePhase, state.mulliganCount);
-                        break;
-                    }
-                    case 'move_card': {
-                        const name = command.args.cardName;
-                        const zone = command.args.zone;
-
-                        if (zone === 'battlefield') {
-                            const cardInHand = state.hand.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
-                            if (cardInHand) {
-                                handleMobilePlayCard({ playerId: aiId, cardId: cardInHand.id });
-                            }
-                        } else if (zone === 'graveyard' || zone === 'exile') {
-                            const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
-                            if (objOnBoard) {
-                                setBoardObjects(prev => prev.filter(o => o.id !== objOnBoard.id));
-                                emitAction('REMOVE_OBJECT', { id: objOnBoard.id });
-                                if (zone === 'graveyard') state.graveyard.unshift(objOnBoard.cardData);
-                                if (zone === 'exile') state.exile.unshift(objOnBoard.cardData);
-                                addLog(`${aiOpponent.name} moved ${objOnBoard.cardData.name} to ${zone}`);
-
-                                if (myId === aiId) {
-                                    if (zone === 'graveyard') setGraveyard(state.graveyard);
-                                    if (zone === 'exile') setExile(state.exile);
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    case 'tap_untap': {
-                        const name = command.args.cardName;
-                        const candidates = boardObjectsRef.current.filter(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
-                        if (candidates.length > 0) {
-                            const myControllerIdx = playersListRef.current.findIndex(p => p.id === aiId);
-                            const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
-                            const objOnBoard = candidates.find(o => o.rotation === defaultRot) || candidates[0];
-                            const isTapped = objOnBoard.rotation !== defaultRot;
-                            const newRot = isTapped ? defaultRot : (defaultRot + 90) % 360;
-
-                            setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, rotation: newRot } : o));
-                            emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { rotation: newRot } });
-                            addLog(`${aiOpponent.name} ${isTapped ? 'untapped' : 'tapped'} ${objOnBoard.cardData.name}`);
-                        }
-                        break;
-                    }
-                    case 'change_life': {
-                        const amount = command.args.amount || 0;
-                        handleMobileUpdateLife({ playerId: aiId, amount });
-                        break;
-                    }
-                    case 'add_counter': {
-                        const name = command.args.cardName;
-                        const amount = command.args.amount;
-                        const cType = command.args.counterType;
-                        const objOnBoard = boardObjectsRef.current.find(o => o.controllerId === aiId && o.cardData.name.toLowerCase().includes(name.toLowerCase()));
-                        if (objOnBoard) {
-                            const newCount = (objOnBoard.counters[cType] || 0) + amount;
-                            setBoardObjects(prev => prev.map(o => o.id === objOnBoard.id ? { ...o, counters: { ...o.counters, [cType]: newCount } } : o));
-                            emitAction('UPDATE_OBJECT', { id: objOnBoard.id, updates: { counters: { ...objOnBoard.counters, [cType]: newCount } } });
-                            addLog(`${aiOpponent.name} updated ${cType} counter on ${objOnBoard.cardData.name} by ${amount}`);
-                        }
-                        break;
-                    }
-                    case 'mulligan': {
-                        const keep = command.args.keep;
-                        handleMobileMulligan({ playerId: aiId, keep });
-                        break;
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to execute AI command:", e);
-            }
-        };
-    });
-
-    // AI Initial Game State & Mulligan Prompt
-    useEffect(() => {
-        const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || !aiConnected || !aiManagerRef.current) return;
-        if (gamePhase === 'SETUP') return;
-
-        // Ensure we only prompt this once per game start
-        if (hasPromptedAiMulliganRef.current) return;
-        hasPromptedAiMulliganRef.current = true;
-
-        const aiId = aiOpponent.id || '';
-        const state = localPlayerStates.current[aiId];
-        if (!state) return;
-
-        let recap = `--- GAME STARTED ---\n`;
-        recap += `The game has started! Turn order has been decided.\n`;
-        const firstPlayer = playersList.find(p => p.id === currentTurnPlayerId);
-        if (firstPlayer) recap += `The first player to go is: ${firstPlayer.name}\n\n`;
-
-        recap += `Your Starting Hand (${state.hand.filter(c => !c.isToken).length} cards):\n`;
-        state.hand.filter(c => !c.isToken).forEach(c => recap += `- ${c.name}\n`);
-
-        if (gamePhase === 'MULLIGAN') {
-            recap += `\nWould you like to keep this hand or take a mulligan? Output your JSON command now. Example:\n\`\`\`json\n{"action": "mulligan", "args": {"keep": true}}\n\`\`\``;
-        } else {
-            recap += `\nMulligans are disabled. You will keep this hand. Wait for your turn.`;
-        }
-
-        aiManagerRef.current.sendGameState(recap);
-        setIsAiThinking(true);
-        console.log("Sent Initial Start/Mulligan prompt to AI");
-    }, [gamePhase, aiConnected, currentTurnPlayerId, playersList, aiOpponentsData, getAiOpponentData]);
-
-    // AI Turn Recap Generator
-    useEffect(() => {
-        const aiOpponent = getAiOpponentData();
-        if (!aiOpponent || !aiConnected || !aiManagerRef.current) return;
-
-        const aiId = aiOpponent.id || '';
-        // Guard against infinite recap loop
-        const recapKey = `${turn}-${turnStep}-${aiId}`;
-        if (hasSentTurnRecapRef.current === recapKey) return;
-        hasSentTurnRecapRef.current = recapKey;
-
-        // It is now the AI's turn! Generate a recap of the board state.
-        const state = localPlayerStates.current[aiId];
-        if (!state) return;
-
-        let recap = `--- TURN START RECAP ---\n`;
-        recap += `It is now your turn! (Phase: ${gamePhase}, Step: ${turnStep})\n\n`;
-
-        recap += `Your Hand (${state.hand.filter(c => !c.isToken).length} cards):\n`;
-        state.hand.filter(c => !c.isToken).forEach(c => recap += `- ${c.name}\n`);
-        recap += `\nYour Board:\n`;
-
-        const myBoard = boardObjects.filter(o => o.controllerId === aiId);
-        if (myBoard.length === 0) recap += `(Empty)\n`;
-        myBoard.forEach(o => {
-            const controllerIdx = playersList.findIndex(p => p.id === aiId);
-            const defaultRot = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
-            const isTapped = o.rotation !== defaultRot;
-            recap += `- ${o.cardData.name} ${isTapped ? '(TAPPED)' : '(UNTAPPED)'}\n`;
-        });
-
-        recap += `\nOpponents:\n`;
-        playersList.filter(p => p.id !== aiId).forEach(p => {
-            const isMe = p.id === socket.id || p.id === 'local-player' || p.id === playersList[mySeatIndex]?.id;
-            const oppLife = opponentsLife[p.id] ?? 40;
-            const hpCount = isMe ? life : oppLife;
-            // Get proper hand count for opponent
-            let oppHandCount = 0;
-            if (isLocal && !isMe) {
-                const s = localPlayerStates.current[p.id];
-                oppHandCount = s ? s.hand.filter(c => !c.isToken).length : 0;
-            } else if (isMe) {
-                oppHandCount = hand.filter(c => !c.isToken).length;
-            } else {
-                oppHandCount = opponentsCounts[p.id]?.hand || 0;
-            }
-
-            recap += `${p.name} - Life: ${hpCount}, Hand: ${oppHandCount} cards\n`;
-
-            const oppBoard = boardObjects.filter(o => o.controllerId === p.id);
-            if (oppBoard.length > 0) {
-                recap += `  Board:\n`;
-                oppBoard.forEach(o => {
-                    const oppIdx = playersList.findIndex(x => x.id === p.id);
-                    const defRot = (oppIdx !== -1 && layout[oppIdx]) ? layout[oppIdx].rot : 0;
-                    const isTapped = o.rotation !== defRot;
-                    recap += `  - ${o.cardData.name} ${isTapped ? '(TAPPED)' : '(UNTAPPED)'}\n`;
-                });
-            }
-        });
-        recap += `\nWhat actions will you take? Remember to pass the turn when you are finished.`;
-
-        aiManagerRef.current.sendGameState(recap);
-        setIsAiThinking(true);
-        console.log("Sent Turn Recap to AI. Recap content length:", recap.length);
-        console.log("RECAP SENT TO AI:\n", recap);
-
-    }, [turn, currentTurnPlayerId, turnStep, aiConnected, localOpponents, socket.id, mySeatIndex, playersList, boardObjects, layout, opponentsLife, gamePhase, isLocal, hand, opponentsCounts, localPlayerStates]);
-
-
     const cardsInHand = hand.filter(c => !c.isToken);
     const tokensInHand = hand.filter(c => c.isToken);
     const cardsInHandWithShortcuts = cardsInHand.map((c, i) => ({ ...c, shortcutKey: i < 9 ? `${i + 1}` : i === 9 ? '0' : undefined }));
@@ -5103,16 +4897,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4 flex justify-between items-center">
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
-                                    <div className="flex gap-2">
-                                        {Object.keys(aiOpponentsData).length === 0 && (
-                                            <button onClick={() => setShowAiConfigModal(true)} className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                                <Crown size={12} /> Add AI
-                                            </button>
-                                        )}
-                                        <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                            <Shuffle size={12} /> Shuffle Order
-                                        </button>
-                                    </div>
+                                    <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                        <Shuffle size={12} /> Shuffle Order
+                                    </button>
                                 )}
                             </h3>
                             <div className="space-y-2">
@@ -5204,95 +4991,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             )}
                         </div>
                     </div>
-
-                    {/* AI Config Modal for Host */}
-                    {showAiConfigModal && (
-                        <div className="absolute inset-0 z-[200] bg-black/80 flex items-center justify-center p-4" onClick={() => setShowAiConfigModal(false)}>
-                            <div className="bg-gray-800 p-6 rounded-xl border border-gray-600 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                                <h3 className="text-xl font-bold text-white mb-4">Add AI Opponent</h3>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-400 mb-1">AI Name</label>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
-                                            value={aiConfig.name}
-                                            onChange={e => setAiConfig({ ...aiConfig, name: e.target.value })}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-400 mb-1">Select Deck</label>
-                                        <select
-                                            className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
-                                            value={aiConfig.deckId}
-                                            onChange={e => setAiConfig({ ...aiConfig, deckId: e.target.value })}
-                                        >
-                                            <option value="" disabled>Select a deck...</option>
-                                            {savedDecks?.map(d => (
-                                                <option key={d.id} value={d.id}>{d.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="flex justify-end gap-2 mt-6">
-                                        <button onClick={() => setShowAiConfigModal(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm font-bold">Cancel</button>
-                                        <button
-                                            onClick={() => {
-                                                if (aiConfig.deckId) {
-                                                    const deckToUse = savedDecks?.find(d => d.id === aiConfig.deckId);
-                                                    if (deckToUse) {
-                                                        const aiId = `ai-player-${Date.now()}`;
-                                                        setAiOpponentsData(prev => ({ ...prev, [aiId]: { name: aiConfig.name, deck: deckToUse.deck, tokens: deckToUse.tokens, color: '#9333ea' } }));
-
-                                                        // Initialize opponentsCounts and opponentsCommanders for the AI
-                                                        setOpponentsCounts(prev => ({
-                                                            ...prev,
-                                                            [aiId]: {
-                                                                library: deckToUse.deck.filter(c => !c.isCommander).length,
-                                                                graveyard: 0,
-                                                                exile: 0,
-                                                                hand: 7,
-                                                                command: deckToUse.deck.filter(c => c.isCommander).length
-                                                            }
-                                                        }));
-                                                        setOpponentsCommanders(prev => ({
-                                                            ...prev,
-                                                            [aiId]: deckToUse.deck.filter(c => c.isCommander)
-                                                        }));
-                                                        setOpponentsLife(prev => ({
-                                                            ...prev,
-                                                            [aiId]: 40
-                                                        }));
-
-                                                        // Initialize AI's local player state
-                                                        localPlayerStates.current[aiId] = {
-                                                            id: aiId,
-                                                            hand: [],
-                                                            library: deckToUse.deck.filter(c => !c.isCommander),
-                                                            graveyard: [],
-                                                            exile: [],
-                                                            commandZone: deckToUse.deck.filter(c => c.isCommander),
-                                                            life: 40,
-                                                            counters: {},
-                                                            commanderDamage: {},
-                                                            mulliganCount: 0,
-                                                            hasKeptHand: false
-                                                        };
-
-                                                        socket.emit('add_ai_player', { room: roomId, name: aiConfig.name, color: '#9333ea', aiId });
-                                                        setShowAiConfigModal(false);
-                                                    }
-                                                }
-                                            }}
-                                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-white text-sm font-bold disabled:opacity-50"
-                                            disabled={!aiConfig.deckId}
-                                        >
-                                            Add AI
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -5642,12 +5340,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                         {p.name.charAt(0).toUpperCase()}
                                     </div>
                                     <div className="flex flex-col leading-none justify-center">
-                                        <div className="flex items-center gap-1">
-                                            <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
-                                            {isTurn && isAiThinking && aiOpponentsData[p.id] && (
-                                                <Loader className="animate-spin text-yellow-400" size={10} />
-                                            )}
-                                        </div>
+                                        <span className={`text-xs font-bold ${isTurn ? 'text-yellow-400' : 'text-gray-300'} max-w-[80px] truncate`}>{p.name}</span>
                                         <span className="text-white font-mono text-[10px]">{pLife} HP</span>
                                     </div>
                                     {takenDamage.length > 0 && (
@@ -5767,17 +5460,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <History size={20} />
                     </button>
-                    {aiConnected && aiManagerRef.current && (
-                        <button
-                            onPointerDown={() => { aiManagerRef.current?.startMic(); setIsMicActive(true); }}
-                            onPointerUp={() => { aiManagerRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
-                            onPointerLeave={() => { if (isMicActive) { aiManagerRef.current?.stopMic(); setIsMicActive(false); } }}
-                            className={`p-2 rounded-lg transition-colors ${isMicActive ? 'bg-red-600 text-white animate-pulse' : 'hover:bg-gray-800 text-gray-400'}`}
-                            title="Hold to talk to AI"
-                        >
-                            <Mic size={20} />
-                        </button>
-                    )}
                     <button
                         onClick={() => setShowStatsModal(true)}
                         className={`p-2 rounded-lg transition-colors ${showStatsModal ? 'bg-blue-600 text-white' : 'hover:bg-gray-800 text-gray-400'}`}
@@ -5869,16 +5551,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         {!isLandscape && (
                             <button onClick={() => { setShowSettingsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><Settings /> Settings</button>
                         )}
-                        {aiConnected && aiManagerRef.current && (
-                            <button
-                                onPointerDown={() => { aiManagerRef.current?.startMic(); setIsMicActive(true); }}
-                                onPointerUp={() => { aiManagerRef.current?.stopMic(); setIsMicActive(false); setIsAiThinking(true); }}
-                                onPointerLeave={() => { if (isMicActive) { aiManagerRef.current?.stopMic(); setIsMicActive(false); } }}
-                                className={`w-full py-3 ${isMicActive ? 'bg-red-600 animate-pulse text-white' : 'bg-gray-800 text-white'} rounded-xl font-bold flex items-center justify-center gap-2 touch-none select-none`}
-                            >
-                                <Mic /> {isMicActive ? 'Listening...' : 'Hold to Talk to AI'}
-                            </button>
-                        )}
                         <button onClick={() => { setIsLogOpen(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><History /> Game Log</button>
                         <button onClick={() => { setShowStatsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><BarChart3 /> Stats</button>
                         {isHost && <button onClick={() => { setShowPlayerManager(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-blue-900/50 text-blue-200 rounded-xl font-bold flex items-center justify-center gap-2"><Shield /> Host Controls</button>}
@@ -5903,6 +5575,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     <div className="absolute top-4 right-4 flex flex-col gap-2 z-10 hidden md:flex">
                         <button onClick={() => setView(v => ({ ...v, scale: Math.min(v.scale + 0.1, 3) }))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomIn size={18} /></button>
                         <button onClick={() => setView(v => ({ ...v, scale: Math.max(v.scale - 0.1, 0.1) }))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomOut size={18} /></button>
+                        {isLocal && localOpponents?.some(o => o.type === 'ai') && (
+                            <button
+                                onMouseDown={() => aiManagerRef.current?.startMic()}
+                                onMouseUp={() => aiManagerRef.current?.stopMic()}
+                                onMouseLeave={() => aiManagerRef.current?.stopMic()}
+                                title="Push to talk to AI"
+                                className="p-2 bg-blue-600 hover:bg-blue-500 rounded text-white shadow-lg flex items-center justify-center transition"
+                            >
+                                <Mic size={18} />
+                            </button>
+                        )}
                     </div>
 
                     {/* Hand UI (Only visible in Setup/Playing) */}
@@ -6423,7 +6106,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Help / Shortcuts</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">?</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space (Hold) + Drag</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Talk to AI</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Shift (Hold)</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Zoom Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Mouse Wheel</kbd></div>
 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Play Commander</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">C</kbd></div>

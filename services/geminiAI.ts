@@ -206,3 +206,26 @@ When it is your turn, tell the player what you are doing, then use the JSON comm
         this.conversationClient = null;
     }
 }
+
+export function generateDeckMarkdown(deck: import('../types').CardData[]): string {
+    const counts: { [name: string]: { count: number, card: import('../types').CardData } } = {};
+    for (const card of deck) {
+        if (!counts[card.name]) {
+            counts[card.name] = { count: 1, card };
+        } else {
+            counts[card.name].count++;
+        }
+    }
+
+    let md = "# Deck Contents\n\n";
+    for (const { count, card } of Object.values(counts)) {
+        md += `## ${count}x ${card.name}\n`;
+        md += `- **Cost:** ${card.manaCost || 'None'}\n`;
+        md += `- **Type:** ${card.typeLine}\n`;
+        if (card.power && card.toughness) md += `- **Stats:** ${card.power}/${card.toughness}\n`;
+        if (card.oracleText) md += `- **Text:** ${card.oracleText.replace(/\n/g, ' ')}\n`;
+        md += `\n`;
+    }
+    return md;
+}
+

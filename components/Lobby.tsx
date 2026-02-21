@@ -15,7 +15,7 @@ interface LobbyProps {
     playerSleeve: string;
     setPlayerSleeve: (color: string) => void;
     onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
-    onLocalGame: () => void;
+    onHostVsAI?: (deck: SavedDeck) => void;
     onImportDeck: () => void;
     savedDeckCount: number;
     currentTokens: CardData[];
@@ -32,9 +32,10 @@ interface LobbyProps {
 export const Lobby: React.FC<LobbyProps> = ({
     playerName, setPlayerName,
     playerSleeve, setPlayerSleeve,
-    onJoin, onLocalGame, onImportDeck, savedDeckCount,
+    onJoin, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
     savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck,
+    onHostVsAI,
     geminiApiKey, setGeminiApiKey
 }) => {
 
@@ -47,6 +48,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     // Library State
     const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+    const [isSelectingAIDeck, setIsSelectingAIDeck] = useState(false);
     const [editingDeck, setEditingDeck] = useState<SavedDeck | null>(null);
     const [isEditingTokens, setIsEditingTokens] = useState(false);
     const [tokenImportText, setTokenImportText] = useState('');
@@ -198,19 +200,14 @@ export const Lobby: React.FC<LobbyProps> = ({
         joinRoom(code);
     };
 
-    const handleLocalGame = () => {
+    const handleHostVsAIClick = () => {
         if (savedDeckCount === 0) {
             alert("Please import a deck first!");
             return;
         }
 
-        // If no deck is active, load the most recent one.
-        if (activeDeck.length === 0 && savedDecks.length > 0) {
-            const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens);
-        }
-
-        onLocalGame();
+        setIsSelectingAIDeck(true);
+        setIsLibraryOpen(true);
     };
 
     const handleJoinRoom = () => {
@@ -372,10 +369,10 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                                 <div className="flex flex-col md:flex-row gap-4 mb-4">
                                     <button
-                                        onClick={handleLocalGame}
-                                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                        onClick={handleHostVsAIClick}
+                                        className="flex-1 bg-purple-700 hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                                     >
-                                        <Users size={20} /> Local Game
+                                        <Zap size={20} /> Host Game vs AI
                                     </button>
                                     <button
                                         onClick={handleCreateRoom}
@@ -452,8 +449,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
                         <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-[90vh] md:h-auto">
                             <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                                <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500" /> {isEditingTokens ? 'Manage Global Tokens' : 'Deck Library'}</h3>
-                                <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); setIsEditingTokens(false); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                                <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500" /> {isEditingTokens ? 'Manage Global Tokens' : (isSelectingAIDeck ? "Select AI Opponent's Deck" : 'Deck Library')}</h3>
+                                <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); setIsEditingTokens(false); setIsSelectingAIDeck(false); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
                             </div>
 
                             <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
@@ -514,18 +511,26 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                         <h4 className="font-bold text-white text-sm sm:text-base truncate">{deck.name}</h4>
                                                         <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
                                                         <div className="flex gap-2 flex-wrap">
-                                                            <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Play size={12} /> Load
-                                                            </button>
-                                                            <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Edit3 size={12} /> Edit
-                                                            </button>
-                                                            <button onClick={() => handleExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Download size={12} /> Export
-                                                            </button>
-                                                            <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
-                                                                <Trash2 size={12} /> Delete
-                                                            </button>
+                                                            {isSelectingAIDeck ? (
+                                                                <button onClick={() => { setIsSelectingAIDeck(false); setIsLibraryOpen(false); onHostVsAI?.(deck); }} className="px-3 py-2 sm:py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center gap-1 w-full justify-center">
+                                                                    <Zap size={12} /> Select for AI
+                                                                </button>
+                                                            ) : (
+                                                                <>
+                                                                    <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                        <Play size={12} /> Load
+                                                                    </button>
+                                                                    <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                        <Edit3 size={12} /> Edit
+                                                                    </button>
+                                                                    <button onClick={() => handleExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                        <Download size={12} /> Export
+                                                                    </button>
+                                                                    <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
+                                                                        <Trash2 size={12} /> Delete
+                                                                    </button>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>

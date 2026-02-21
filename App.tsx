@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Lobby } from './components/Lobby';
 import { DeckBuilder } from './components/DeckBuilder';
 import { Tabletop } from './components/Tabletop';
-import { LocalSetup } from './components/LocalSetup';
+
 import { MobileController } from './components/MobileController';
 import { CardData, ManaRule } from './types';
 import { PLAYER_COLORS } from './constants';
@@ -10,8 +10,6 @@ import { PLAYER_COLORS } from './constants';
 enum View {
     LOBBY = 'LOBBY',
     DECK_BUILDER = 'DECK_BUILDER',
-    LOCAL_SETUP = 'LOCAL_SETUP',
-    LOCAL_GAME = 'LOCAL_GAME',
     GAME = 'GAME',
     MOBILE_CONTROLLER = 'MOBILE_CONTROLLER',
     DECK_SELECT = 'DECK_SELECT',
@@ -73,7 +71,7 @@ function App() {
     });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
-    const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
+    const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
     const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() => {
@@ -98,6 +96,8 @@ function App() {
         }
         return 'New Deck';
     });
+
+    // API Keys
     const [geminiApiKey, setGeminiApiKey] = useState<string>(() => loadState('geminiApiKey', ''));
 
     // Persist state changes to Local Storage
@@ -150,7 +150,7 @@ function App() {
     const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string) => {
         // Prevent re-triggering if already in a game-related view (fixes infinite deck-select loop)
         if (currentView === View.GAME || currentView === View.DECK_SELECT ||
-            currentView === View.MOBILE_CONTROLLER || currentView === View.LOCAL_GAME) return;
+            currentView === View.MOBILE_CONTROLLER) return;
 
         if (code) setRoomId(code);
         setIsGameStarted(!!isStarted);
@@ -190,17 +190,22 @@ function App() {
         }
     };
 
-    const handleStartLocalGame = (opponents: any[], isLocalTable: boolean = false) => {
-        setLocalOpponents(opponents);
-        setIsLocalTableHost(isLocalTable);
-        if (isLocalTable) {
-            // Generate a 4-letter room code
-            const code = crypto.randomUUID().slice(0, 6).toUpperCase();
-            setRoomId(code);
-        } else {
-            setRoomId("LOCAL");
-        }
-        setCurrentView(View.LOCAL_GAME);
+
+
+    const handleHostVsAI = (aiDeck: { name: string, deck: CardData[], tokens: CardData[] }) => {
+        const code = crypto.randomUUID().slice(0, 6).toUpperCase();
+        setRoomId(code);
+        setIsGameStarted(false);
+        setIsLocalTableHost(false);
+        setLocalOpponents([{
+            id: 'ai-opponent-1',
+            name: 'Gemini',
+            deck: aiDeck.deck,
+            tokens: aiDeck.tokens,
+            color: '#3b82f6',
+            type: 'ai'
+        }]);
+        setCurrentView(View.GAME);
     };
 
     const handleSaveDeck = (deck: SavedDeck) => {
@@ -248,7 +253,6 @@ function App() {
                     playerSleeve={playerSleeve}
                     setPlayerSleeve={setPlayerSleeve}
                     onJoin={handleJoinGame}
-                    onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
                     onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
                     savedDeckCount={activeDeck.length}
                     currentTokens={lobbyTokens}
@@ -258,6 +262,7 @@ function App() {
                     onSaveDeck={handleSaveDeck}
                     onDeleteDeck={handleDeleteDeck}
                     onLoadDeck={handleDeckReady}
+                    onHostVsAI={handleHostVsAI}
                     geminiApiKey={geminiApiKey}
                     setGeminiApiKey={setGeminiApiKey}
                 />
@@ -278,14 +283,6 @@ function App() {
                 />
             )}
 
-            {currentView === View.LOCAL_SETUP && (
-                <LocalSetup
-                    onStartGame={handleStartLocalGame}
-                    onBack={() => setCurrentView(View.LOBBY)}
-                    savedDecks={savedDecks}
-                />
-            )}
-
             {currentView === View.GAME && (
                 <Tabletop
                     initialDeck={activeDeck}
@@ -295,23 +292,7 @@ function App() {
                     roomId={roomId}
                     initialGameStarted={isGameStarted}
                     manaRules={activeManaRules}
-                    savedDecks={savedDecks}
-                    geminiApiKey={geminiApiKey}
-                    onExit={() => setCurrentView(View.LOBBY)}
-                />
-            )}
-
-            {currentView === View.LOCAL_GAME && (
-                <Tabletop
-                    initialDeck={activeDeck}
-                    initialTokens={lobbyTokens}
-                    playerName={playerName}
-                    sleeveColor={playerSleeve}
-                    roomId={isLocalTableHost ? roomId : "LOCAL"}
-                    isLocal={true}
-                    isLocalTableHost={isLocalTableHost}
                     localOpponents={localOpponents}
-                    manaRules={activeManaRules}
                     geminiApiKey={geminiApiKey}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
