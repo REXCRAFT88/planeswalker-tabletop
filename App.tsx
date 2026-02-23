@@ -179,6 +179,23 @@ function App() {
     };
 
     const handleDeckSelected = (deck: SavedDeck) => {
+        if (isAddingAIToExistingGame) {
+            setLocalOpponents(prev => [
+                ...prev,
+                {
+                    id: 'ai-opponent-1',
+                    name: 'Gemini',
+                    deck: [...deck.deck],
+                    tokens: [...deck.tokens],
+                    color: '#3b82f6',
+                    type: 'ai'
+                }
+            ]);
+            setIsAddingAIToExistingGame(false);
+            setCurrentView(View.GAME);
+            return;
+        }
+
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
         setActiveManaRules(deck.manaRules || {});
