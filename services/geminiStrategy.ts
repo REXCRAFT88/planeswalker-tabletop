@@ -25,6 +25,9 @@ export class GeminiStrategyClient {
     private onConnected?: () => void;
     private onError?: (error: any) => void;
     private isConnecting: boolean = false;
+    private lastRequestTime: number = 0;
+    private requestQueue: Array<() => void> = [];
+    private isProcessingQueue: boolean = false;
 
     constructor(options: GeminiStrategyOptions) {
         this.apiKey = options.apiKey;
@@ -38,8 +41,35 @@ export class GeminiStrategyClient {
      * Send game state to AI and get strategic response
      */
     public async sendGameState(gameState: string): Promise<void> {
+        // Rate limiting: Ensure at least 2 seconds between requests to avoid hitting API limits
+        const now = Date.now();
+        const timeSinceLastRequest = now - this.lastRequestTime;
+        const minRequestInterval = 2000; // 2 seconds minimum between requests
+
+        if (timeSinceLastRequest < minRequestInterval) {
+            const delay = minRequestInterval - timeSinceLastRequest;
+            console.log(`[Rate Limit] Throttling request for ${delay}ms`);
+            return new Promise((resolve, reject) => {
+                setTimeout(async () => {
+                    try {
+                        await this.executeRequest(gameState);
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
+                }, delay);
+            });
+        }
+
+        return this.executeRequest(gameState);
+    }
+
+    private async executeRequest(gameState: string): Promise<void> {
+        this.lastRequestTime = Date.now();
+
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.apiKey}`;
+            // Using gemini-2.5-flash-lite for higher free tier limits (1,000 requests/day vs 20/day for flash)
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${this.apiKey}`;
 
             const payload = {
                 contents: [{
@@ -65,6 +95,24 @@ export class GeminiStrategyClient {
 
             if (!response.ok) {
                 const errorData = await response.json();
+
+                // Handle 429 rate limit specifically
+                if (response.status === 429) {
+                    console.warn('[Rate Limit] API quota exceeded. Retrying after delay...');
+                    // Exponential backoff: wait longer on repeated 429s
+                    const retryDelay = Math.min(10000 * Math.pow(2, this.requestQueue.length), 60000); // Up to 1 min
+                    return new Promise((resolve, reject) => {
+                        setTimeout(async () => {
+                            try {
+                                await this.executeRequest(gameState);
+                                resolve();
+                            } catch (error) {
+                                reject(error);
+                            }
+                        }, retryDelay);
+                    });
+                }
+
                 throw new Error(`API Error: ${JSON.stringify(errorData)}`);
             }
 

@@ -849,6 +849,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const aiManagerRef = useRef<GeminiAIManager | null>(null);
     const [magicRulesText, setMagicRulesText] = useState<string>('');
 
+    // Track the last processed log ID to avoid duplicate AI reactions
+    const lastProcessedLogIdRef = useRef<string | null>(null);
+
     useEffect(() => {
         if (localOpponents?.some(o => o.type === 'ai')) {
             fetch('/magic_rules_context.md')
@@ -1585,7 +1588,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             localOpponents.forEach((opp, idx) => {
                 // Ensure we have a valid ID, fallback to player-X if needed
                 const pid = opp.id || playersList[idx + 1]?.id || `player-${idx + 1}`;
-                states[pid] = createInitialState(pid, opp.deck, opp.tokens);
+
+                // Use opponent's deck if available, otherwise log warning and use fallback
+                if (opp.deck && opp.deck.length > 0) {
+                    states[pid] = createInitialState(pid, opp.deck, opp.tokens || []);
+                } else {
+                    console.warn(`[AI] Opponent ${opp.name} (${pid}) has no deck provided. Falling back to initialDeck.`);
+                    states[pid] = createInitialState(pid, initialDeck, opp.tokens || []);
+                }
             });
 
             localPlayerStates.current = states;
@@ -2469,10 +2479,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         color: opp.color,
                         aiId: opp.id
                     });
-                } else if (opp.type === 'ai' && playersList.find(rp => rp.id === opp.id) && !localPlayerStates.current[opp.id]) {
+                } else if (opp.type === 'ai' && playersList.find(rp => rp.id === opp.id)) {
                     // Initialize AI state if it was added mid-game
-                    if (gamePhase !== 'SETUP') {
-                        const aiState = createInitialState(opp.id, opp.deck, opp.tokens);
+                    // Check if state exists AND has cards - if not, reinitialize
+                    const existingState = localPlayerStates.current[opp.id];
+                    const needsInit = !existingState || existingState.library.length === 0;
+
+                    if (gamePhase !== 'SETUP' && needsInit) {
+                        console.log(`[AI] Initializing state for ${opp.name}, deck has ${opp.deck?.length || 0} cards`);
+
+                        const aiState = createInitialState(opp.id, opp.deck || [], opp.tokens || []);
                         if (aiState.library.length >= 7) {
                             const aiStartHand = aiState.library.slice(0, 7);
                             aiState.library = aiState.library.slice(7);
@@ -2489,7 +2505,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 selectedVoice: aiVoice,
                                 playerName: playerName,
                                 aiName: opp.name,
-                                aiDeckMarkdown: generateDeckMarkdown(opp.deck),
+                                aiDeckMarkdown: generateDeckMarkdown(opp.deck || []),
                                 opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
                                 magicRulesMarkdown: magicRulesText,
                                 onGameCommand: (cmds) => {
@@ -2742,12 +2758,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const lastLog = logs[0];
         const aiOpponent = localOpponents?.find(o => o.type === 'ai');
 
-        if (aiOpponent && lastLog.playerName !== aiOpponent.name && lastLog.type === 'ACTION') {
-            // Conversational reaction to player action
-            aiManagerRef.current.sendGameEvent(`Player ${lastLog.playerName} just did the following: ${lastLog.message}`);
+        // Skip if we've already processed this log (prevents duplicate reactions)
+        if (!lastLog || lastProcessedLogIdRef.current === lastLog.id) return;
 
-            // Priority Interrupt Check (Only ask for response if it's NOT the AI's turn)
-            if (currentTurnPlayerId !== aiOpponent.id) {
+        if (aiOpponent && lastLog.playerName !== aiOpponent.name && lastLog.type === 'ACTION') {
+            // Mark this log as processed
+            lastProcessedLogIdRef.current = lastLog.id;
+
+            // Only send priority interrupt for significant actions, not every small action
+            // Filter out actions that don't require interrupt (like life changes, etc.)
+            const requiresInterrupt = /draw|play|cast|activate|tap|attack|block/i.test(lastLog.message);
+
+            if (requiresInterrupt && currentTurnPlayerId !== aiOpponent.id) {
                 const aiState = localPlayerStates.current[aiOpponent.id];
                 const p1Id = playersList[0].id;
                 const p1State = localPlayerStates.current[p1Id];
@@ -2758,7 +2780,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     return `Board: ${objs.map(o => `${o.quantity}x ${o.cardData.name} ${o.rotation === 90 ? '(Tapped)' : '(Untapped)'}`).join(', ')}`;
                 };
 
-                const prompt = `PRIORITY INTERRUPT! Player ${lastLog.playerName} just performed an action: "${lastLog.message}". 
+                const prompt = `PRIORITY INTERRUPT! Player ${lastLog.playerName} just performed an action: "${lastLog.message}".
 Do you want to respond by casting an Instant, playing a Flash card, or activating an ability?
 
 Your Status:
@@ -2833,9 +2855,18 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                         opp = localOpponents[idx - 1];
                     }
 
-                    if (opp) {
-                        states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
+                    // Log for debugging if AI opponent not found
+                    if (p.isAi && !opp) {
+                        console.warn(`[AI] Opponent ${p.name} (${p.id}) found in playersList but not in localOpponents. localOpponents:`, localOpponents);
+                    }
+
+                    if (opp && opp.deck && opp.deck.length > 0) {
+                        states[p.id] = createInitialState(p.id, opp.deck, opp.tokens || []);
+                    } else if (opp) {
+                        console.warn(`[AI] Opponent ${opp.name} has empty deck. Falling back to initialDeck.`);
+                        states[p.id] = createInitialState(p.id, initialDeck, opp.tokens || []);
                     } else {
+                        console.warn(`[AI] No opponent found for player ${p.name}, creating empty state`);
                         states[p.id] = createInitialState(p.id, [], []);
                     }
                 }
@@ -2850,6 +2881,8 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     // Keep tokens if any
                     const tokens = state.hand.filter(c => c.isToken);
                     state.hand = [...initialHand, ...tokens];
+                } else if (state.library.length === 0) {
+                    console.warn(`[AI] Player ${state.id} has 0 cards in library at game start!`);
                 }
             });
 

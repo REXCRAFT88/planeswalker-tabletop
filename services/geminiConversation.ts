@@ -27,6 +27,8 @@ export class GeminiConversationClient {
     private micSource: MediaStreamAudioSourceNode | null = null;
     private isMicActive: boolean = false;
     private selectedVoice: string;
+    private lastEventTime: number = 0;
+    private eventQueue: Array<string> = [];
 
     constructor(options: GeminiConversationOptions) {
         this.apiKey = options.apiKey;
@@ -85,7 +87,7 @@ export class GeminiConversationClient {
         console.log("Sending Gemini Conversation Setup message...");
         const setupMessage = {
             setup: {
-                model: "models/gemini-2.5-flash-native-audio-preview-12-2025",
+                model: "models/gemini-2.5-flash-lite", // Using flash-lite for higher free tier limits
                 generationConfig: {
                     responseModalities: ["AUDIO"], // Audio responses only
                     speechConfig: {
@@ -150,6 +152,19 @@ export class GeminiConversationClient {
      */
     public sendGameEvent(eventDescription: string) {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+        // Rate limiting: Don't send events too frequently
+        const now = Date.now();
+        const timeSinceLastEvent = now - this.lastEventTime;
+        const minEventInterval = 3000; // 3 seconds minimum between events
+
+        if (timeSinceLastEvent < minEventInterval) {
+            // Skip this event to prevent spamming the AI
+            console.log('[Conversation Rate Limit] Skipping event, too soon after previous one');
+            return;
+        }
+
+        this.lastEventTime = now;
 
         const msg = {
             clientContent: {
