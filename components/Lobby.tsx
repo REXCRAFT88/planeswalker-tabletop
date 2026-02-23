@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Bot } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
@@ -14,7 +14,7 @@ interface LobbyProps {
     setPlayerName: (name: string) => void;
     playerSleeve: string;
     setPlayerSleeve: (color: string) => void;
-    onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
+    onJoin: (code?: string, isStarted?: boolean, gameType?: string, aiOpponent?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' }) => void;
     onHostLocalTable?: () => void;
     onImportDeck: () => void;
     savedDeckCount: number;
@@ -57,6 +57,10 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // AI Opponent State
+    const [selectedAIDeck, setSelectedAIDeck] = useState<SavedDeck | null>(null);
+    const [showAIOption, setShowAIOption] = useState(false);
 
     // Auto-join if session exists
     useEffect(() => {
@@ -194,10 +198,56 @@ export const Lobby: React.FC<LobbyProps> = ({
         setShowReconnectModal(false);
     };
 
-    const handleCreateRoom = () => {
+    const handleCreateRoom = (withAI = false) => {
         const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-        setRoomCode(code); // Ideally pass this up or store in URL
-        joinRoom(code);
+        setRoomCode(code);
+
+        // Pass AI opponent info if selected
+        const aiOpponent = withAI && selectedAIDeck ? {
+            id: 'ai-opponent-' + Date.now(),
+            name: 'Gemini AI',
+            deck: [...selectedAIDeck.deck],
+            tokens: [...selectedAIDeck.tokens],
+            color: '#3b82f6',
+            type: 'ai' as const
+        } : undefined;
+
+        if (aiOpponent) {
+            // Call onJoin with AI opponent
+            onJoin(code, false, 'online', aiOpponent);
+        } else {
+            joinRoom(code);
+        }
+    };
+
+    const handlePlayWithAI = () => {
+        if (savedDeckCount === 0) {
+            alert("Please import a deck first!");
+            return;
+        }
+        if (!geminiApiKey) {
+            alert("Please configure your Gemini API Key to play against AI!");
+            return;
+        }
+        setIsSelectingAIDeck(true);
+        setIsLibraryOpen(true);
+    };
+
+    const handleSelectAIDeck = (deck: SavedDeck) => {
+        setSelectedAIDeck(deck);
+        setIsLibraryOpen(false);
+        setIsSelectingAIDeck(false);
+        // Start game with selected AI deck
+        const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const aiOpponent = {
+            id: 'ai-opponent-' + Date.now(),
+            name: 'Gemini AI',
+            deck: [...deck.deck],
+            tokens: [...deck.tokens],
+            color: '#3b82f6',
+            type: 'ai' as const
+        };
+        onJoin(code, false, 'online', aiOpponent);
     };
 
     const handleHostLocalTableClick = () => {
@@ -365,7 +415,48 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                             <div className="pt-4 border-t border-gray-700">
 
-                                <div className="flex flex-col md:flex-row gap-4 mb-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                                    <button
+                                        onClick={handlePlayWithAI}
+                                        className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                    >
+                                        <Bot size={20} /> Play vs AI
+                                    </button>
+                                    <button
+                                        onClick={handleHostLocalTableClick}
+                                        className="bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                    >
+                                        <Layers size={20} /> Local Sandbox
+                                    </button>
+                                    <button
+                                        onClick={() => handleCreateRoom(false)}
+                                        disabled={isJoining}
+                                        className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                    >
+                                        {isJoining ? <Loader className="animate-spin" /> : <Play size={20} />}
+                                        {isJoining ? (joinStatus || 'Joining...') : 'Online Game'}
+                                    </button>
+                                </div>
+
+                                {selectedAIDeck && (
+                                    <div className="bg-purple-900/30 border border-purple-500/50 p-3 rounded-lg mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <Bot size={20} className="text-purple-400" />
+                                            <div className="flex-1">
+                                                <p className="text-sm font-bold text-purple-300">AI Opponent Selected</p>
+                                                <p className="text-xs text-purple-400">{selectedAIDeck.name} ({selectedAIDeck.deck.length} cards)</p>
+                                            </div>
+                                            <button
+                                                onClick={() => setSelectedAIDeck(null)}
+                                                className="text-purple-400 hover:text-white"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-3 mb-4">
                                     <button
                                         onClick={handleHostLocalTableClick}
                                         className="flex-1 bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"

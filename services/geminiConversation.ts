@@ -87,7 +87,7 @@ export class GeminiConversationClient {
         console.log("Sending Gemini Conversation Setup message...");
         const setupMessage = {
             setup: {
-                model: "models/gemini-2.5-flash-lite", // Using flash-lite for higher free tier limits
+                model: "models/gemini-2.5-flash", // Using 2.5-flash for audio support
                 generationConfig: {
                     responseModalities: ["AUDIO"], // Audio responses only
                     speechConfig: {
@@ -100,7 +100,7 @@ export class GeminiConversationClient {
                 },
                 systemInstruction: {
                     parts: [{
-                        text: "You are a friendly, conversational AI assistant for a Magic: The Gathering game. Your role is to chat with players, provide encouragement, give brief strategic insights, and answer questions about the game. Keep responses natural and conversational, but brief (1-2 sentences max). You are NOT responsible for game commands or rules - that's handled by the strategy system."
+                        text: "You are a friendly, conversational AI assistant for a Magic: The Gathering game. Your role is to speak to the player with game commentary and engage in conversation. Keep responses natural and conversational, but brief (1-2 sentences max). When you receive a game event or commentary, SPEAK IT ALOUD to the player in a natural way."
                     }]
                 }
             }
@@ -156,7 +156,7 @@ export class GeminiConversationClient {
         // Rate limiting: Don't send events too frequently
         const now = Date.now();
         const timeSinceLastEvent = now - this.lastEventTime;
-        const minEventInterval = 3000; // 3 seconds minimum between events
+        const minEventInterval = 2000; // 2 seconds minimum between events
 
         if (timeSinceLastEvent < minEventInterval) {
             // Skip this event to prevent spamming the AI
@@ -165,13 +165,14 @@ export class GeminiConversationClient {
         }
 
         this.lastEventTime = now;
+        console.log('[Conversation] Sending event:', eventDescription);
 
         const msg = {
             clientContent: {
                 turns: [{
                     role: "user",
                     parts: [{
-                        text: `Game Event: ${eventDescription}`
+                        text: eventDescription
                     }]
                 }],
                 turnComplete: true

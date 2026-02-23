@@ -861,6 +861,31 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [localOpponents]);
 
+    // Initialize AI Manager when magic rules are loaded and game is ready
+    useEffect(() => {
+        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+        if (aiOpponent && geminiApiKey && magicRulesText && !aiManagerRef.current && (isLocal || isHost) && gamePhase !== 'SETUP') {
+            console.log(`[AI] Initializing AI Manager for ${aiOpponent.name} with deck size: ${aiOpponent.deck?.length}`);
+            aiManagerRef.current = new GeminiAIManager({
+                apiKey: geminiApiKey,
+                selectedVoice: aiVoice,
+                playerName: playerName,
+                aiName: aiOpponent.name,
+                aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck || []),
+                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
+                magicRulesMarkdown: magicRulesText,
+                onGameCommand: (cmds) => {
+                    cmds.forEach(cmd => handleAIGameCommand(cmd, aiOpponent.id || ''));
+                },
+                onConnected: () => {
+                    addLog(`${aiOpponent.name} (Gemini AI) Connected!`, 'SYSTEM', aiOpponent.name);
+                },
+                onError: (err) => console.error('AI Manager error:', err)
+            });
+            aiManagerRef.current.connectAll();
+        }
+    }, [magicRulesText, geminiApiKey, localOpponents, gamePhase, initialDeck, playerName, aiVoice, isLocal, isHost]);
+
     const [turnStartTime, setTurnStartTime] = useState(Date.now());
     const [elapsedTime, setElapsedTime] = useState(0);
     const [round, setRound] = useState(1);
@@ -2464,7 +2489,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
             scale: startScale
         });
-    }, [initialDeck, initialGameStarted]);
+    }, [initialDeck, initialGameStarted, magicRulesText, geminiApiKey]);
 
     const requestedAiIds = useRef<Set<string>>(new Set());
 
@@ -2929,27 +2954,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             setCurrentTurnPlayerId(playersList[0].id);
         }
 
-        // Initialize AI Manager if an AI exists and we are the host
-        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
-        if (aiOpponent && geminiApiKey && !aiManagerRef.current && (isLocal || isHost)) {
-            aiManagerRef.current = new GeminiAIManager({
-                apiKey: geminiApiKey,
-                selectedVoice: aiVoice,
-                playerName: playerName,
-                aiName: aiOpponent.name,
-                aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck),
-                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
-                magicRulesMarkdown: magicRulesText,
-                onGameCommand: (cmds) => {
-                    cmds.forEach(cmd => handleAIGameCommand(cmd, aiOpponent.id || ''));
-                },
-                onConnected: () => {
-                    addLog(`${aiOpponent.name} (Gemini AI) Connected!`, 'SYSTEM', aiOpponent.name);
-                },
-                onError: (err) => console.error(err)
-            });
-            aiManagerRef.current.connectAll();
-        }
+        // Note: AI Manager initialization is now handled by a separate useEffect that waits for magicRulesText
 
         addLog("Game Started", "SYSTEM", "Host");
 

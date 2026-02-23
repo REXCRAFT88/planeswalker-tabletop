@@ -148,7 +148,7 @@ function App() {
         setCurrentView(View.LOBBY);
     };
 
-    const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string) => {
+    const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string, aiOpponent?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' }) => {
         // Prevent re-triggering if already in a game-related view (fixes infinite deck-select loop)
         if (currentView === View.GAME || currentView === View.DECK_SELECT ||
             currentView === View.MOBILE_CONTROLLER) return;
@@ -156,19 +156,29 @@ function App() {
         if (code) setRoomId(code);
         setIsGameStarted(!!isStarted);
 
+        // Set AI opponent if provided (for starting game with AI)
+        if (aiOpponent) {
+            setLocalOpponents([aiOpponent]);
+        }
+
         // If the player has more than one saved deck, show the deck picker
         // Skip deck selection on reconnects (isStarted=true) since server restores state
-        if (savedDecks.length > 1 && gameType !== 'local_table' && !isStarted) {
+        // Also skip deck selection if we're playing against AI (auto-load active deck)
+        if (savedDecks.length > 1 && gameType !== 'local_table' && !isStarted && !aiOpponent) {
             setPendingJoin({ code, isStarted, gameType });
             setCurrentView(View.DECK_SELECT);
             return;
         }
 
-        // If exactly 1 deck, auto-load it
-        if (savedDecks.length === 1) {
-            setActiveDeck([...savedDecks[0].deck]);
-            setLobbyTokens([...savedDecks[0].tokens]);
-            setActiveManaRules(savedDecks[0].manaRules || {});
+        // If exactly 1 deck or playing against AI, auto-load it
+        if (savedDecks.length === 1 || aiOpponent) {
+            const deckToLoad = savedDecks.length > 0 ? savedDecks[0] : (activeDeck.length > 0 ? { name: 'Current Deck', deck: activeDeck, tokens: lobbyTokens } : null);
+            if (deckToLoad) {
+                setActiveDeck([...deckToLoad.deck]);
+                setLobbyTokens([...deckToLoad.tokens]);
+                setActiveManaRules(deckToLoad.manaRules || {});
+                setActiveDeckName(deckToLoad.name);
+            }
         }
 
         if (gameType === 'local_table') {

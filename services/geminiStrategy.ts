@@ -41,10 +41,10 @@ export class GeminiStrategyClient {
      * Send game state to AI and get strategic response
      */
     public async sendGameState(gameState: string): Promise<void> {
-        // Rate limiting: Ensure at least 2 seconds between requests to avoid hitting API limits
+        // Rate limiting: Ensure at least 3 seconds between requests to avoid hitting API limits
         const now = Date.now();
         const timeSinceLastRequest = now - this.lastRequestTime;
-        const minRequestInterval = 2000; // 2 seconds minimum between requests
+        const minRequestInterval = 3000; // 3 seconds minimum between requests
 
         if (timeSinceLastRequest < minRequestInterval) {
             const delay = minRequestInterval - timeSinceLastRequest;
@@ -68,8 +68,8 @@ export class GeminiStrategyClient {
         this.lastRequestTime = Date.now();
 
         try {
-            // Using gemini-2.5-flash-lite for higher free tier limits (1,000 requests/day vs 20/day for flash)
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${this.apiKey}`;
+            // Using gemini-1.5-flash for free tier (15 requests per minute)
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
 
             const payload = {
                 contents: [{

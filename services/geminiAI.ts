@@ -25,6 +25,7 @@ export class GeminiAIManager {
     private strategyClient: GeminiStrategyClient | null = null;
     private conversationClient: GeminiConversationClient | null = null;
     private options: AIOptions;
+    private isConversationConnected: boolean = false;
 
     constructor(options: AIOptions) {
         this.options = options;
@@ -137,8 +138,10 @@ If you have instants or flash cards in your hand, you CAN play them on the oppon
 
                     // Bridge commentary to Conversation AI
                     const commentaries = commands.filter(c => c.commentary).map(c => c.commentary);
-                    if (commentaries.length > 0 && this.conversationClient) {
-                        this.conversationClient.sendGameEvent(`Voice the following exactly: "${commentaries.join(' ')}"`);
+                    if (commentaries.length > 0 && this.conversationClient && this.isConversationConnected) {
+                        const commentaryText = commentaries.join(' ');
+                        console.log('Sending commentary to voice:', commentaryText);
+                        this.conversationClient.sendGameEvent(commentaryText);
                     }
                 }
             },
@@ -164,6 +167,11 @@ If you have instants or flash cards in your hand, you CAN play them on the oppon
             },
             onConnected: () => {
                 console.log('Conversation AI connected');
+                this.isConversationConnected = true;
+            },
+            onDisconnected: (reason) => {
+                console.log('Conversation AI disconnected:', reason);
+                this.isConversationConnected = false;
             },
             onError: this.options.onError
         };
@@ -225,6 +233,7 @@ If you have instants or flash cards in your hand, you CAN play them on the oppon
         console.log('Disconnecting AI Manager...');
         this.strategyClient?.disconnect();
         this.conversationClient?.disconnect();
+        this.isConversationConnected = false;
         this.strategyClient = null;
         this.conversationClient = null;
     }
