@@ -1156,6 +1156,35 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         aiManagerRef.current?.stopMic();
     };
 
+    useEffect(() => {
+        if (!geminiApiKey || gamePhase === 'SETUP') return;
+
+        let isShiftDown = false;
+        const onGlobalKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Shift') {
+                if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+                if (!isShiftDown) {
+                    isShiftDown = true;
+                    handleMicDown();
+                }
+            }
+        };
+        const onGlobalKeyUp = (e: KeyboardEvent) => {
+            if (e.key === 'Shift') {
+                isShiftDown = false;
+                handleMicUp();
+            }
+        };
+
+        window.addEventListener('keydown', onGlobalKeyDown);
+        window.addEventListener('keyup', onGlobalKeyUp);
+        return () => {
+            window.removeEventListener('keydown', onGlobalKeyDown);
+            window.removeEventListener('keyup', onGlobalKeyUp);
+        };
+    }, [geminiApiKey, gamePhase]);
+
+
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
 
@@ -2440,6 +2469,40 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         color: opp.color,
                         aiId: opp.id
                     });
+                } else if (opp.type === 'ai' && playersList.find(rp => rp.id === opp.id) && !localPlayerStates.current[opp.id]) {
+                    // Initialize AI state if it was added mid-game
+                    if (gamePhase !== 'SETUP') {
+                        const aiState = createInitialState(opp.id, opp.deck, opp.tokens);
+                        if (aiState.library.length >= 7) {
+                            const aiStartHand = aiState.library.slice(0, 7);
+                            aiState.library = aiState.library.slice(7);
+                            const aiStartTokens = aiState.hand.filter(c => c.isToken);
+                            aiState.hand = [...aiStartHand, ...aiStartTokens];
+                        }
+                        localPlayerStates.current[opp.id] = aiState;
+                        sendAIStateUpdate(opp.id);
+
+                        // If AI manager isn't running, start it
+                        if (!aiManagerRef.current && geminiApiKey) {
+                            aiManagerRef.current = new GeminiAIManager({
+                                apiKey: geminiApiKey,
+                                selectedVoice: aiVoice,
+                                playerName: playerName,
+                                aiName: opp.name,
+                                aiDeckMarkdown: generateDeckMarkdown(opp.deck),
+                                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
+                                magicRulesMarkdown: magicRulesText,
+                                onGameCommand: (cmds) => {
+                                    cmds.forEach(cmd => handleAIGameCommand(cmd, opp.id || ''));
+                                },
+                                onConnected: () => {
+                                    addLog(`${opp.name} (Gemini AI) Connected!`, 'SYSTEM', opp.name);
+                                },
+                                onError: (err) => console.error(err)
+                            });
+                            aiManagerRef.current.connectAll();
+                        }
+                    }
                 }
             });
         }
@@ -6650,8 +6713,8 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     onMouseLeave={handleMicUp}
                     onTouchStart={handleMicDown}
                     onTouchEnd={handleMicUp}
-                    className={`fixed bottom-24 right-4 z-[9000] p-4 rounded-full shadow-2xl transition-all duration-200 ${isMicPressed ? 'bg-red-600 scale-110 shadow-red-500/50' : 'bg-purple-600 hover:bg-purple-500 shadow-purple-500/30'}`}
-                    title="Push to Talk"
+                    className={`fixed bottom-[130px] right-24 z-[9000] p-4 rounded-full shadow-2xl transition-all duration-200 ${isMicPressed ? 'bg-red-600 scale-110 shadow-red-500/50' : 'bg-purple-600 hover:bg-purple-500 shadow-purple-500/30'}`}
+                    title="Push to Talk (Shift)"
                 >
                     <Mic className={`text-white ${isMicPressed ? 'animate-pulse' : ''}`} size={28} />
                 </button>
