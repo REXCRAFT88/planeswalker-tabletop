@@ -10,6 +10,7 @@ export interface GeminiConversationOptions {
     onConnected?: () => void;
     onDisconnected?: (reason: string) => void;
     onError?: (error: any) => void;
+    selectedVoice?: string;
 }
 
 export class GeminiConversationClient {
@@ -25,6 +26,7 @@ export class GeminiConversationClient {
     private processor: ScriptProcessorNode | AudioWorkletNode | null = null;
     private micSource: MediaStreamAudioSourceNode | null = null;
     private isMicActive: boolean = false;
+    private selectedVoice: string;
 
     constructor(options: GeminiConversationOptions) {
         this.apiKey = options.apiKey;
@@ -32,6 +34,7 @@ export class GeminiConversationClient {
         this.onConnected = options.onConnected;
         this.onDisconnected = options.onDisconnected;
         this.onError = options.onError;
+        this.selectedVoice = options.selectedVoice || "Aoede";
     }
 
     /**
@@ -88,7 +91,7 @@ export class GeminiConversationClient {
                     speechConfig: {
                         voiceConfig: {
                             prebuiltVoiceConfig: {
-                                voiceName: "Aoede" // Friendly, conversational voice
+                                voiceName: this.selectedVoice // Configurable voice
                             }
                         }
                     }

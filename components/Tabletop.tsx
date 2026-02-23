@@ -1143,6 +1143,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [aiVoice, setAiVoice] = useState(localStorage.getItem('planeswalker_ai_voice') || 'Aoede');
+    const [isMicPressed, setIsMicPressed] = useState(false);
+
+    const handleMicDown = () => {
+        setIsMicPressed(true);
+        aiManagerRef.current?.startMic();
+    };
+
+    const handleMicUp = () => {
+        setIsMicPressed(false);
+        aiManagerRef.current?.stopMic();
+    };
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -1878,20 +1890,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             let amIHost = hostId ? socket.id === hostId : false;
             if (hostId) setIsHost(amIHost);
 
-            // If we are the host, verify AI players are in the room
-            if (amIHost && localOpponents) {
-                localOpponents.forEach(opp => {
-                    if (opp.type === 'ai' && !roomPlayers.find(rp => rp.id === opp.id)) {
-                        socket.emit('add_ai_player', {
-                            room: roomId,
-                            name: opp.name,
-                            color: opp.color,
-                            aiId: opp.id
-                        });
-                    }
-                });
-            }
-
             // Only remove board objects for players who have truly left (not just disconnected)
             // Disconnected players keep their objects so they can reconnect
             if (leftPlayers.length > 0 && amIHost && gamePhaseRef.current !== 'SETUP') {
@@ -2153,15 +2151,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setTurnStep(data.turnStep);
             }
             else if (action === 'UPDATE_LIFE') {
-                if (sender && sender.id !== socket.id) {
-                    setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
+                const targetId = data.proxyId || (sender ? sender.id : null);
+                if (targetId && targetId !== socket.id) {
+                    setOpponentsLife(prev => ({ ...prev, [targetId]: data.life }));
                 }
             }
             else if (action === 'UPDATE_COUNTS') {
-                if (sender && sender.id !== socket.id) {
+                const effectiveSenderId = data.proxyId || (sender ? sender.id : null);
+                if (effectiveSenderId && effectiveSenderId !== socket.id) {
                     setOpponentsCounts(prev => ({
                         ...prev,
-                        [sender.id]: {
+                        [effectiveSenderId]: {
                             library: data.library,
                             graveyard: data.graveyard,
                             exile: data.exile,
@@ -2170,7 +2170,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         }
                     }));
                     if (data.commanders) {
-                        setOpponentsCommanders(prev => ({ ...prev, [sender.id]: data.commanders }));
+                        setOpponentsCommanders(prev => ({ ...prev, [effectiveSenderId]: data.commanders }));
                     }
                 }
             }
@@ -2427,6 +2427,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
     }, [initialDeck, initialGameStarted]);
 
+    const requestedAiIds = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (!isLocal && isHost && localOpponents && playersList) {
+            localOpponents.forEach(opp => {
+                if (opp.type === 'ai' && !playersList.find(rp => rp.id === opp.id) && !requestedAiIds.current.has(opp.id)) {
+                    requestedAiIds.current.add(opp.id);
+                    socket.emit('add_ai_player', {
+                        room: roomId,
+                        name: opp.name,
+                        color: opp.color,
+                        aiId: opp.id
+                    });
+                }
+            });
+        }
+    }, [isLocal, isHost, localOpponents, playersList, roomId]);
+
     // Auto-center opponent view
     useEffect(() => {
         if (isOpponentViewOpen) {
@@ -2490,6 +2508,34 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         sendHandUpdate(currentId, hand, gamePhase, mulliganCount);
     }, [hand, gamePhase, mulliganCount, isLocal, mySeatIndex, playersList]);
 
+    const sendAIStateUpdate = (aiPlayerId: string) => {
+        const state = localPlayerStates.current[aiPlayerId];
+        if (!state) return;
+
+        socket.emit('game_action', {
+            room: roomId,
+            action: 'UPDATE_COUNTS',
+            data: {
+                proxyId: aiPlayerId,
+                library: state.library.length,
+                graveyard: state.graveyard.length,
+                exile: state.exile.length,
+                hand: state.hand.filter(c => !c.isToken).length,
+                command: state.commandZone.length,
+                commanders: state.commandZone
+            }
+        });
+
+        socket.emit('game_action', {
+            room: roomId,
+            action: 'UPDATE_LIFE',
+            data: {
+                proxyId: aiPlayerId,
+                life: state.life
+            }
+        });
+    };
+
     const handleAIGameCommand = (cmd: GameCommand, aiPlayerId: string) => {
         console.log(`[Gemini AI] executing command: ${cmd.action}`, cmd.args);
         const aiName = localOpponents?.find(o => o.id === aiPlayerId)?.name || 'AI';
@@ -2507,7 +2553,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             drawn++;
                         }
                     }
-                    sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+                    sendAIStateUpdate(aiPlayerId);
                     addLog(`drew ${drawn} card(s)`, 'ACTION', aiName);
                     break;
                 }
@@ -2521,7 +2567,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         if (idx !== -1) {
                             const card = state.hand[idx];
                             state.hand.splice(idx, 1);
-                            sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+                            sendAIStateUpdate(aiPlayerId);
 
                             const seatIdx = playersList.findIndex(p => p.id === aiPlayerId);
                             const mat = layout[seatIdx] || { x: 0, y: 0, rot: 0 };
@@ -2580,7 +2626,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 }
                 case 'change_life': {
                     const { amount } = cmd.args;
-                    socket.emit('game_action', { room: roomId, action: 'CHANGE_LIFE', data: { playerId: aiPlayerId, amount: amount } });
+                    const state = localPlayerStates.current[aiPlayerId];
+                    if (state) {
+                        state.life += amount;
+                        addLog(`changed life by ${amount}`, 'ACTION', aiName);
+                        sendAIStateUpdate(aiPlayerId);
+                    }
                     break;
                 }
                 case 'mulligan': {
@@ -2598,7 +2649,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             state.hand = [];
                             state.mulliganCount++;
                             for (let i = 0; i < 7; i++) state.hand.push(state.library.shift()!);
-                            sendHandUpdate(aiPlayerId, state.hand, gamePhase, state.mulliganCount);
+                            sendAIStateUpdate(aiPlayerId);
                         }
                     }
                     break;
@@ -2787,6 +2838,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         if (aiOpponent && geminiApiKey && !aiManagerRef.current && (isLocal || isHost)) {
             aiManagerRef.current = new GeminiAIManager({
                 apiKey: geminiApiKey,
+                selectedVoice: aiVoice,
                 playerName: playerName,
                 aiName: aiOpponent.name,
                 aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck),
@@ -4935,7 +4987,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
                                     <div className="flex gap-2">
-                                        {localOpponents.filter(o => o.type === 'ai').length === 0 && onAddAIRequest && (
+                                        {!isLocal && localOpponents.filter(o => o.type === 'ai').length === 0 && onAddAIRequest && (
                                             <button
                                                 onClick={() => {
                                                     if (!geminiApiKey) {
@@ -6540,6 +6592,32 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                 </label>
                             </div>
 
+                            {geminiApiKey && (
+                                <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
+                                    <label className="flex justify-between items-center cursor-pointer">
+                                        <div>
+                                            <h4 className="font-bold text-white flex items-center gap-2"><Mic size={16} className="text-purple-400" /> AI Voice Profile</h4>
+                                            <p className="text-xs text-gray-400">Select the Gemini voice persona. (Changes apply on next game setup).</p>
+                                        </div>
+                                        <select
+                                            value={aiVoice}
+                                            onChange={(e) => {
+                                                setAiVoice(e.target.value);
+                                                localStorage.setItem('planeswalker_ai_voice', e.target.value);
+                                            }}
+                                            className="bg-gray-900 border border-gray-600 rounded p-1 text-white text-sm outline-none cursor-pointer focus:ring-1 focus:ring-purple-500"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <option value="Aoede">Aoede</option>
+                                            <option value="Puck">Puck</option>
+                                            <option value="Charon">Charon</option>
+                                            <option value="Kore">Kore</option>
+                                            <option value="Fenrir">Fenrir</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            )}
+
                             <button
                                 onClick={() => { setShowShortcuts(true); setShowSettingsModal(false); }}
                                 className="w-full bg-gray-700/50 hover:bg-gray-700 p-4 rounded-lg border border-gray-600 flex justify-between items-center transition-colors group"
@@ -6562,6 +6640,20 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     title="Exit Full Screen"
                 >
                     <Minimize size={24} />
+                </button>
+            )}
+
+            {geminiApiKey && localOpponents?.some(o => o.type === 'ai') && gamePhase !== 'SETUP' && (
+                <button
+                    onMouseDown={handleMicDown}
+                    onMouseUp={handleMicUp}
+                    onMouseLeave={handleMicUp}
+                    onTouchStart={handleMicDown}
+                    onTouchEnd={handleMicUp}
+                    className={`fixed bottom-24 right-4 z-[9000] p-4 rounded-full shadow-2xl transition-all duration-200 ${isMicPressed ? 'bg-red-600 scale-110 shadow-red-500/50' : 'bg-purple-600 hover:bg-purple-500 shadow-purple-500/30'}`}
+                    title="Push to Talk"
+                >
+                    <Mic className={`text-white ${isMicPressed ? 'animate-pulse' : ''}`} size={28} />
                 </button>
             )}
         </div>

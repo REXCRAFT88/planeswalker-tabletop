@@ -18,6 +18,7 @@ export interface AIOptions {
     onGameCommand: (commands: GameCommand[]) => void;
     onConnected?: () => void;
     onError?: (error: any) => void;
+    selectedVoice?: string;
 }
 
 export class GeminiAIManager {
@@ -156,6 +157,7 @@ If you have instants or flash cards in your hand, you CAN play them on the oppon
     private initializeConversation() {
         const conversationOptions: GeminiConversationOptions = {
             apiKey: this.options.apiKey,
+            selectedVoice: this.options.selectedVoice,
             onAudioOutput: (audioData) => {
                 // Audio responses are played by the conversation client
                 console.log('Conversation Audio received:', audioData.length, 'bytes');

@@ -193,19 +193,12 @@ function App() {
 
 
 
-    const handleHostVsAI = (aiDeck: { name: string, deck: CardData[], tokens: CardData[] }) => {
+    const handleHostLocalTable = () => {
         const code = crypto.randomUUID().slice(0, 6).toUpperCase();
         setRoomId(code);
         setIsGameStarted(false);
-        setIsLocalTableHost(false);
-        setLocalOpponents([{
-            id: 'ai-opponent-1',
-            name: 'Gemini',
-            deck: aiDeck.deck,
-            tokens: aiDeck.tokens,
-            color: '#3b82f6',
-            type: 'ai'
-        }]);
+        setIsLocalTableHost(true);
+        setLocalOpponents([]);
         setCurrentView(View.GAME);
     };
 
@@ -263,7 +256,7 @@ function App() {
                     onSaveDeck={handleSaveDeck}
                     onDeleteDeck={handleDeleteDeck}
                     onLoadDeck={handleDeckReady}
-                    onHostVsAI={handleHostVsAI}
+                    onHostLocalTable={handleHostLocalTable}
                     geminiApiKey={geminiApiKey}
                     setGeminiApiKey={setGeminiApiKey}
                 />

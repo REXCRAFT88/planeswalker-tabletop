@@ -15,7 +15,7 @@ interface LobbyProps {
     playerSleeve: string;
     setPlayerSleeve: (color: string) => void;
     onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
-    onHostVsAI?: (deck: SavedDeck) => void;
+    onHostLocalTable?: () => void;
     onImportDeck: () => void;
     savedDeckCount: number;
     currentTokens: CardData[];
@@ -35,7 +35,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     onJoin, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
     savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck,
-    onHostVsAI,
+    onHostLocalTable,
     geminiApiKey, setGeminiApiKey
 }) => {
 
@@ -200,18 +200,12 @@ export const Lobby: React.FC<LobbyProps> = ({
         joinRoom(code);
     };
 
-    const handleHostVsAIClick = () => {
-        if (!geminiApiKey) {
-            alert("Please provide a Gemini API Key in the field below to play against the AI.");
-            return;
-        }
+    const handleHostLocalTableClick = () => {
         if (savedDeckCount === 0) {
             alert("Please import a deck first!");
             return;
         }
-
-        setIsSelectingAIDeck(true);
-        setIsLibraryOpen(true);
+        onHostLocalTable?.();
     };
 
     const handleJoinRoom = () => {
@@ -373,10 +367,10 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                                 <div className="flex flex-col md:flex-row gap-4 mb-4">
                                     <button
-                                        onClick={handleHostVsAIClick}
-                                        className="flex-1 bg-purple-700 hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                        onClick={handleHostLocalTableClick}
+                                        className="flex-1 bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                                     >
-                                        <Zap size={20} /> Host Game vs AI
+                                        <Layers size={20} /> Local Sandbox
                                     </button>
                                     <button
                                         onClick={handleCreateRoom}
@@ -515,26 +509,18 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                         <h4 className="font-bold text-white text-sm sm:text-base truncate">{deck.name}</h4>
                                                         <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
                                                         <div className="flex gap-2 flex-wrap">
-                                                            {isSelectingAIDeck ? (
-                                                                <button onClick={() => { setIsSelectingAIDeck(false); setIsLibraryOpen(false); onHostVsAI?.(deck); }} className="px-3 py-2 sm:py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded flex items-center gap-1 w-full justify-center">
-                                                                    <Zap size={12} /> Select for AI
-                                                                </button>
-                                                            ) : (
-                                                                <>
-                                                                    <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                        <Play size={12} /> Load
-                                                                    </button>
-                                                                    <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                        <Edit3 size={12} /> Edit
-                                                                    </button>
-                                                                    <button onClick={() => handleExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                        <Download size={12} /> Export
-                                                                    </button>
-                                                                    <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
-                                                                        <Trash2 size={12} /> Delete
-                                                                    </button>
-                                                                </>
-                                                            )}
+                                                            <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                <Play size={12} /> Load
+                                                            </button>
+                                                            <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                <Edit3 size={12} /> Edit
+                                                            </button>
+                                                            <button onClick={() => handleExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                                <Download size={12} /> Export
+                                                            </button>
+                                                            <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
+                                                                <Trash2 size={12} /> Delete
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </div>
