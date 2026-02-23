@@ -176,7 +176,7 @@ function App() {
             if (deckToLoad) {
                 setActiveDeck([...deckToLoad.deck]);
                 setLobbyTokens([...deckToLoad.tokens]);
-                setActiveManaRules(deckToLoad.manaRules || {});
+                setActiveManaRules('manaRules' in deckToLoad ? (deckToLoad.manaRules || {}) : {});
                 setActiveDeckName(deckToLoad.name);
             }
         }

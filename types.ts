@@ -118,6 +118,7 @@ export interface Player {
   graveyard: CardData[];
   exile: CardData[];
   commandZone: CardData[];
+  isAi?: boolean;
 }
 
 export interface PlayerStats {

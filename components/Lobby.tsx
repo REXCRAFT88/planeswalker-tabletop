@@ -464,7 +464,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         <Layers size={20} /> Local Sandbox
                                     </button>
                                     <button
-                                        onClick={handleCreateRoom}
+                                        onClick={() => handleCreateRoom()}
                                         disabled={isJoining}
                                         className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                                     >

@@ -884,7 +884,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             });
             aiManagerRef.current.connectAll();
         }
-    }, [magicRulesText, geminiApiKey, localOpponents, gamePhase, initialDeck, playerName, aiVoice, isLocal, isHost]);
+    }, [magicRulesText, geminiApiKey, localOpponents, gamePhase, initialDeck, playerName, aiVoice, isLocal]);
 
     const [turnStartTime, setTurnStartTime] = useState(Date.now());
     const [elapsedTime, setElapsedTime] = useState(0);
