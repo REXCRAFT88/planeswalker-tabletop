@@ -6,7 +6,9 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(curl -I https://render.com/deploy/REXCRAFT88/planeswalker-tabletop)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(cd:*)",
+      "Bash(echo Node not found in PATH:*)"
     ]
   }
 }
