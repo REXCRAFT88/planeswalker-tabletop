@@ -15,7 +15,7 @@ export interface AIOptions {
     aiDeckMarkdown: string;
     opponentDeckMarkdown: string;
     magicRulesMarkdown: string;
-    onGameCommand: (command: GameCommand) => void;
+    onGameCommand: (commands: GameCommand[]) => void;
     onConnected?: () => void;
     onError?: (error: any) => void;
 }
@@ -41,6 +41,9 @@ Your job is to use your deck to win by playing strictly by the rules.
 You are an opponent to the other player. Do not reveal or tell them your cards or plan unless you find it advantageous to winning.
 You should always announce the actions you are doing and try to be friendly and helpful to your opponent if they are confused or have questions.
 
+IMPORTANT: You are playing in REAL TIME. We will send you updates on the opponent's turn. YOU HAVE PRIORITY to cast instants and activate abilities in response to their actions!
+If you are prompted during the opponent's turn and wish to take NO ACTION, use the "no_action" command to pass priority!
+
 You have been provided with the database for the Magic rules, as well as your deck and your opponent's deck.
 Use these to make sure you are playing by the rules and not making illegal moves or actions.
 You can also use this to try to plan ahead and strategize.
@@ -62,14 +65,18 @@ ${this.options.opponentDeckMarkdown}
 
 ### Interacting with the Game Board (Commands)
 You also have a list of commands. These are how you interact with the board and get it to do your actions.
-Whenever you want to perform a physical action on the board, you MUST output a JSON code block in your response using the following format.
-You can output multiple JSON code blocks if you are doing multiple actions in a sequence.
+Whenever you want to perform a physical action on the board, you MUST output a JSON code block in your response. 
+You should output an ARRAY of these action objects if you are doing multiple things.
+Include a "commentary" string in your action object to provide a dramatic or descriptive vocalization of that action to the player!
 
 \`\`\`json
-{
-  "action": "ACTION_TYPE",
-  "args": { ... }
-}
+[
+  {
+    "action": "ACTION_TYPE",
+    "args": { ... },
+    "commentary": "Ah, you thought you could attack me? I play this!"
+  }
+]
 \`\`\`
 
 **Available Actions:**
@@ -101,23 +108,37 @@ You can output multiple JSON code blocks if you are doing multiple actions in a 
 
 6. **Mulligan Decision**: (Only used at the start of the game when prompted).
 \`\`\`json
-{ "action": "mulligan", "args": { "keep": true } }
+[ { "action": "mulligan", "args": { "keep": true } } ]
 \`\`\`
+
+7. **Pass Priority / No Action**: (Crucial for when you are prompted during the opponent's turn but do not wish to cast an instant).
+\`\`\`json
+[ { "action": "no_action", "args": {} } ]
+\`\`\`
+
+### Persona Bridge
+Whatever text you write inside the "commentary" field will be immediately sent to your Conversation Brain, which will vocalize it out loud to the player! Use this to talk trash, explain your moves, or react to the game!
 
 ### Game State & Logs
 You will be fed with the game logs continuously. This is simply so that you know what is happening during the game, what the other player is doing, and to confirm if you did your actions correctly.
-At the start of your turn, you will be given a summary of your hand, the board state, and the opponent's state.
-When it is your turn, tell the player what you are doing, then use the JSON commands to execute it!`;
+At the start of your turn, or when you RECEIVE PRIORITY on an opponent's turn, you will be given a summary of the board state.
+If you have instants or flash cards in your hand, you CAN play them on the opponent's turn!`;
 
         const strategyOptions: GeminiStrategyOptions = {
             apiKey: this.options.apiKey,
             systemInstruction: systemInstruction,
             onText: (text) => {
                 // Extract game commands from AI response
-                const command = GeminiStrategyClient.extractCommand(text);
-                if (command) {
-                    console.log('Game Command:', command);
-                    this.options.onGameCommand(command);
+                const commands = GeminiStrategyClient.extractCommands(text);
+                if (commands && commands.length > 0) {
+                    console.log('Game Commands:', commands);
+                    this.options.onGameCommand(commands);
+
+                    // Bridge commentary to Conversation AI
+                    const commentaries = commands.filter(c => c.commentary).map(c => c.commentary);
+                    if (commentaries.length > 0 && this.conversationClient) {
+                        this.conversationClient.sendGameEvent(`Voice the following exactly: "${commentaries.join(' ')}"`);
+                    }
                 }
             },
             onConnected: () => {

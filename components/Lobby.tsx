@@ -201,6 +201,10 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleHostVsAIClick = () => {
+        if (!geminiApiKey) {
+            alert("Please provide a Gemini API Key in the field below to play against the AI.");
+            return;
+        }
         if (savedDeckCount === 0) {
             alert("Please import a deck first!");
             return;

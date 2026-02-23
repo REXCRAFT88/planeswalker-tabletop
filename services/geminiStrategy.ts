@@ -13,8 +13,9 @@ export interface GeminiStrategyOptions {
 }
 
 export interface GameCommand {
-    action: 'draw_card' | 'move_card' | 'tap_untap' | 'change_life' | 'add_counter' | 'mulligan' | 'pass_turn';
+    action: 'draw_card' | 'move_card' | 'tap_untap' | 'change_life' | 'add_counter' | 'mulligan' | 'pass_turn' | 'no_action';
     args: any;
+    commentary?: string;
 }
 
 export class GeminiStrategyClient {
@@ -85,19 +86,26 @@ export class GeminiStrategyClient {
     }
 
     /**
-     * Extract JSON command from AI response
+     * Extract JSON commands from AI response
      */
-    public static extractCommand(response: string): GameCommand | null {
-        // Try to find JSON in markdown code blocks
-        const jsonMatch = response.match(/```json\n?([\s\S]*?)\n?```/i);
-        if (jsonMatch && jsonMatch[1]) {
+    public static extractCommands(response: string): GameCommand[] {
+        const commands: GameCommand[] = [];
+        // Match all json blocks
+        const regex = /```json\n?([\s\S]*?)\n?```/gi;
+        let match;
+        while ((match = regex.exec(response)) !== null) {
             try {
-                return JSON.parse(jsonMatch[1]);
+                const parsed = JSON.parse(match[1]);
+                if (Array.isArray(parsed)) {
+                    commands.push(...parsed);
+                } else {
+                    commands.push(parsed);
+                }
             } catch (e) {
-                console.warn('Failed to parse JSON command:', e);
+                console.warn('Failed to parse JSON command block:', e);
             }
         }
-        return null;
+        return commands;
     }
 
     public disconnect() {

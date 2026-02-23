@@ -99,6 +99,7 @@ function App() {
 
     // API Keys
     const [geminiApiKey, setGeminiApiKey] = useState<string>(() => loadState('geminiApiKey', ''));
+    const [isAddingAIToExistingGame, setIsAddingAIToExistingGame] = useState(false);
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -294,6 +295,10 @@ function App() {
                     manaRules={activeManaRules}
                     localOpponents={localOpponents}
                     geminiApiKey={geminiApiKey}
+                    onAddAIRequest={() => {
+                        setIsAddingAIToExistingGame(true);
+                        setCurrentView(View.DECK_SELECT);
+                    }}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}
@@ -302,9 +307,9 @@ function App() {
                 <div className="w-full h-full flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in">
                     <div className="w-full max-w-3xl">
                         <h1 className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 text-center mb-2">
-                            Choose Your Deck
+                            {isAddingAIToExistingGame ? "Select AI Opponent's Deck" : "Choose Your Deck"}
                         </h1>
-                        <p className="text-gray-400 text-center mb-6">Select which deck you want to play with in this game.</p>
+                        <p className="text-gray-400 text-center mb-6">{isAddingAIToExistingGame ? "Select which deck the AI will play with." : "Select which deck you want to play with in this game."}</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto custom-scrollbar p-1">
                             {savedDecks.map(deck => {
                                 const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
@@ -326,7 +331,15 @@ function App() {
                             })}
                         </div>
                         <button
-                            onClick={() => { setPendingJoin(null); setCurrentView(View.LOBBY); }}
+                            onClick={() => {
+                                if (isAddingAIToExistingGame) {
+                                    setIsAddingAIToExistingGame(false);
+                                    setCurrentView(View.GAME);
+                                } else {
+                                    setPendingJoin(null);
+                                    setCurrentView(View.LOBBY);
+                                }
+                            }}
                             className="mt-6 w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold transition-colors"
                         >
                             Cancel

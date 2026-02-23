@@ -33,6 +33,7 @@ interface TabletopProps {
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
     manaRules?: Record<string, ManaRule>;
     geminiApiKey?: string;
+    onAddAIRequest?: () => void;
     onExit: () => void;
 }
 
@@ -835,7 +836,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onAddAIRequest, onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -849,13 +850,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [magicRulesText, setMagicRulesText] = useState<string>('');
 
     useEffect(() => {
-        if (isLocal && localOpponents?.some(o => o.type === 'ai')) {
+        if (localOpponents?.some(o => o.type === 'ai')) {
             fetch('/magic_rules_context.md')
                 .then(r => r.text())
                 .then(text => setMagicRulesText(text))
                 .catch(err => console.error("Failed to load magic rules:", err));
         }
-    }, [isLocal, localOpponents]);
+    }, [localOpponents]);
 
     const [turnStartTime, setTurnStartTime] = useState(Date.now());
     const [elapsedTime, setElapsedTime] = useState(0);
@@ -2556,6 +2557,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     socket.emit('game_action', { room: roomId, action: 'END_TURN', data: { playerId: aiPlayerId } });
                     break;
                 }
+                case 'no_action': {
+                    console.log(`[Gemini AI] Passed priority (No Action).`);
+                    break;
+                }
                 case 'tap_untap': {
                     const { cardName } = cmd.args;
                     // Find object on board belonging to ai
@@ -2617,15 +2622,47 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [gamePhase, localOpponents, playersList]);
 
-    // AI Conversational Hook
+    // AI Conversational & Priority Interrupt Hook
     useEffect(() => {
-        if (!aiManagerRef.current || logs.length === 0) return;
+        if (!aiManagerRef.current || logs.length === 0 || gamePhase !== 'PLAYING') return;
         const lastLog = logs[0];
         const aiOpponent = localOpponents?.find(o => o.type === 'ai');
+
         if (aiOpponent && lastLog.playerName !== aiOpponent.name && lastLog.type === 'ACTION') {
+            // Conversational reaction to player action
             aiManagerRef.current.sendGameEvent(`Player ${lastLog.playerName} just did the following: ${lastLog.message}`);
+
+            // Priority Interrupt Check (Only ask for response if it's NOT the AI's turn)
+            if (currentTurnPlayerId !== aiOpponent.id) {
+                const aiState = localPlayerStates.current[aiOpponent.id];
+                const p1Id = playersList[0].id;
+                const p1State = localPlayerStates.current[p1Id];
+
+                const getBoard = (pid: string) => {
+                    const objs = boardObjects.filter(o => o.controllerId === pid);
+                    if (objs.length === 0) return "Board is empty.";
+                    return `Board: ${objs.map(o => `${o.quantity}x ${o.cardData.name} ${o.rotation === 90 ? '(Tapped)' : '(Untapped)'}`).join(', ')}`;
+                };
+
+                const prompt = `PRIORITY INTERRUPT! Player ${lastLog.playerName} just performed an action: "${lastLog.message}". 
+Do you want to respond by casting an Instant, playing a Flash card, or activating an ability?
+
+Your Status:
+Life: ${aiState?.life || 40}
+Hand: ${aiState?.hand.length || 0} cards. ${(aiState?.hand || []).map(c => c.name).join(', ')}
+${getBoard(aiOpponent.id)}
+
+Opponent Status (${playersList[0].name}):
+Life: ${p1State?.life || 40}
+${getBoard(p1Id)}
+
+Respond with a JSON block containing the action you want to take. If you do not want to respond, execute a single "no_action" action!`;
+
+                console.log("Sending Priority Interrupt to AI...");
+                aiManagerRef.current.sendGameState(prompt);
+            }
         }
-    }, [logs, localOpponents]);
+    }, [logs, localOpponents, gamePhase, currentTurnPlayerId, boardObjects, playersList]);
 
     // AI Strategy Hook
     useEffect(() => {
@@ -2755,8 +2792,8 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                 aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck),
                 opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
                 magicRulesMarkdown: magicRulesText,
-                onGameCommand: (cmd) => {
-                    handleAIGameCommand(cmd, aiOpponent.id || '');
+                onGameCommand: (cmds) => {
+                    cmds.forEach(cmd => handleAIGameCommand(cmd, aiOpponent.id || ''));
                 },
                 onConnected: () => {
                     addLog(`${aiOpponent.name} (Gemini AI) Connected!`, 'SYSTEM', aiOpponent.name);
@@ -4897,9 +4934,25 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4 flex justify-between items-center">
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
-                                    <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                        <Shuffle size={12} /> Shuffle Order
-                                    </button>
+                                    <div className="flex gap-2">
+                                        {localOpponents.filter(o => o.type === 'ai').length === 0 && onAddAIRequest && (
+                                            <button
+                                                onClick={() => {
+                                                    if (!geminiApiKey) {
+                                                        alert("Please configure a Gemini API Key in the Lobby first to use the AI.");
+                                                        return;
+                                                    }
+                                                    onAddAIRequest();
+                                                }}
+                                                className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors"
+                                            >
+                                                <Zap size={12} /> Add AI
+                                            </button>
+                                        )}
+                                        <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                            <Shuffle size={12} /> Shuffle Order
+                                        </button>
+                                    </div>
                                 )}
                             </h3>
                             <div className="space-y-2">
