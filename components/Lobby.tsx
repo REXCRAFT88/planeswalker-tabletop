@@ -581,211 +581,209 @@ export const Lobby: React.FC<LobbyProps> = ({
             {showCustomizeModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                    <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                        <h3 className="font-bold text-white flex items-center gap-2"><Settings className="text-teal-500" /> Customize Mat & Sleeves</h3>
-                        <button onClick={() => setShowCustomizeModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
-                    </div>
+                        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                            <h3 className="font-bold text-white flex items-center gap-2"><Settings className="text-teal-500" /> Customize Mat & Sleeves</h3>
+                            <button onClick={() => setShowCustomizeModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                        </div>
 
-                    <div className="flex-1 overflow-y-auto flex flex-col md:flex-row gap-6 p-6">
-                        {/* Mat Customization */}
-                        <div className="flex-1 flex flex-col gap-4">
-                            <h4 className="text-lg font-bold text-white">Playmat</h4>
-                            <div className="relative aspect-[16/10] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
-                                {matPreviewUrl ? (
-                                    <div
-                                        className="w-full h-full overflow-hidden cursor-move"
-                                        onWheel={handleMatWheel}
-                                        onMouseDown={handleMatMouseDown}
-                                        onMouseMove={handleMatMouseMove}
-                                        onMouseUp={handleMatMouseUp}
-                                        onMouseLeave={handleMatMouseUp}
-                                    >
-                                        <img
-                                            ref={matImageRef}
-                                            src={matPreviewUrl}
-                                            alt="Mat Preview"
-                                            className="absolute top-0 left-0 object-cover transition-transform"
-                                            style={{
-                                                width: '100%',
-                                                height: '100%',
-                                                transform: `translate(${matTransform.x}px, ${matTransform.y}px) scale(${matTransform.scale})`,
-                                                transformOrigin: 'center center'
-                                            }}
-                                            onError={() => setMatPreviewUrl('')}
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-600">
-                                        <div className="text-center">
-                                            <Image size={48} className="mx-auto mb-2 opacity-50" />
-                                            <p className="text-sm">No custom mat set</p>
+                        <div className="flex-1 overflow-y-auto flex flex-col md:flex-row gap-6 p-6">
+                            {/* Mat Customization */}
+                            <div className="flex-1 flex flex-col gap-4">
+                                <h4 className="text-lg font-bold text-white">Playmat</h4>
+                                <div className="relative aspect-[16/10] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                                    {matPreviewUrl ? (
+                                        <div
+                                            className="w-full h-full overflow-hidden cursor-move"
+                                            onWheel={handleMatWheel}
+                                            onMouseDown={handleMatMouseDown}
+                                            onMouseMove={handleMatMouseMove}
+                                            onMouseUp={handleMatMouseUp}
+                                            onMouseLeave={handleMatMouseUp}
+                                        >
+                                            <img
+                                                ref={matImageRef}
+                                                src={matPreviewUrl}
+                                                alt="Mat Preview"
+                                                className="absolute top-0 left-0 object-cover transition-transform"
+                                                style={{
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    transform: `translate(${matTransform.x}px, ${matTransform.y}px) scale(${matTransform.scale})`,
+                                                    transformOrigin: 'center center'
+                                                }}
+                                                onError={() => setMatPreviewUrl('')}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                            <div className="text-center">
+                                                <Image size={48} className="mx-auto mb-2 opacity-50" />
+                                                <p className="text-sm">No custom mat set</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={resetMatTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
+                                            <RefreshCcw size={14} />
+                                        </button>
+                                        <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
+                                            {Math.round(matTransform.scale * 100)}%
                                         </div>
                                     </div>
-                                )}
-                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={resetMatTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
-                                        <RefreshCcw size={14} />
-                                    </button>
-                                    <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
-                                        {Math.round(matTransform.scale * 100)}%
+                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <button
+                                            onClick={() => {
+                                                const input = document.createElement('input');
+                                                input.type = 'file';
+                                                input.accept = 'image/*';
+                                                input.onchange = (e) => {
+                                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                                    if (file) {
+                                                        const reader = new FileReader();
+                                                        reader.onload = (e) => setMatPreviewUrl(e.target?.result as string);
+                                                        reader.readAsDataURL(file);
+                                                    }
+                                                };
+                                                input.click();
+                                            }}
+                                            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                        >
+                                            <Image size={16} /> Upload Image
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Or paste image URL..."
+                                        value={matPreviewUrl || customMatUrl}
+                                        onChange={(e) => setMatPreviewUrl(e.target.value)}
+                                        className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                                    />
                                     <button
                                         onClick={() => {
-                                            const input = document.createElement('input');
-                                            input.type = 'file';
-                                            input.accept = 'image/*';
-                                            input.onchange = (e) => {
-                                                const file = (e.target as HTMLInputElement).files?.[0];
-                                                if (file) {
-                                                    const reader = new FileReader();
-                                                    reader.onload = (e) => setMatPreviewUrl(e.target?.result as string);
-                                                    reader.readAsDataURL(file);
-                                                }
-                                            };
-                                            input.click();
+                                            setCustomMatUrl(matPreviewUrl);
+                                            setMatPreviewUrl('');
                                         }}
-                                        className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                        disabled={!matPreviewUrl}
+                                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        <Image size={16} /> Upload Image
+                                        <Check size={16} />
                                     </button>
                                 </div>
+                                {customMatUrl && (
+                                    <div>
+                                        <button
+                                            onClick={() => setCustomMatUrl('')}
+                                            className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
+                                        >
+                                            <Trash2 size={16} className="inline mr-2" /> Remove Custom Mat
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="Or paste image URL..."
-                                    value={matPreviewUrl || customMatUrl}
-                                    onChange={(e) => setMatPreviewUrl(e.target.value)}
-                                    className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                                />
-                                <button
-                                    onClick={() => {
-                                        setCustomMatUrl(matPreviewUrl);
-                                        setMatPreviewUrl('');
-                                    }}
-                                    disabled={!matPreviewUrl}
-                                    className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <Check size={16} />
-                                </button>
-                            </div>
-                            {customMatUrl && (
-                                <div>
+
+                            {/* Sleeve Customization */}
+                            <div className="flex-1 flex flex-col gap-4">
+                                <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
+                                <div className="relative aspect-[2.5/3.5] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                                    {sleevePreviewUrl ? (
+                                        <div
+                                            className="w-full h-full overflow-hidden cursor-move"
+                                            onWheel={handleSleeveWheel}
+                                            onMouseDown={handleSleeveMouseDown}
+                                            onMouseMove={handleSleeveMouseMove}
+                                            onMouseUp={handleSleeveMouseUp}
+                                            onMouseLeave={handleSleeveMouseUp}
+                                        >
+                                            <img
+                                                ref={sleeveImageRef}
+                                                src={sleevePreviewUrl}
+                                                alt="Sleeve Preview"
+                                                className="absolute top-0 left-0 object-cover transition-transform"
+                                                style={{
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale})`,
+                                                    transformOrigin: 'center center'
+                                                }}
+                                                onError={() => setSleevePreviewUrl('')}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: playerSleeve }}>
+                                            <div className="text-center">
+                                                <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-2">
+                                                    <div className="w-12 h-12 rounded-full border-2 border-white/20"></div>
+                                                </div>
+                                                <p className="text-sm text-white/60">Current: {playerSleeve}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
+                                            <RefreshCcw size={14} />
+                                        </button>
+                                        <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
+                                            {Math.round(sleeveTransform.scale * 100)}%
+                                        </div>
+                                    </div>
+                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <button
+                                            onClick={() => {
+                                                const input = document.createElement('input');
+                                                input.type = 'file';
+                                                input.accept = 'image/*';
+                                                input.onchange = (e) => {
+                                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                                    if (file) {
+                                                        const reader = new FileReader();
+                                                        reader.onload = (e) => setSleevePreviewUrl(e.target?.result as string);
+                                                        reader.readAsDataURL(file);
+                                                    }
+                                                };
+                                                input.click();
+                                            }}
+                                            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                        >
+                                            <Image size={16} /> Upload Image
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Or paste image URL..."
+                                        value={sleevePreviewUrl || customSleeveUrl}
+                                        onChange={(e) => setSleevePreviewUrl(e.target.value)}
+                                        className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                                    />
                                     <button
-                                        onClick={() => setCustomMatUrl('')}
+                                        onClick={() => {
+                                            setCustomSleeveUrl(sleevePreviewUrl);
+                                            setSleevePreviewUrl('');
+                                        }}
+                                        disabled={!sleevePreviewUrl}
+                                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <Check size={16} />
+                                    </button>
+                                </div>
+                                {customSleeveUrl && (
+                                    <button
+                                        onClick={() => setCustomSleeveUrl('')}
                                         className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
                                     >
-                                        <Trash2 size={16} className="inline mr-2" /> Remove Custom Mat
+                                        <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
                                     </button>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Sleeve Customization */}
-                        <div className="flex-1 flex flex-col gap-4">
-                            <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
-                            <div className="relative aspect-[2.5/3.5] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
-                                {sleevePreviewUrl ? (
-                                    <div
-                                        className="w-full h-full overflow-hidden cursor-move"
-                                        onWheel={handleSleeveWheel}
-                                        onMouseDown={handleSleeveMouseDown}
-                                        onMouseMove={handleSleeveMouseMove}
-                                        onMouseUp={handleSleeveMouseUp}
-                                        onMouseLeave={handleSleeveMouseUp}
-                                    >
-                                        <img
-                                            ref={sleeveImageRef}
-                                            src={sleevePreviewUrl}
-                                            alt="Sleeve Preview"
-                                            className="absolute top-0 left-0 object-cover transition-transform"
-                                            style={{
-                                                width: '100%',
-                                                height: '100%',
-                                                transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale})`,
-                                                transformOrigin: 'center center'
-                                            }}
-                                            onError={() => setSleevePreviewUrl('')}
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: playerSleeve }}>
-                                        <div className="text-center">
-                                            <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-2">
-                                                <div className="w-12 h-12 rounded-full border-2 border-white/20"></div>
-                                            </div>
-                                            <p className="text-sm text-white/60">Current: {playerSleeve}</p>
-                                        </div>
-                                    </div>
                                 )}
-                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
-                                        <RefreshCcw size={14} />
-                                    </button>
-                                    <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
-                                        {Math.round(sleeveTransform.scale * 100)}%
-                                    </div>
-                                </div>
-                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <button
-                                        onClick={() => {
-                                            const input = document.createElement('input');
-                                            input.type = 'file';
-                                            input.accept = 'image/*';
-                                            input.onchange = (e) => {
-                                                const file = (e.target as HTMLInputElement).files?.[0];
-                                                if (file) {
-                                                    const reader = new FileReader();
-                                                    reader.onload = (e) => setSleevePreviewUrl(e.target?.result as string);
-                                                    reader.readAsDataURL(file);
-                                                }
-                                            };
-                                            input.click();
-                                        }}
-                                        className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
-                                    >
-                                        <Image size={16} /> Upload Image
-                                    </button>
-                                </div>
                             </div>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="Or paste image URL..."
-                                    value={sleevePreviewUrl || customSleeveUrl}
-                                    onChange={(e) => setSleevePreviewUrl(e.target.value)}
-                                    className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                                />
-                                <button
-                                    onClick={() => {
-                                        setCustomSleeveUrl(sleevePreviewUrl);
-                                        setSleevePreviewUrl('');
-                                    }}
-                                    disabled={!sleevePreviewUrl}
-                                    className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <Check size={16} />
-                                </button>
-                            </div>
-                            {customSleeveUrl && (
-                                <button
-                                    onClick={() => setCustomSleeveUrl('')}
-                                    className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
-                                >
-                                    <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
-                                </button>
-                            )}
                         </div>
                     </div>
-            </div>
+                </div>
+            )}
         </div>
-        </div>
-        </div>
-        </div>
-        </div>
-    )
+    );
 };
 
 const UserIcon = ({ className, size }: { className?: string, size?: number }) => (
