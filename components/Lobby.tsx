@@ -674,12 +674,14 @@ export const Lobby: React.FC<LobbyProps> = ({
                             </button>
                         </div>
                         {customMatUrl && (
-                            <button
-                                onClick={() => setCustomMatUrl('')}
-                                className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
-                            >
-                                <Trash2 size={16} className="inline mr-2" /> Remove Custom Mat
-                            </button>
+                            <div>
+                                <button
+                                    onClick={() => setCustomMatUrl('')}
+                                    className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
+                                >
+                                    <Trash2 size={16} className="inline mr-2" /> Remove Custom Mat
+                                </button>
+                            </div>
                         )}
                     </div>
 
