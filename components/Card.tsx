@@ -1,8 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { BoardObject, CardData, ManaColor, ManaRule } from '../types';
-import { ManaSource, isBasicLand } from '../services/mana';
+import React, { useState, useRef } from 'react';
+import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -38,14 +37,9 @@ interface CardProps {
     defaultRotation?: number;
     isHandVisible?: boolean;
     onHover?: (id: string | null) => void;
-    manaSource?: ManaSource;
-    onManaClick?: () => void;
-    manaRule?: ManaRule;
-    onDragChange?: (isDragging: boolean) => void;
-    showManaCalculator?: boolean;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover, manaSource, onManaClick, manaRule, onDragChange, showManaCalculator = true }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -54,23 +48,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const [hasMoved, setHasMoved] = useState(false);
     const [isOverHand, setIsOverHand] = useState(false);
     const lastTapRef = useRef(0);
-
-    // Debug logging for mana source - only log once per card when it first mounts or when button visibility changes
-    const loggedCardId = useRef<string | null>(null);
-    useEffect(() => {
-        // Only log once per card ID to avoid spam
-        if (manaSource && isControlledByMe && loggedCardId.current !== object.id) {
-            loggedCardId.current = object.id;
-            console.log(`[Card] ${object.cardData.name} manaSource:`, {
-                abilityType: manaSource.abilityType,
-                hideManaButton: manaSource.hideManaButton,
-                producedMana: manaSource.producedMana,
-                hasRule: !!manaRule,
-                ruleTrigger: manaRule?.trigger,
-                isLand: object.cardData.isLand
-            });
-        }
-    }, [object.id]); // Only re-run if card ID changes
 
     // Handle immediate drag from hand/zones
     React.useEffect(() => {
@@ -85,7 +62,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
 
             onBringToFront(object.id);
             setIsDragging(true);
-            if (onDragChange) onDragChange(true);
 
             dragStartRef.current = {
                 offsetX: worldX - object.x,
@@ -174,7 +150,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
 
             setIsDragging(true);
-            if (onDragChange) onDragChange(true);
             setHasMoved(true);
         }
 
@@ -220,7 +195,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         }
 
         setIsDragging(false);
-        if (onDragChange) onDragChange(false);
         setIsOverHand(false);
         setHasMoved(false);
         dragStartRef.current = null;
@@ -269,7 +243,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
         if (newTapped !== object.tappedQuantity) {
             onUpdate(object.id, { tappedQuantity: newTapped });
             const action = delta > 0 ? 'tapped' : 'untapped';
-            onLog(`${action} 1 ${object.cardData.name} (Untapped: ${untappedCount + (delta > 0 ? -1 : 1)}/${object.quantity})`);
+            onLog(`${action} 1 ${object.cardData.name} (Total Tapped: ${newTapped}/${object.quantity})`);
         }
     }
 
@@ -410,80 +384,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
     const vx = viewX || 0;
     const vy = viewY || 0;
 
-    // Determine if mana button should be shown
-    // Show button when:
-    // 1. Card has a mana source (produces mana)
-    // 2. Card is controlled by me
-    // 3. NOT passive (passive auto-adds mana)
-    // 4. hideManaButton is FALSE (user wants to see the button)
-    // 5. NOT a land (lands produce mana on tap automatically, no button needed)
-    //
-    // When button is hidden but card has tap ability:
-    // - The card still produces mana when tapped via tap-to-mana detection in Tabletop
-
-    const isPassive = manaSource?.abilityType === 'passive' || manaRule?.trigger === 'passive';
-    const isLand = object.cardData.isLand;
-
-    // For lands without custom rules, default to hiding the button
-    // Basic lands ALWAYS hide the button - they should just tap to add mana
-    const basicLand = isBasicLand(object.cardData.name);
-    const effectiveHideButton = manaSource?.hideManaButton ?? (basicLand || (isLand && !manaRule));
-
-    // Show mana button if:
-    // - Has mana source AND controlled by me AND not passive
-    // - AND (hideManaButton is false OR (it's NOT a land AND we don't have a specific override))
-    // We want utility lands (hideManaButton === false) to show their button.
-    const shouldShowManaButton = showManaCalculator &&
-        manaSource &&
-        isControlledByMe &&
-        !isPassive &&
-        !effectiveHideButton;
-
-    // Log for debugging - only log once per card ID when visibility changes
-    const loggedButtonId = useRef<string | null>(null);
-    useEffect(() => {
-        // Only log when button visibility actually changes for a card
-        if (manaSource && isControlledByMe && loggedButtonId.current !== object.id) {
-            loggedButtonId.current = object.id;
-            console.log(`[Card] ${object.cardData.name} shouldShowManaButton: ${shouldShowManaButton}`, {
-                hasSource: !!manaSource,
-                isControlledByMe,
-                isPassive,
-                hideManaButton: manaSource.hideManaButton,
-                isLand,
-                effectiveHideButton,
-                trigger: manaRule?.trigger
-            });
-        }
-    }, [object.id]); // Only re-run if card ID changes
-
-    // Get the primary mana color for display
-    const getPrimaryManaIcon = () => {
-        if (!manaSource) return '/mana/colorless.png';
-        let produced = manaSource.producedMana;
-
-        // Fallback for empty produced array if rule exists (e.g. conditional production currently 0)
-        if (produced.length === 0 && manaRule && manaRule.produced) {
-            produced = Object.keys(manaRule.produced).filter(k => manaRule.produced[k] > 0) as any[];
-        }
-
-        // If flexible (multiple options or WUBRG/CMD), show rainbow
-        if (manaSource.isFlexible || produced.includes('WUBRG') || produced.includes('CMD')) {
-            return '/mana/all.png';
-        }
-
-        // If single color, show that color
-        if (produced.length > 0) {
-            const color = produced[0];
-            const colorMap: Record<string, string> = {
-                'W': 'white', 'U': 'blue', 'B': 'black', 'R': 'red', 'G': 'green', 'C': 'colorless'
-            };
-            return `/mana/${colorMap[color] || 'colorless'}.png`;
-        }
-
-        return '/mana/colorless.png';
-    };
-
     const cardContent = (
         <div
             ref={cardRef}
@@ -505,7 +405,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             onClick={() => !isMobile && setShowOverlay(false)} // Tap to close overlay if open (desktop only)
             onMouseEnter={() => onHover && onHover(object.id)}
             onMouseLeave={() => onHover && onHover(null)}
-            data-object-id={object.id}
         >
             {/* Stack Layers (Behind) */}
             {isStack && (
@@ -543,30 +442,6 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         </div>
                     )}
 
-                    {/* Mana Button Overlay (Top-Left) - Shows on hover only */}
-                    {shouldShowManaButton && (
-                        <div
-                            className="absolute top-2 left-2 z-30 transition-opacity opacity-0 group-hover:opacity-100"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                console.log(`[Card] Mana button clicked for ${object.cardData.name}`);
-                                onManaClick?.();
-                            }}
-                            onDoubleClick={(e) => e.stopPropagation()}
-                        >
-                            <button className="w-8 h-8 rounded-full bg-gray-900/90 border-2 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-transform">
-                                <img src={getPrimaryManaIcon()} className="w-5 h-5 object-contain drop-shadow-md" alt="Mana" />
-                            </button>
-                            {/* Mana count indicator */}
-                            {manaSource.manaCount && manaSource.manaCount > 1 && (
-                                <span className="absolute -bottom-1 -right-1 bg-amber-500 text-black text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                                    {manaSource.manaCount}
-                                </span>
-                            )}
-                        </div>
-                    )}
-
                     {/* Hover Actions */}
                     <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
 
@@ -574,10 +449,10 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                         {isStack && isControlledByMe ? (
                             <div className="flex flex-col gap-1 items-center interactive-ui mb-1">
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-300 font-bold uppercase">Untapped</span>
+                                    <span className="text-[10px] text-gray-300 font-bold uppercase">Tap</span>
                                     <div className="flex items-center gap-1 bg-gray-800/80 rounded-full px-2 py-0.5">
                                         <button onClick={(e) => { e.stopPropagation(); adjustStackTap(1); }} className="text-gray-300 hover:text-white"><RotateCw size={14} /></button>
-                                        <span className="text-xs font-mono min-w-[2rem] text-center">{untappedCount}/{object.quantity}</span>
+                                        <span className="text-xs font-mono min-w-[2rem] text-center">{object.tappedQuantity}/{object.quantity}</span>
                                         <button onClick={(e) => { e.stopPropagation(); adjustStackTap(-1); }} className="text-gray-300 hover:text-white"><RefreshCcw size={14} /></button>
                                     </div>
                                 </div>
@@ -650,11 +525,11 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
                 {/* Stack Count Badge - Moved outside overflow-hidden */}
                 {isStack && (
                     <div className="absolute -top-3 -right-3 bg-red-600 text-white font-mono rounded-lg px-2 h-6 border-2 border-gray-900 shadow-xl z-20 flex items-center justify-center text-xs font-bold pointer-events-none whitespace-nowrap">
-                        {untappedCount} / {object.quantity}
+                        {object.tappedQuantity} / {object.quantity}
                     </div>
                 )}
             </div>
-        </div >
+        </div>
     );
 
     return cardContent;

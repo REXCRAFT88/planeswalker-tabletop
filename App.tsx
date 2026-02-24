@@ -2,21 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { Lobby } from './components/Lobby';
 import { DeckBuilder } from './components/DeckBuilder';
 import { Tabletop } from './components/Tabletop';
-
+import { LocalSetup } from './components/LocalSetup';
 import { MobileController } from './components/MobileController';
-import { CardData, ManaRule, SavedDeck } from './types';
-
+import { CardData } from './types';
 import { PLAYER_COLORS } from './constants';
 
 enum View {
     LOBBY = 'LOBBY',
     DECK_BUILDER = 'DECK_BUILDER',
+    LOCAL_SETUP = 'LOCAL_SETUP',
+    LOCAL_GAME = 'LOCAL_GAME',
     GAME = 'GAME',
     MOBILE_CONTROLLER = 'MOBILE_CONTROLLER',
     DECK_SELECT = 'DECK_SELECT',
 }
 
 const STORAGE_KEY = 'planeswalker_tabletop_settings_v1';
+
+export interface SavedDeck {
+    id: string;
+    name: string;
+    deck: CardData[];
+    tokens: CardData[];
+    sleeveColor: string;
+    createdAt?: number;
+}
 
 function App() {
     const [currentView, setCurrentView] = useState<View>(View.LOBBY);
@@ -62,35 +72,9 @@ function App() {
     });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
-    const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
+    const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
-    const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() => {
-        // First try to load from direct storage
-        const loaded = loadState<Record<string, ManaRule>>('activeManaRules', null);
-        if (loaded && Object.keys(loaded).length > 0) return loaded;
-        // Fallback to most recent saved deck if available
-        if (savedDecks.length > 0) {
-            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            return sorted[0].manaRules || {};
-        }
-        return {};
-    });
-    const [activeDeckName, setActiveDeckName] = useState<string>(() => {
-        // First try to load from direct storage
-        const loaded = loadState<string>('activeDeckName', null);
-        if (loaded) return loaded;
-        // Fallback to saved decks
-        if (savedDecks.length > 0) {
-            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            return sorted[0].name;
-        }
-        return 'New Deck';
-    });
-
-    // API Keys
-    const [geminiApiKey, setGeminiApiKey] = useState<string>(() => loadState('geminiApiKey', ''));
-    const [isAddingAIToExistingGame, setIsAddingAIToExistingGame] = useState(false);
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -99,13 +83,10 @@ function App() {
             playerSleeve,
             activeDeck,
             lobbyTokens,
-            savedDecks,
-            activeManaRules,
-            activeDeckName,
-            geminiApiKey
+            savedDecks
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeManaRules, activeDeckName, geminiApiKey]);
+    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
 
     // Prevent Render.com from sleeping by pinging the server
     useEffect(() => {
@@ -115,23 +96,18 @@ function App() {
         return () => clearInterval(interval);
     }, []);
 
-    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>, id?: string) => {
+    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
-        if (manaRules) setActiveManaRules(manaRules);
-        if (deckName) setActiveDeckName(deckName);
 
-        // Always save if we have an ID (update) OR if shouldSave is true (new)
-        // If we have an ID, we are updating an existing deck, so we must save regardless of shouldSave flag (which indicates 'new deck')
-        if (shouldSave || id) {
+        if (shouldSave) {
             const newDeck: SavedDeck = {
-                id: id || crypto.randomUUID(),
+                id: crypto.randomUUID(),
                 name: deckName || `Deck ${new Date().toLocaleDateString()}`,
                 deck,
                 tokens,
                 sleeveColor: playerSleeve,
-                createdAt: Date.now(), // Update timestamp? Maybe keep original if updating? For now update is fine.
-                manaRules: manaRules || activeManaRules,
+                createdAt: Date.now()
             };
             handleSaveDeck(newDeck);
         }
@@ -139,37 +115,26 @@ function App() {
         setCurrentView(View.LOBBY);
     };
 
-    const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string, aiOpponent?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' }) => {
+    const handleJoinGame = (code?: string, isStarted?: boolean, gameType?: string) => {
         // Prevent re-triggering if already in a game-related view (fixes infinite deck-select loop)
         if (currentView === View.GAME || currentView === View.DECK_SELECT ||
-            currentView === View.MOBILE_CONTROLLER) return;
+            currentView === View.MOBILE_CONTROLLER || currentView === View.LOCAL_GAME) return;
 
         if (code) setRoomId(code);
         setIsGameStarted(!!isStarted);
 
-        // Set AI opponent if provided (for starting game with AI)
-        if (aiOpponent) {
-            setLocalOpponents([aiOpponent]);
-        }
-
         // If the player has more than one saved deck, show the deck picker
         // Skip deck selection on reconnects (isStarted=true) since server restores state
-        // Also skip deck selection if we're playing against AI (auto-load active deck)
-        if (savedDecks.length > 1 && gameType !== 'local_table' && !isStarted && !aiOpponent) {
+        if (savedDecks.length > 1 && gameType !== 'local_table' && !isStarted) {
             setPendingJoin({ code, isStarted, gameType });
             setCurrentView(View.DECK_SELECT);
             return;
         }
 
-        // If exactly 1 deck or playing against AI, auto-load it
-        if (savedDecks.length === 1 || aiOpponent) {
-            const deckToLoad = savedDecks.length > 0 ? savedDecks[0] : (activeDeck.length > 0 ? { name: 'Current Deck', deck: activeDeck, tokens: lobbyTokens } : null);
-            if (deckToLoad) {
-                setActiveDeck([...deckToLoad.deck]);
-                setLobbyTokens([...deckToLoad.tokens]);
-                setActiveManaRules('manaRules' in deckToLoad ? (deckToLoad.manaRules || {}) : {});
-                setActiveDeckName(deckToLoad.name);
-            }
+        // If exactly 1 deck, auto-load it
+        if (savedDecks.length === 1) {
+            setActiveDeck([...savedDecks[0].deck]);
+            setLobbyTokens([...savedDecks[0].tokens]);
         }
 
         if (gameType === 'local_table') {
@@ -180,27 +145,8 @@ function App() {
     };
 
     const handleDeckSelected = (deck: SavedDeck) => {
-        if (isAddingAIToExistingGame) {
-            setLocalOpponents(prev => [
-                ...prev,
-                {
-                    id: 'ai-opponent-1',
-                    name: 'Gemini',
-                    deck: [...deck.deck],
-                    tokens: [...deck.tokens],
-                    color: '#3b82f6',
-                    type: 'ai'
-                }
-            ]);
-            setIsAddingAIToExistingGame(false);
-            setCurrentView(View.GAME);
-            return;
-        }
-
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
-        setActiveManaRules(deck.manaRules || {});
-        setActiveDeckName(deck.name);
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);
@@ -209,47 +155,29 @@ function App() {
         }
     };
 
-
-
-    const handleHostLocalTable = () => {
-        const code = crypto.randomUUID().slice(0, 6).toUpperCase();
-        setRoomId(code);
-        setIsGameStarted(false);
-        setIsLocalTableHost(true);
-        setLocalOpponents([]);
-        setCurrentView(View.GAME);
+    const handleStartLocalGame = (opponents: any[], isLocalTable: boolean = false) => {
+        setLocalOpponents(opponents);
+        setIsLocalTableHost(isLocalTable);
+        if (isLocalTable) {
+            // Generate a 4-letter room code
+            const code = crypto.randomUUID().slice(0, 6).toUpperCase();
+            setRoomId(code);
+        } else {
+            setRoomId("LOCAL");
+        }
+        setCurrentView(View.LOCAL_GAME);
     };
 
     const handleSaveDeck = (deck: SavedDeck) => {
-        // CLEANUP: Ensure isCommander is only set on cards actually in the deck
-        // This handles cases where a card was marked as commander but then removed from the list
-        const cleanedDeck = {
-            ...deck,
-            deck: deck.deck.map(card => ({
-                ...card,
-                // The card is by definition in the deck here, but this is a good place to 
-                // perform any other deck-level validations if needed.
-                // The 'isCommander' preservation is mostly handled in DeckBuilder.handleImport,
-                // but this acts as a final safeguard.
-            }))
-        };
-
         setSavedDecks(prev => {
-            const idx = prev.findIndex(d => d.id === cleanedDeck.id);
+            const idx = prev.findIndex(d => d.id === deck.id);
             if (idx >= 0) {
                 const copy = [...prev];
-                copy[idx] = cleanedDeck;
+                copy[idx] = deck;
                 return copy;
             }
-            return [...prev, cleanedDeck];
+            return [...prev, deck];
         });
-
-        // Sync with active state if we are saving the currently active deck
-        if (cleanedDeck.name === activeDeckName) {
-            setActiveDeck(cleanedDeck.deck);
-            setLobbyTokens(cleanedDeck.tokens);
-            setActiveManaRules(cleanedDeck.manaRules || {});
-        }
     };
 
     const handleDeleteDeck = (id: string) => {
@@ -265,8 +193,9 @@ function App() {
                     playerSleeve={playerSleeve}
                     setPlayerSleeve={setPlayerSleeve}
                     onJoin={handleJoinGame}
+                    onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
                     onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
-                    savedDeckCount={savedDecks.length}
+                    savedDeckCount={activeDeck.length}
                     currentTokens={lobbyTokens}
                     onTokensChange={setLobbyTokens}
                     activeDeck={activeDeck}
@@ -274,9 +203,6 @@ function App() {
                     onSaveDeck={handleSaveDeck}
                     onDeleteDeck={handleDeleteDeck}
                     onLoadDeck={handleDeckReady}
-                    onHostLocalTable={handleHostLocalTable}
-                    geminiApiKey={geminiApiKey}
-                    setGeminiApiKey={setGeminiApiKey}
                 />
             )}
 
@@ -284,14 +210,16 @@ function App() {
                 <DeckBuilder
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
-                    initialManaRules={activeManaRules}
-                    initialName={activeDeckName}
-                    initialId={(() => {
-                        const match = savedDecks.find(d => d.name === activeDeckName);
-                        return match ? match.id : undefined;
-                    })()}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
+                />
+            )}
+
+            {currentView === View.LOCAL_SETUP && (
+                <LocalSetup
+                    onStartGame={handleStartLocalGame}
+                    onBack={() => setCurrentView(View.LOBBY)}
+                    savedDecks={savedDecks}
                 />
             )}
 
@@ -303,13 +231,20 @@ function App() {
                     sleeveColor={playerSleeve}
                     roomId={roomId}
                     initialGameStarted={isGameStarted}
-                    manaRules={activeManaRules}
+                    onExit={() => setCurrentView(View.LOBBY)}
+                />
+            )}
+
+            {currentView === View.LOCAL_GAME && (
+                <Tabletop
+                    initialDeck={activeDeck}
+                    initialTokens={lobbyTokens}
+                    playerName={playerName}
+                    sleeveColor={playerSleeve}
+                    roomId={isLocalTableHost ? roomId : "LOCAL"}
+                    isLocal={true}
+                    isLocalTableHost={isLocalTableHost}
                     localOpponents={localOpponents}
-                    geminiApiKey={geminiApiKey}
-                    onAddAIRequest={() => {
-                        setIsAddingAIToExistingGame(true);
-                        setCurrentView(View.DECK_SELECT);
-                    }}
                     onExit={() => setCurrentView(View.LOBBY)}
                 />
             )}
@@ -318,9 +253,9 @@ function App() {
                 <div className="w-full h-full flex flex-col items-center justify-center p-4 md:p-8 animate-in fade-in">
                     <div className="w-full max-w-3xl">
                         <h1 className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 text-center mb-2">
-                            {isAddingAIToExistingGame ? "Select AI Opponent's Deck" : "Choose Your Deck"}
+                            Choose Your Deck
                         </h1>
-                        <p className="text-gray-400 text-center mb-6">{isAddingAIToExistingGame ? "Select which deck the AI will play with." : "Select which deck you want to play with in this game."}</p>
+                        <p className="text-gray-400 text-center mb-6">Select which deck you want to play with in this game.</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto custom-scrollbar p-1">
                             {savedDecks.map(deck => {
                                 const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
@@ -342,15 +277,7 @@ function App() {
                             })}
                         </div>
                         <button
-                            onClick={() => {
-                                if (isAddingAIToExistingGame) {
-                                    setIsAddingAIToExistingGame(false);
-                                    setCurrentView(View.GAME);
-                                } else {
-                                    setPendingJoin(null);
-                                    setCurrentView(View.LOBBY);
-                                }
-                            }}
+                            onClick={() => { setPendingJoin(null); setCurrentView(View.LOBBY); }}
                             className="mt-6 w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold transition-colors"
                         >
                             Cancel

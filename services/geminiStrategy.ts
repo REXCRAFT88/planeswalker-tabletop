@@ -24,10 +24,7 @@ export class GeminiStrategyClient {
     private onText: (text: string) => void;
     private onConnected?: () => void;
     private onError?: (error: any) => void;
-    private isConnecting: boolean = false;
     private lastRequestTime: number = 0;
-    private requestQueue: Array<() => void> = [];
-    private isProcessingQueue: boolean = false;
 
     constructor(options: GeminiStrategyOptions) {
         this.apiKey = options.apiKey;
@@ -111,21 +108,12 @@ export class GeminiStrategyClient {
             if (!response.ok) {
                 const errorData = await response.json();
 
-                // Handle 429 rate limit specifically
+                // Handle 429 rate limit: silently drop to avoid recursive retry spam.
+                // The next game-state update will trigger a new request naturally.
                 if (response.status === 429) {
-                    console.warn('[Rate Limit] API quota exceeded. Retrying after delay...');
-                    // Exponential backoff: wait longer on repeated 429s
-                    const retryDelay = Math.min(10000 * Math.pow(2, this.requestQueue.length), 60000); // Up to 1 min
-                    return new Promise((resolve, reject) => {
-                        setTimeout(async () => {
-                            try {
-                                await this.executeRequest(gameState);
-                                resolve();
-                            } catch (error) {
-                                reject(error);
-                            }
-                        }, retryDelay);
-                    });
+                    const retryAfter = errorData?.error?.details?.find((d: any) => d['@type']?.includes('RetryInfo'))?.retryDelay;
+                    console.warn(`[Rate Limit] API quota exceeded. Will retry on next event. ${retryAfter ? `Retry after: ${retryAfter}` : ''}`);
+                    return; // Graceful exit — no recursive retry
                 }
 
                 throw new Error(`API Error: ${JSON.stringify(errorData)}`);

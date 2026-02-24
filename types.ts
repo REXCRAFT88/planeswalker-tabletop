@@ -1,68 +1,7 @@
-export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'WUBRG' | 'CMD';
-
-export interface ManaRule {
-  // Disable mana production from this card entirely
-  disabled?: boolean;
-  // Activation trigger
-  trigger: 'tap' | 'activated' | 'passive';
-  // Activation cost (mana required to activate ability)
-  activationCost: Record<ManaColor, number>;
-  genericActivationCost?: number; // Generic mana cost (e.g. {1})
-  // How the mana amount is calculated
-  calcMode: 'set' | 'counters' | 'creatures' | 'basicLands';
-  calcMultiplier: number; // default 1
-  includeBasePower?: boolean; // when counters mode: add creature's base power to counter count
-  // How the mana is produced
-  prodMode: 'standard' | 'available' | 'chooseColor' | 'commander' | 'sameAsCard' | 'multiplied';
-  // 'available' = player chooses one color from lands they control
-  // 'chooseColor' = player picks a color from WUBRG at runtime via modal
-  produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
-  producedAlt?: Record<ManaColor, number>; // "or" choice
-  // Alternative rule set (opens modal for player to choose which rule to apply)
-  alternativeRule?: ManaRule;
-  // Global application (e.g. "All Creatures have...")
-  appliesTo?: ('creatures' | 'lands' | 'basics' | 'nonbasics')[];
-  // appliesToCondition options:
-  // 'counters' - only if target cards (creatures/lands) have counters (e.g. Rishkar)
-  // 'grantingCardCounters' - only if this card granting the ability has counters (e.g. Incubation Druid)
-  appliesToCondition?: 'counters' | 'grantingCardCounters';
-
-  // Global Multipliers (e.g. Virtue of Strength)
-  manaMultiplier?: number; // e.g. 3 for "triples mana produced by basic lands"
-
-  // Auto-tap settings
-  autoTap: boolean;
-  autoTapPriority: number; // decimal allowed
-  // UI settings
-  hideManaButton?: boolean;
-  // Categorization override
-  isLandOverride?: boolean;
-  // Initialize as tapped
-  entersTapped?: boolean;
-}
-
-export const EMPTY_MANA_RULE: ManaRule = {
-  trigger: 'tap',
-  activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  genericActivationCost: 0,
-  calcMode: 'set',
-  calcMultiplier: 1,
-  prodMode: 'standard',
-  produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  manaMultiplier: 1,
-  autoTap: true,
-  autoTapPriority: 1,
-  hideManaButton: true,
-  isLandOverride: false,
-  entersTapped: false,
-};
-
 export enum CardState {
   UNTAPPED = 'UNTAPPED',
   TAPPED = 'TAPPED',
 }
-
-export type TurnStep = 'UNTAP' | 'UPKEEP' | 'DRAW' | 'MAIN1' | 'ATTACK' | 'MAIN2' | 'END';
 
 export interface CardData {
   id: string; // Unique instance ID
@@ -84,7 +23,6 @@ export interface CardData {
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
-  userXValue?: number; // Runtime state for mana payment
 }
 
 export interface BoardObject {
@@ -118,7 +56,6 @@ export interface Player {
   graveyard: CardData[];
   exile: CardData[];
   commandZone: CardData[];
-  isAi?: boolean;
 }
 
 export interface PlayerStats {
@@ -158,14 +95,4 @@ export interface LogEntry {
   playerName: string;
   message: string;
   type: 'ACTION' | 'CHAT' | 'SYSTEM';
-}
-
-export interface SavedDeck {
-  id: string;
-  name: string;
-  deck: CardData[];
-  tokens: CardData[];
-  sleeveColor: string;
-  createdAt?: number;
-  manaRules?: Record<string, ManaRule>;
 }

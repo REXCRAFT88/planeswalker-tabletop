@@ -1,22 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, User as UserIcon } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
-import { CardData, ManaRule, ManaColor } from '../types';
-import { parseDeckList, fetchBatch } from '../services/scryfall';
-import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
-
+import { CardData } from '../types';
+import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
 import { connectSocket } from '../services/socket';
-import type { SavedDeck } from '../types';
-
-import { ManaRulesModal } from './ManaRulesModal';
+import { SavedDeck } from '../App';
 
 interface LobbyProps {
     playerName: string;
     setPlayerName: (name: string) => void;
     playerSleeve: string;
     setPlayerSleeve: (color: string) => void;
-    onJoin: (code?: string, isStarted?: boolean, gameType?: string, aiOpponent?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' }) => void;
-    onHostLocalTable?: () => void;
+    onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
+    onLocalGame: () => void;
     onImportDeck: () => void;
     savedDeckCount: number;
     currentTokens: CardData[];
@@ -26,20 +22,18 @@ interface LobbyProps {
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
     onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
-    geminiApiKey?: string;
-    setGeminiApiKey?: (key: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
     playerName, setPlayerName,
     playerSleeve, setPlayerSleeve,
-    onJoin, onImportDeck, savedDeckCount,
+    onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
-    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck,
-    onHostLocalTable,
-    geminiApiKey, setGeminiApiKey
+    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
 }) => {
-
+    const [isSearching, setIsSearching] = useState(false);
+    const [importText, setImportText] = useState('');
+    const [isImporting, setIsImporting] = useState(false);
     const [roomCode, setRoomCode] = useState('');
     const [isJoining, setIsJoining] = useState(false);
     const [joinStatus, setJoinStatus] = useState('');
@@ -49,19 +43,11 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     // Library State
     const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-    const [isSelectingAIDeck, setIsSelectingAIDeck] = useState(false);
     const [editingDeck, setEditingDeck] = useState<SavedDeck | null>(null);
     const [isEditingTokens, setIsEditingTokens] = useState(false);
     const [tokenImportText, setTokenImportText] = useState('');
     const [isImportingTokens, setIsImportingTokens] = useState(false);
     const [tokenImportError, setTokenImportError] = useState<string | null>(null);
-    const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
-    const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    // AI Opponent State (kept for future use but UI button removed)
-    const [selectedAIDeck, setSelectedAIDeck] = useState<SavedDeck | null>(null);
-    const [showAIOption, setShowAIOption] = useState(false);
 
     // Auto-join if session exists
     useEffect(() => {
@@ -199,64 +185,25 @@ export const Lobby: React.FC<LobbyProps> = ({
         setShowReconnectModal(false);
     };
 
-    const handleCreateRoom = (withAI = false) => {
+    const handleCreateRoom = () => {
         const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-        setRoomCode(code);
-
-        // Pass AI opponent info if selected
-        const aiOpponent = withAI && selectedAIDeck ? {
-            id: 'ai-opponent-' + Date.now(),
-            name: 'Gemini AI',
-            deck: [...selectedAIDeck.deck],
-            tokens: [...selectedAIDeck.tokens],
-            color: '#3b82f6',
-            type: 'ai' as const
-        } : undefined;
-
-        if (aiOpponent) {
-            // Call onJoin with AI opponent
-            onJoin(code, false, 'online', aiOpponent);
-        } else {
-            joinRoom(code);
-        }
+        setRoomCode(code); // Ideally pass this up or store in URL
+        joinRoom(code);
     };
 
-    const handlePlayWithAI = () => {
+    const handleLocalGame = () => {
         if (savedDeckCount === 0) {
             alert("Please import a deck first!");
             return;
         }
-        if (!geminiApiKey) {
-            alert("Please configure your Gemini API Key to play against AI!");
-            return;
-        }
-        setIsSelectingAIDeck(true);
-        setIsLibraryOpen(true);
-    };
 
-    const handleSelectAIDeck = (deck: SavedDeck) => {
-        setSelectedAIDeck(deck);
-        setIsLibraryOpen(false);
-        setIsSelectingAIDeck(false);
-        // Start game with selected AI deck
-        const code = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const aiOpponent = {
-            id: 'ai-opponent-' + Date.now(),
-            name: 'Gemini AI',
-            deck: [...deck.deck],
-            tokens: [...deck.tokens],
-            color: '#3b82f6',
-            type: 'ai' as const
-        };
-        onJoin(code, false, 'online', aiOpponent);
-    };
-
-    const handleHostLocalTableClick = () => {
-        if (savedDeckCount === 0) {
-            alert("Please import a deck first!");
-            return;
+        // If no deck is active, load the most recent one.
+        if (activeDeck.length === 0 && savedDecks.length > 0) {
+            const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens);
         }
-        onHostLocalTable?.();
+
+        onLocalGame();
     };
 
     const handleJoinRoom = () => {
@@ -268,10 +215,9 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name);
+        onLoadDeck([...deck.deck], [...deck.tokens]);
         setIsLibraryOpen(false);
     };
-
 
 
     const toggleCommanderInEdit = (cardId: string) => {
@@ -284,62 +230,15 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
-        onLoadDeck(deck.deck, deck.tokens, false, deck.name);
+        onLoadDeck(deck.deck, deck.tokens);
         // Then go to builder
         onImportDeck();
     };
 
     const handleCreateNewDeck = () => {
-        // Clear current active deck
-        onLoadDeck([], [], false, 'New Deck');
+        // Clear current active deck if needed, or just go to builder
+        onLoadDeck([], []);
         onImportDeck();
-    };
-
-    const handleExportDeck = (deck: SavedDeck) => {
-        const json = JSON.stringify(deck, null, 2);
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${deck.name.replace(/[^a-z0-9]/gi, '_')}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    const handleImportDeckFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        try {
-            const text = await file.text();
-            const parsed = JSON.parse(text) as SavedDeck;
-            if (!parsed.deck || !Array.isArray(parsed.deck)) {
-                alert('Invalid deck file format.');
-                return;
-            }
-            // Assign a new ID to avoid conflicts
-            const imported: SavedDeck = {
-                ...parsed,
-                id: crypto.randomUUID(),
-                name: parsed.name || 'Imported Deck',
-                createdAt: Date.now(),
-            };
-            onSaveDeck(imported);
-        } catch (err) {
-            alert('Failed to import deck file. Please ensure it is a valid JSON file.');
-        }
-        // Reset file input
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-
-    const handleSaveManaRule = (card: CardData, rule: ManaRule | null) => {
-        if (!editingDeck) return;
-        const rules = { ...(editingDeck.manaRules || {}) };
-        if (rule) {
-            rules[card.scryfallId] = rule;
-        } else {
-            delete rules[card.scryfallId];
-        }
-        setEditingDeck({ ...editingDeck, manaRules: rules });
     };
 
     const toggleFullScreen = () => {
@@ -353,354 +252,267 @@ export const Lobby: React.FC<LobbyProps> = ({
     const activeCommander = activeDeck.find(c => c.isCommander) || activeDeck[0];
 
     return (
-        <>
-            <div className="w-full h-full overflow-y-auto relative pb-32">
-                <div className="min-h-full flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-700">
-                    <div className="w-full max-w-md">
-                        <div className="absolute top-4 right-4">
-                            <button onClick={toggleFullScreen} className="p-2 bg-gray-800 rounded-full text-white shadow-lg border border-gray-700">
-                                <Maximize size={20} />
-                            </button>
-                        </div>
-                        <div className="text-center mb-8">
-                            {activeCommander ? (
-                                <div className="w-32 h-44 mx-auto mb-4 rounded-xl shadow-2xl shadow-orange-500/20 rotate-3 border-2 border-orange-500/50 overflow-hidden">
-                                    <img src={activeCommander.imageUrl} className="w-full h-full object-cover" alt="Commander" />
-                                </div>
-                            ) : (
-                                <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3"><Shield size={40} className="text-white" /></div>
-                            )}
-                            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-200 to-red-400 mb-2">
-                                Planeswalker Tabletop
-                            </h1>
-                            <p className="text-gray-400">
-                                The ultimate browser-based commander interface.
-                            </p>
+        <div className="w-full h-full overflow-y-auto relative pb-32">
+            <div className="min-h-full flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-700">
+                <div className="w-full max-w-md">
+                    <div className="absolute top-4 right-4">
+                        <button onClick={toggleFullScreen} className="p-2 bg-gray-800 rounded-full text-white shadow-lg border border-gray-700">
+                            <Maximize size={20} />
+                        </button>
+                    </div>
+                    <div className="text-center mb-8">
+                        {activeCommander ? (
+                            <div className="w-32 h-44 mx-auto mb-4 rounded-xl shadow-2xl shadow-orange-500/20 rotate-3 border-2 border-orange-500/50 overflow-hidden">
+                                <img src={activeCommander.imageUrl} className="w-full h-full object-cover" alt="Commander" />
+                            </div>
+                        ) : (
+                            <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-orange-500/30 rotate-3"><Shield size={40} className="text-white" /></div>
+                        )}
+                        <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-200 to-red-400 mb-2">
+                            Planeswalker Tabletop
+                        </h1>
+                        <p className="text-gray-400">
+                            The ultimate browser-based commander interface.
+                        </p>
+                    </div>
+
+                    <div className="w-full space-y-4 bg-gray-800/50 backdrop-blur-sm p-6 rounded-2xl border border-gray-700 shadow-xl relative z-10">
+
+                        {/* Name Input */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Name</label>
+                            <div className="relative">
+                                <UserIcon className="absolute left-3 top-3 text-gray-500" size={18} />
+                                <input
+                                    type="text"
+                                    value={playerName}
+                                    onChange={(e) => setPlayerName(e.target.value)}
+                                    className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 text-white focus:ring-2 focus:ring-orange-500 focus:outline-none transition-all"
+                                />
+                            </div>
                         </div>
 
-                        <div className="w-full space-y-4 bg-gray-800/50 backdrop-blur-sm p-6 rounded-2xl border border-gray-700 shadow-xl relative z-10">
+                        <div className="pt-4 border-t border-gray-700">
 
-                            {/* Name Input */}
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Name</label>
-                                <div className="relative">
-                                    <UserIcon className="absolute left-3 top-3 text-gray-500" size={18} />
+                            <div className="flex flex-col md:flex-row gap-4 mb-4">
+                                <button
+                                    onClick={handleLocalGame}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                    <Users size={20} /> Local Game
+                                </button>
+                                <button
+                                    onClick={handleCreateRoom}
+                                    disabled={isJoining}
+                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                    {isJoining ? <Loader className="animate-spin" /> : <Play size={20} />}
+                                    {isJoining ? (joinStatus || 'Joining...') : 'Create Online Table'}
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="h-px bg-gray-700 flex-1" />
+                                <span className="text-gray-500 text-xs uppercase font-bold">OR</span>
+                                <div className="h-px bg-gray-700 flex-1" />
+                            </div>
+
+                            {/* Join Existing Game */}
+                            <div className="bg-gray-900 p-3 rounded-xl border border-gray-700 mb-4">
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Join Existing Table</label>
+                                <div className="flex flex-col md:flex-row gap-2">
                                     <input
                                         type="text"
-                                        value={playerName}
-                                        onChange={(e) => setPlayerName(e.target.value)}
-                                        className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 text-white focus:ring-2 focus:ring-orange-500 focus:outline-none transition-all"
+                                        placeholder="Room Code"
+                                        value={roomCode}
+                                        onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                                        className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 text-white focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono tracking-widest placeholder:normal-case placeholder:tracking-normal"
+                                        maxLength={6}
                                     />
+                                    <button
+                                        onClick={handleJoinRoom}
+                                        disabled={isJoining || !roomCode}
+                                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Join
+                                    </button>
                                 </div>
                             </div>
 
-                            {/* Gemini API Key Input */}
-                            {setGeminiApiKey && (
-                                <div>
-                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center justify-between">
-                                        <span>Gemini API Key (For AI Opponent)</span>
-                                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 normal-case underline">Get Key</a>
-                                    </label>
-                                    <div className="relative">
-                                        <Zap className="absolute left-3 top-3 text-gray-500" size={18} />
-                                        <input
-                                            type="password"
-                                            value={geminiApiKey || ''}
-                                            onChange={(e) => setGeminiApiKey(e.target.value)}
-                                            placeholder="Optional..."
-                                            className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 text-white focus:ring-2 focus:ring-purple-500 focus:outline-none transition-all text-xs"
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="pt-4 border-t border-gray-700">
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                                    <button
-                                        onClick={handleHostLocalTableClick}
-                                        className="bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                                    >
-                                        <Layers size={20} /> Local Sandbox
-                                    </button>
-                                    <button
-                                        onClick={() => handleCreateRoom(false)}
-                                        disabled={isJoining}
-                                        className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                                    >
-                                        {isJoining ? <Loader className="animate-spin" /> : <Play size={20} />}
-                                        {isJoining ? (joinStatus || 'Joining...') : 'Online Game'}
-                                    </button>
-                                </div>
-
-
-
-                                {/* Join Existing Game */}
-                                <div className="bg-gray-900 p-3 rounded-xl border border-gray-700 mb-4">
-                                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Join Existing Table</label>
-                                    <div className="flex flex-col md:flex-row gap-2">
-                                        <input
-                                            type="text"
-                                            placeholder="Room Code"
-                                            value={roomCode}
-                                            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                                            className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 text-white focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono tracking-widest placeholder:normal-case placeholder:tracking-normal"
-                                            maxLength={6}
-                                        />
-                                        <button
-                                            onClick={handleJoinRoom}
-                                            disabled={isJoining || !roomCode}
-                                            className="bg-blue-600 hover:bg-blue-500 text-white px-4 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            Join
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-3">
-                                    <button
-                                        onClick={() => setIsLibraryOpen(true)}
-                                        className="flex items-center justify-center gap-3 p-4 bg-gray-900 hover:bg-gray-750 border border-gray-700 hover:border-purple-500 rounded-xl transition-all group"
-                                    >
-                                        <BookOpen className="text-purple-500 group-hover:scale-110 transition-transform" size={18} />
-                                        <span className="text-sm font-medium text-gray-300">Deck Library / Manage Decks</span>
-                                    </button>
-                                </div>
+                            <div className="grid grid-cols-1 gap-3">
+                                <button
+                                    onClick={() => setIsLibraryOpen(true)}
+                                    className="flex items-center justify-center gap-3 p-4 bg-gray-900 hover:bg-gray-750 border border-gray-700 hover:border-purple-500 rounded-xl transition-all group"
+                                >
+                                    <BookOpen className="text-purple-500 group-hover:scale-110 transition-transform" size={18} />
+                                    <span className="text-sm font-medium text-gray-300">Deck Library / Manage Decks</span>
+                                </button>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                {/* Reconnect Modal */}
-                {showReconnectModal && (
-                    <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                        <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
-                            <h3 className="text-2xl font-bold text-white mb-4">Active Session Found</h3>
-                            <p className="text-gray-300 mb-8">You were disconnected from a game. Do you want to reconnect?</p>
-                            <div className="flex flex-col gap-3">
-                                <button onClick={handleReconnect} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2">
-                                    <Play size={18} /> Reconnect
-                                </button>
-                                <button onClick={handleNewSession} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2">
-                                    <Plus size={18} /> Start New Session
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Deck Library Modal */}
-                {isLibraryOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-                        <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-[90vh] md:h-auto">
-                            <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                                <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500" /> {isEditingTokens ? 'Manage Global Tokens' : (isSelectingAIDeck ? "Select AI Opponent's Deck" : 'Deck Library')}</h3>
-                                <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); setIsEditingTokens(false); setIsSelectingAIDeck(false); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
-                            </div>
-
-                            <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-                                {isEditingTokens ? (
-                                    <div className="p-4 flex flex-col gap-4 h-full min-h-0 overflow-y-auto">
-                                        <h4 className="text-sm font-bold text-gray-400">Paste Token List</h4>
-                                        <textarea
-                                            className="flex-1 w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
-                                            placeholder={`1 Goblin\n2 Treasure\n1 Food...`}
-                                            value={tokenImportText}
-                                            onChange={(e) => setTokenImportText(e.target.value)}
-                                            disabled={isImportingTokens}
-                                        />
-                                        {tokenImportError && <p className="text-red-400 text-xs">{tokenImportError}</p>}
-                                        <div className="flex justify-end gap-4">
-                                            <button onClick={() => setIsEditingTokens(false)} className="text-gray-400 hover:text-white">Cancel</button>
-                                            <button onClick={handleTokenImport} disabled={isImportingTokens} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
-                                                {isImportingTokens ? <Loader className="animate-spin" size={16} /> : <Check size={16} />}
-                                                {isImportingTokens ? 'Loading...' : 'Save Tokens'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : !editingDeck ? (
-                                    <div className="p-4 overflow-y-auto custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4 pb-8">
-                                        <div className="col-span-full flex flex-col md:flex-row gap-2">
-                                            <button onClick={handleCreateNewDeck} className="flex-1 flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
-                                                <Plus size={20} /> Create New Deck
-                                            </button>
-                                            <button onClick={() => setIsEditingTokens(true)} className="flex-1 flex items-center justify-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
-                                                <Layers size={20} /> Manage Global Tokens
-                                            </button>
-                                        </div>
-                                        <div className="col-span-full flex gap-2">
-                                            <button
-                                                onClick={() => fileInputRef.current?.click()}
-                                                className="flex-1 flex items-center justify-center gap-2 p-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded-xl text-sm font-bold transition-colors"
-                                            >
-                                                <Upload size={16} /> Import Deck File
-                                            </button>
-                                            <input
-                                                ref={fileInputRef}
-                                                type="file"
-                                                accept=".json"
-                                                onChange={handleImportDeckFile}
-                                                className="hidden"
-                                            />
-                                        </div>
-
-                                        {savedDecks.map(deck => {
-                                            const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
-                                            return (
-                                                <div key={deck.id} className="bg-gray-700/50 border border-gray-600 rounded-xl p-3 sm:p-4 flex flex-row gap-3 hover:border-gray-500 transition group relative">
-                                                    <div className="w-14 h-20 sm:w-20 sm:h-28 bg-black rounded overflow-hidden flex-shrink-0 relative">
-                                                        {commander ? <img src={commander.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-gray-800" />}
-                                                        {deck.deck.some(c => c.isCommander) && <div className="absolute top-0 right-0 bg-amber-500 p-0.5 rounded-bl"><Crown size={8} className="text-black" /></div>}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                        <h4 className="font-bold text-white text-sm sm:text-base truncate">{deck.name}</h4>
-                                                        <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
-                                                        <div className="flex gap-2 flex-wrap">
-                                                            <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Play size={12} /> Load
-                                                            </button>
-                                                            <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Edit3 size={12} /> Edit
-                                                            </button>
-                                                            <button onClick={() => handleExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
-                                                                <Download size={12} /> Export
-                                                            </button>
-                                                            <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
-                                                                <Trash2 size={12} /> Delete
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                        {savedDecks.length === 0 && <div className="col-span-full text-center text-gray-500 py-10">No saved decks found.</div>}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col h-full">
-                                        <div className="p-4 border-b border-gray-700 flex gap-4 items-center bg-gray-800">
-                                            <button onClick={() => setEditingDeck(null)} className="text-gray-400 hover:text-white"><X /></button>
-                                            <input
-                                                className="bg-gray-900 border border-gray-600 rounded px-3 py-1 text-white font-bold flex-1"
-                                                value={editingDeck.name}
-                                                onChange={e => setEditingDeck({ ...editingDeck, name: e.target.value })}
-                                            />
-                                            <button onClick={() => { onSaveDeck(editingDeck); setEditingDeck(null); }} className="bg-green-600 hover:bg-green-500 text-white px-4 py-1 rounded font-bold flex items-center gap-2">
-                                                <Save size={16} /> Save Changes
-                                            </button>
-                                        </div>
-                                        <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-                                            <div className="flex-1 overflow-y-auto p-4 border-r border-gray-700 min-h-0">
-                                                <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Cards (Click to set Commander)</h4>
-                                                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                                                    {editingDeck.deck.map(card => (
-                                                        <div
-                                                            key={card.id}
-                                                            onClick={() => toggleCommanderInEdit(card.id)}
-                                                            onMouseEnter={() => setHoveredCardId(card.id)}
-                                                            onMouseLeave={() => setHoveredCardId(null)}
-                                                            className={`relative aspect-[2.5/3.5] rounded cursor-pointer border-2 ${card.isCommander ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'border-transparent hover:border-gray-500'}`}
-                                                        >
-                                                            <img src={card.imageUrl} className="w-full h-full object-cover rounded-sm" />
-                                                            {card.isCommander && <div className="absolute top-1 right-1 bg-amber-500 text-black p-0.5 rounded-full"><Crown size={10} /></div>}
-                                                            {editingDeck.manaRules?.[card.scryfallId] && (
-                                                                <div className="absolute top-1 left-1 bg-purple-600 text-white p-0.5 rounded-full" title="Custom mana rules">
-                                                                    <Zap size={8} />
-                                                                </div>
-                                                            )}
-                                                            {hoveredCardId === card.id && (
-                                                                <div className="absolute inset-0 bg-black/40 flex items-end justify-center pb-4 rounded-sm">
-                                                                    <button
-                                                                        onClick={(e) => { e.stopPropagation(); setManaRulesCard(card); }}
-                                                                        className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-bold rounded-md flex items-center gap-1 shadow-lg"
-                                                                    >
-                                                                        <Zap size={8} /> Mana Rules
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                            <div className="w-full md:w-1/3 p-4 overflow-y-auto bg-gray-900/50 min-h-[150px]">
-                                                <h4 className="text-xs font-bold text-gray-400 uppercase mb-2 flex flex-col gap-2">
-                                                    <span>Tokens ({editingDeck.tokens.length})</span>
-                                                    <div className="text-[10px] text-gray-500 font-normal">
-                                                        To add tokens, please use the "Edit" button in the library to open the Deck Builder, where you can add tokens in the final step.
-                                                    </div>
-                                                    <button onClick={() => setEditingDeck({ ...editingDeck, tokens: [] })} className="text-red-400 text-[10px] self-start hover:underline">
-                                                        Clear All Tokens
-                                                    </button>
-                                                </h4>
-                                                <div className="space-y-2">
-                                                    {editingDeck.tokens.map(token => (
-                                                        <div key={token.id} className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700">
-                                                            <img src={token.imageUrl} className="w-8 h-11 rounded object-cover" />
-                                                            <span className="text-xs text-gray-300 truncate flex-1">{token.name}</span>
-                                                            <button onClick={() => setEditingDeck({ ...editingDeck, tokens: editingDeck.tokens.filter(t => t.id !== token.id) })} className="text-red-400 hover:text-red-300"><X size={14} /></button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
 
-            {/* Mana Rules Modal */}
-            {
-                manaRulesCard && editingDeck && (
-                    <ManaRulesModal
-                        card={manaRulesCard}
-                        existingRule={editingDeck.manaRules?.[manaRulesCard.scryfallId]}
-                        commanderColors={(() => {
-                            const commander = editingDeck.deck.find((c: CardData) => c.isCommander);
-                            if (!commander?.manaCost) return undefined;
-                            const colors: ManaColor[] = [];
-                            if (commander.manaCost.includes('W')) colors.push('W');
-                            if (commander.manaCost.includes('U')) colors.push('U');
-                            if (commander.manaCost.includes('B')) colors.push('B');
-                            if (commander.manaCost.includes('R')) colors.push('R');
-                            if (commander.manaCost.includes('G')) colors.push('G');
-                            return colors.length > 0 ? colors : undefined;
-                        })()}
-                        onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
-                        onClose={() => setManaRulesCard(null)}
-                        allSources={editingDeck.deck
-                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land') || !!editingDeck.manaRules?.[c.scryfallId])
-                            .map(c => {
-                                const rule = editingDeck.manaRules?.[c.scryfallId];
-                                let priority = rule?.autoTapPriority;
+            {/* Reconnect Modal */}
+            {showReconnectModal && (
+                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-8 shadow-2xl max-w-md w-full text-center">
+                        <h3 className="text-2xl font-bold text-white mb-4">Active Session Found</h3>
+                        <p className="text-gray-300 mb-8">You were disconnected from a game. Do you want to reconnect?</p>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={handleReconnect} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center justify-center gap-2">
+                                <Play size={18} /> Reconnect
+                            </button>
+                            <button onClick={handleNewSession} className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold flex items-center justify-center gap-2">
+                                <Plus size={18} /> Start New Session
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
-                                if (priority === undefined) {
-                                    let produced: ManaColor[] = [];
-                                    if (rule) {
-                                        if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
-                                            Object.entries(rule.produced).forEach(([color, count]) => {
-                                                if (count > 0) produced.push(color as ManaColor);
-                                            });
-                                        } else {
-                                            produced = ['W', 'U'];
-                                        }
-                                    } else {
-                                        produced = parseProducedMana(c.producedMana);
-                                        if (produced.length === 0) {
-                                            const basic = getBasicLandColor(c.name);
-                                            if (basic) produced = [basic];
-                                        }
-                                    }
-                                    priority = getManaPriority(c, produced);
-                                }
-                                return { id: c.id, name: c.name, priority };
-                            })
-                        }
-                    />
-                )
-            }
-        </>
+            {/* Deck Library Modal */}
+            {isLibraryOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] h-[90vh] md:h-auto">
+                        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                            <h3 className="font-bold text-white flex items-center gap-2"><BookOpen className="text-purple-500" /> {isEditingTokens ? 'Manage Global Tokens' : 'Deck Library'}</h3>
+                            <button onClick={() => { setIsLibraryOpen(false); setEditingDeck(null); setIsEditingTokens(false); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
+                            {isEditingTokens ? (
+                                <div className="p-4 flex flex-col gap-4 h-full min-h-0 overflow-y-auto">
+                                    <h4 className="text-sm font-bold text-gray-400">Paste Token List</h4>
+                                    <textarea
+                                        className="flex-1 w-full bg-gray-900 border border-gray-600 rounded-lg p-4 text-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                                        placeholder={`1 Goblin\n2 Treasure\n1 Food...`}
+                                        value={tokenImportText}
+                                        onChange={(e) => setTokenImportText(e.target.value)}
+                                        disabled={isImportingTokens}
+                                    />
+                                    {tokenImportError && <p className="text-red-400 text-xs">{tokenImportError}</p>}
+                                    <div className="flex justify-end gap-4">
+                                        <button onClick={() => setIsEditingTokens(false)} className="text-gray-400 hover:text-white">Cancel</button>
+                                        <button onClick={handleTokenImport} disabled={isImportingTokens} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
+                                            {isImportingTokens ? <Loader className="animate-spin" size={16} /> : <Check size={16} />}
+                                            {isImportingTokens ? 'Loading...' : 'Save Tokens'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : !editingDeck ? (
+                                <div className="p-4 overflow-y-auto custom-scrollbar grid grid-cols-1 md:grid-cols-2 gap-4 pb-8">
+                                    <div className="col-span-full flex flex-col md:flex-row gap-2">
+                                        <button onClick={handleCreateNewDeck} className="flex-1 flex items-center justify-center gap-2 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
+                                            <Plus size={20} /> Create New Deck
+                                        </button>
+                                        <button onClick={() => setIsEditingTokens(true)} className="flex-1 flex items-center justify-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
+                                            <Layers size={20} /> Manage Global Tokens
+                                        </button>
+                                    </div>
+
+                                    {savedDecks.map(deck => {
+                                        const commander = deck.deck.find(c => c.isCommander) || deck.deck[0];
+                                        return (
+                                            <div key={deck.id} className="bg-gray-700/50 border border-gray-600 rounded-xl p-3 sm:p-4 flex flex-row gap-3 hover:border-gray-500 transition group relative">
+                                                <div className="w-14 h-20 sm:w-20 sm:h-28 bg-black rounded overflow-hidden flex-shrink-0 relative">
+                                                    {commander ? <img src={commander.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-gray-800" />}
+                                                    {deck.deck.some(c => c.isCommander) && <div className="absolute top-0 right-0 bg-amber-500 p-0.5 rounded-bl"><Crown size={8} className="text-black" /></div>}
+                                                </div>
+                                                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                    <h4 className="font-bold text-white text-sm sm:text-base truncate">{deck.name}</h4>
+                                                    <p className="text-xs text-gray-400 mb-2">{deck.deck.length} cards • {deck.tokens.length} tokens</p>
+                                                    <div className="flex gap-2 flex-wrap">
+                                                        <button onClick={() => handleLoadDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                            <Play size={12} /> Load
+                                                        </button>
+                                                        <button onClick={() => handleEditDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                            <Edit3 size={12} /> Edit
+                                                        </button>
+                                                        <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
+                                                            <Trash2 size={12} /> Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {savedDecks.length === 0 && <div className="col-span-full text-center text-gray-500 py-10">No saved decks found.</div>}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col h-full">
+                                    <div className="p-4 border-b border-gray-700 flex gap-4 items-center bg-gray-800">
+                                        <button onClick={() => setEditingDeck(null)} className="text-gray-400 hover:text-white"><X /></button>
+                                        <input
+                                            className="bg-gray-900 border border-gray-600 rounded px-3 py-1 text-white font-bold flex-1"
+                                            value={editingDeck.name}
+                                            onChange={e => setEditingDeck({ ...editingDeck, name: e.target.value })}
+                                        />
+                                        <button onClick={() => { onSaveDeck(editingDeck); setEditingDeck(null); }} className="bg-green-600 hover:bg-green-500 text-white px-4 py-1 rounded font-bold flex items-center gap-2">
+                                            <Save size={16} /> Save Changes
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+                                        <div className="flex-1 overflow-y-auto p-4 border-r border-gray-700 min-h-0">
+                                            <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Cards (Click to set Commander)</h4>
+                                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                                {editingDeck.deck.map(card => (
+                                                    <div
+                                                        key={card.id}
+                                                        onClick={() => toggleCommanderInEdit(card.id)}
+                                                        className={`relative aspect-[2.5/3.5] rounded cursor-pointer border-2 ${card.isCommander ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'border-transparent hover:border-gray-500'}`}
+                                                    >
+                                                        <img src={card.imageUrl} className="w-full h-full object-cover rounded-sm" />
+                                                        {card.isCommander && <div className="absolute top-1 right-1 bg-amber-500 text-black p-0.5 rounded-full"><Crown size={10} /></div>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="w-full md:w-1/3 p-4 overflow-y-auto bg-gray-900/50 min-h-[150px]">
+                                            <h4 className="text-xs font-bold text-gray-400 uppercase mb-2 flex flex-col gap-2">
+                                                <span>Tokens ({editingDeck.tokens.length})</span>
+                                                <div className="text-[10px] text-gray-500 font-normal">
+                                                    To add tokens, please use the "Edit" button in the library to open the Deck Builder, where you can add tokens in the final step.
+                                                </div>
+                                                <button onClick={() => setEditingDeck({ ...editingDeck, tokens: [] })} className="text-red-400 text-[10px] self-start hover:underline">
+                                                    Clear All Tokens
+                                                </button>
+                                            </h4>
+                                            <div className="space-y-2">
+                                                {editingDeck.tokens.map(token => (
+                                                    <div key={token.id} className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700">
+                                                        <img src={token.imageUrl} className="w-8 h-11 rounded object-cover" />
+                                                        <span className="text-xs text-gray-300 truncate flex-1">{token.name}</span>
+                                                        <button onClick={() => setEditingDeck({ ...editingDeck, tokens: editingDeck.tokens.filter(t => t.id !== token.id) })} className="text-red-400 hover:text-red-300"><X size={14} /></button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 };
 
+const UserIcon = ({ className, size }: { className?: string, size?: number }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={className}
+    >
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+    </svg>
+);

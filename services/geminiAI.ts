@@ -216,14 +216,17 @@ If you have instants or flash cards in your hand, you CAN play them on the oppon
      * Connect both AI services
      */
     public async connectAll(): Promise<void> {
-        const [strategy, conversation] = await Promise.all([
-            this.strategyClient?.sendGameState('Initializing game...').catch(() => null),
-            this.conversationClient?.connect().catch(() => null)
+        await Promise.all([
+            this.strategyClient?.sendGameState('Initializing game...').catch((e) => {
+                console.warn('[AI] Initial strategy state failed to send:', e?.message || e);
+            }),
+            this.conversationClient?.connect().catch((e) => {
+                console.warn('[AI] Conversation connect failed:', e?.message || e);
+            })
         ]);
 
-        if (strategy) {
-            this.options.onConnected?.();
-        }
+        // Signal that AI initiation has been attempted
+        this.options.onConnected?.();
     }
 
     /**

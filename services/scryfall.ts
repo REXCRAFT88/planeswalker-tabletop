@@ -123,15 +123,6 @@ export const fetchBatch = async (names: string[], onProgress?: (current: number,
             data.data.forEach((c: any) => {
                 const transformed = transformScryfallData(c);
                 cardMap.set(c.name.toLowerCase(), transformed);
-
-                // Also map the front face name if it's a double-faced/adventure card
-                if (c.name.includes(' // ')) {
-                    const frontName = c.name.split(' // ')[0].toLowerCase();
-                    if (!cardMap.has(frontName)) {
-                        cardMap.set(frontName, transformed);
-                    }
-                }
-
                 cardCache[c.name] = c; // Update cache
             });
 
@@ -195,10 +186,8 @@ const transformScryfallData = (data: any): CardData => {
         isManaSource: data.type_line.toLowerCase().includes('land') ||
             !!(data.produced_mana && data.produced_mana.length > 0) ||
             !!(data.oracle_text && (
-                data.oracle_text.match(/\{T\}: Add/i) ||
-                data.oracle_text.match(/Add \{(?:[WUBRGC]|X|\d+)\}/i) ||
-                data.oracle_text.includes('produces three times') ||
-                data.oracle_text.includes('produces twice as much')
+                data.oracle_text.includes('{T}: Add') ||
+                data.oracle_text.includes('Add {')
             )),
         producedMana: estimateProducedMana({
             name: data.name,
@@ -282,165 +271,6 @@ const detectManaAbilityType = (data: any): { manaAbilityType?: 'tap' | 'activate
     return {};
 };
 
-// --- Auto-Generate Default Mana Rule ---
-// Attempts to create a ManaRule from a card's oracle text and Scryfall data.
-// Returns null if the card doesn't produce mana or is a basic land (no rule needed).
-import { ManaRule, ManaColor as ManaColorType, EMPTY_MANA_RULE } from '../types';
-
-const ZERO_POOL: Record<ManaColorType, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 };
-const COLOR_MAP: Record<string, ManaColorType> = { w: 'W', u: 'U', b: 'B', r: 'R', g: 'G', c: 'C' };
-
-export const generateDefaultManaRule = (card: CardData): ManaRule | null => {
-    const text = card.oracleText || '';
-    const lowerText = text.toLowerCase();
-    const typeLine = (card.typeLine || '').toLowerCase();
-
-    // Skip basic lands — handled natively by the mana system
-    if (typeLine.includes('basic') && typeLine.includes('land')) return null;
-
-    // Skip non-mana-producing cards
-    if (!card.isManaSource) return null;
-
-    // Start from empty rule
-    const rule: ManaRule = { ...EMPTY_MANA_RULE, produced: { ...ZERO_POOL } };
-
-    // --- Trigger Detection ---
-    const abilityInfo = detectManaAbilityType({
-        oracle_text: text,
-        type_line: card.typeLine,
-        produced_mana: card.producedMana,
-    });
-
-    if (abilityInfo.manaAbilityType === 'tap') {
-        rule.trigger = 'tap';
-    } else if (abilityInfo.manaAbilityType === 'activated') {
-        rule.trigger = 'activated';
-        // Parse activation cost
-        if (abilityInfo.manaActivationCost) {
-            const costStr = abilityInfo.manaActivationCost.toLowerCase();
-            for (const [key, color] of Object.entries(COLOR_MAP)) {
-                const re = new RegExp(`\\{${key}\\}`, 'gi');
-                const matches = costStr.match(re);
-                if (matches) rule.activationCost[color] = matches.length;
-            }
-            // Generic mana cost
-            const genericMatch = costStr.match(/\{(\d+)\}/);
-            // Fix: Map generic cost to genericActivationCost, NOT C
-            if (genericMatch) rule.genericActivationCost = parseInt(genericMatch[1]);
-        }
-    } else if (abilityInfo.manaAbilityType === 'complex') {
-        // Complex sources — try to detect "for each" patterns
-        rule.trigger = 'tap';
-    } else if (abilityInfo.manaAbilityType === 'multi') {
-        rule.trigger = 'tap';
-    } else {
-        // Check for passive mana multipliers (e.g. Virtue of Strength)
-        if (lowerText.includes('mana produced') && (lowerText.includes('twice') || lowerText.includes('three times') || lowerText.includes('triple'))) {
-            rule.trigger = 'passive';
-            if (lowerText.includes('three times') || lowerText.includes('triple')) rule.manaMultiplier = 3;
-            else rule.manaMultiplier = 2;
-
-            if (lowerText.includes('basic land')) rule.appliesTo = ['basics' as any];
-            else if (lowerText.includes('land')) rule.appliesTo = ['lands'];
-
-            return rule;
-        }
-        // No mana ability detected
-        return null;
-    }
-
-    // --- CalcMode Detection ---
-    if (lowerText.match(/for each creature/i)) {
-        rule.calcMode = 'creatures';
-        rule.prodMode = 'multiplied';
-        rule.calcMultiplier = 1;
-    } else if (lowerText.match(/for each (basic )?land/i)) {
-        rule.calcMode = 'basicLands';
-        rule.prodMode = 'multiplied';
-        rule.calcMultiplier = 1;
-    } else if (lowerText.match(/equal to.*counter/i) || lowerText.match(/for each.*counter/i)) {
-        rule.calcMode = 'counters';
-        rule.prodMode = 'multiplied';
-        rule.calcMultiplier = 1;
-    } else {
-        rule.calcMode = 'set';
-        rule.prodMode = 'standard';
-    }
-
-    // --- Produced Mana Detection ---
-    // Match "Add {X}{Y}" patterns
-    const addMatches = text.match(/[Aa]dd\s+((?:\{[WUBRGC]\})+)/g);
-    if (addMatches) {
-        for (const m of addMatches) {
-            const symbols = m.match(/\{([WUBRGC])\}/gi) || [];
-            for (const sym of symbols) {
-                const color = COLOR_MAP[sym.replace(/[{}]/g, '').toLowerCase()];
-                if (color) rule.produced[color]++;
-            }
-        }
-    }
-
-    // "Add one mana of any color" — mark as flexible (W:1 as default, with alt showing all colors)
-    if (lowerText.includes('one mana of any color') || lowerText.includes('mana of any type') || lowerText.includes('mana of any one color')) {
-        // Check for commander identity restriction
-        if (lowerText.includes('commander\'s color identity') || lowerText.includes('your commander possesses')) {
-            rule.prodMode = 'commander';
-            rule.produced = { ...ZERO_POOL, C: 1 }; // C:1 stores the quantity 1
-        } else if (lowerText.includes('mana of any color') && (lowerText.includes('a land an opponent controls') || lowerText.includes('you could produce'))) {
-            rule.prodMode = 'available';
-        } else {
-            // Default "any color" modal picker
-            rule.prodMode = 'chooseColor';
-            rule.produced = { ...ZERO_POOL, C: 1 };
-        }
-    }
-
-    // --- Specific Card Overrides ---
-    if (card.name === 'Sol Ring') {
-        rule.produced = { ...ZERO_POOL, C: 2 };
-        rule.prodMode = 'standard';
-    } else if (card.name === 'Arcane Signet' || card.name === 'Command Tower') {
-        rule.prodMode = 'commander';
-        rule.produced = { ...ZERO_POOL, C: 1 };
-    }
-
-    // Non-basic lands that tap for one color (no oracle text for basic land types)
-    if (typeLine.includes('land') && !typeLine.includes('basic')) {
-        if (typeLine.includes('plains') && rule.produced.W === 0) rule.produced.W = 1;
-        if (typeLine.includes('island') && rule.produced.U === 0) rule.produced.U = 1;
-        if (typeLine.includes('swamp') && rule.produced.B === 0) rule.produced.B = 1;
-        if (typeLine.includes('mountain') && rule.produced.R === 0) rule.produced.R = 1;
-        if (typeLine.includes('forest') && rule.produced.G === 0) rule.produced.G = 1;
-    }
-
-    // If we still have no produced mana but Scryfall says it produces, use that
-    const totalProduced = Object.values(rule.produced).reduce((a, b) => a + b, 0);
-    if (totalProduced === 0 && card.producedMana && card.producedMana.length > 0) {
-        for (const m of card.producedMana) {
-            const color = m.toUpperCase() as ManaColorType;
-            if (color in rule.produced) {
-                rule.produced[color]++;
-            }
-        }
-    }
-
-    // Final check — if still no production, skip
-    const finalTotal = Object.values(rule.produced).reduce((a, b) => a + b, 0);
-    if (finalTotal === 0) return null;
-
-    // --- Auto-tap settings ---
-    rule.autoTap = rule.trigger === 'tap';
-    // Non-basic, non-creature sources get higher priority (tapped last)
-    if (typeLine.includes('land') && !typeLine.includes('basic')) {
-        rule.autoTapPriority = 2; // Non-basic lands
-    } else if (typeLine.includes('creature')) {
-        rule.autoTapPriority = 5; // Creatures that produce mana (tap last)
-    } else {
-        rule.autoTapPriority = 3; // Artifacts, etc.
-    }
-
-    return rule;
-};
 
 export const parseDeckList = (text: string): { count: number; name: string }[] => {
     const lines = text.split('\n');

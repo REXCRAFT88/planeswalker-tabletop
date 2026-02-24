@@ -1,25 +1,23 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CardData, BoardObject, LogEntry, PlayerStats, ManaRule, TurnStep } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { ManaDisplay, ManaPaymentSidebar, getIconPath } from './ManaDisplay';
+import { ManaDisplay } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
-import { GeminiAIManager, generateDeckMarkdown } from '../services/geminiAI';
-import { CARD_WIDTH, CARD_HEIGHT, PLAYER_COLORS } from '../constants';
+import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
+import { PLAYER_COLORS } from '../constants';
 import {
     calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
-    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor, BASE_COLORS,
+    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
 import {
-    LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Menu, Maximize, Minimize,
+    LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
 } from 'lucide-react';
-
-import { GameCommand } from '../services/geminiAI';
 
 interface TabletopProps {
     initialDeck: CardData[];
@@ -31,9 +29,6 @@ interface TabletopProps {
     isLocal?: boolean;
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
-    manaRules?: Record<string, ManaRule>;
-    geminiApiKey?: string;
-    onAddAIRequest?: () => void;
     onExit: () => void;
 }
 
@@ -80,32 +75,6 @@ interface LibraryActionState {
     isOpen: boolean;
     cardId: string;
 }
-
-
-const ruleToColors = (rule: ManaRule): ManaColor[] => {
-    const colors: ManaColor[] = [];
-    Object.entries(rule.produced).forEach(([color, count]) => {
-        for (let i = 0; i < count; i++) colors.push(color as ManaColor);
-    });
-    return colors;
-};
-
-const ruleToActivationString = (rule: ManaRule): string => {
-    const parts: string[] = [];
-    if (rule.genericActivationCost && rule.genericActivationCost > 0) {
-        parts.push(`{${rule.genericActivationCost}}`);
-    }
-    Object.entries(rule.activationCost).forEach(([color, count]) => {
-        if (count > 0) {
-            for (let i = 0; i < count; i++) parts.push(`{${color}}`);
-        }
-    });
-    return parts.join('');
-};
-
-
-
-const TURN_STEPS: TurnStep[] = ['UNTAP', 'UPKEEP', 'DRAW', 'MAIN1', 'ATTACK', 'MAIN2', 'END'];
 
 // --- Layout Constants ---
 const MAT_W = 840; // Wider to fit more cards
@@ -180,6 +149,9 @@ const getLayout = (totalPlayers: number, radius: number) => {
     }
     return configs;
 };
+
+
+
 
 
 // Zone Offsets (Relative to Mat Top-Left)
@@ -327,6 +299,8 @@ interface ZoneCounts {
     command: number;
 }
 
+// ...
+
 interface PlaymatProps {
     x: number;
     y: number;
@@ -455,10 +429,7 @@ const Playmat: React.FC<PlaymatProps> = ({
                 transform: `rotate(${rotation}deg)`
             }}
         >
-            <div
-                className="absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]"
-                style={{ color: sleeveColor, filter: 'brightness(1.8)' }}
-            >
+            <div className="absolute bottom-4 left-6 text-white/30 font-bold text-xl uppercase tracking-widest pointer-events-none">
                 {playerName}
             </div>
 
@@ -836,7 +807,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, geminiApiKey, onAddAIRequest, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -846,52 +817,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [mulliganSelectionMode, setMulliganSelectionMode] = useState(false);
     const [cardsToBottom, setCardsToBottom] = useState<CardData[]>([]);
 
-    const aiManagerRef = useRef<GeminiAIManager | null>(null);
-    const [magicRulesText, setMagicRulesText] = useState<string>('');
-
-    // Track the last processed log ID to avoid duplicate AI reactions
-    const lastProcessedLogIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        if (localOpponents?.some(o => o.type === 'ai')) {
-            fetch('/magic_rules_context.md')
-                .then(r => r.text())
-                .then(text => setMagicRulesText(text))
-                .catch(err => console.error("Failed to load magic rules:", err));
-        }
-    }, [localOpponents]);
-
-    // Initialize AI Manager when magic rules are loaded and game is ready
-    useEffect(() => {
-        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
-        if (aiOpponent && geminiApiKey && magicRulesText && !aiManagerRef.current && (isLocal || isHost) && gamePhase !== 'SETUP') {
-            console.log(`[AI] Initializing AI Manager for ${aiOpponent.name} with deck size: ${aiOpponent.deck?.length}`);
-            aiManagerRef.current = new GeminiAIManager({
-                apiKey: geminiApiKey,
-                selectedVoice: aiVoice,
-                playerName: playerName,
-                aiName: aiOpponent.name,
-                aiDeckMarkdown: generateDeckMarkdown(aiOpponent.deck || []),
-                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
-                magicRulesMarkdown: magicRulesText,
-                onGameCommand: (cmds) => {
-                    cmds.forEach(cmd => handleAIGameCommand(cmd, aiOpponent.id || ''));
-                },
-                onConnected: () => {
-                    addLog(`${aiOpponent.name} (Gemini AI) Connected!`, 'SYSTEM', aiOpponent.name);
-                },
-                onError: (err) => console.error('AI Manager error:', err)
-            });
-            aiManagerRef.current.connectAll();
-        }
-    }, [magicRulesText, geminiApiKey, localOpponents, gamePhase, initialDeck, playerName, aiVoice, isLocal]);
-
     const [turnStartTime, setTurnStartTime] = useState(Date.now());
     const [elapsedTime, setElapsedTime] = useState(0);
     const [round, setRound] = useState(1);
     const [turn, setTurn] = useState(1);
     const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string>('');
-    const [turnStep, setTurnStep] = useState<TurnStep>('UNTAP');
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -919,10 +849,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-    const [pendingPaymentCard, setPendingPaymentCard] = useState<CardData | null>(null);
-    const [allocatedMana, setAllocatedMana] = useState<ManaPool>(EMPTY_POOL);
-    const isDraggingRef = useRef(false);
-
     const [showManaCalculator, setShowManaCalculator] = useState(true);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
@@ -961,23 +887,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    const [autoTapEnabled, setAutoTapEnabled] = useState(false); // Disabled by default
-    const [soundsEnabled, setSoundsEnabled] = useState(() => localStorage.getItem('planeswalker_sounds_enabled') !== 'false');
-    const [searchCardSize, setSearchCardSize] = useState(() => Number(localStorage.getItem('planeswalker_search_card_size')) || 200);
-
+    const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
+        return localStorage.getItem('planeswalker_auto_tap') === 'true';
+    });
     const [floatingMana, setFloatingMana] = useState<ManaPool>({ ...EMPTY_POOL });
     const [lastPlayedCard, setLastPlayedCard] = useState<CardData | null>(null);
     const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
     const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
-
-    const [manaRulesState, setManaRulesState] = useState<Record<string, ManaRule>>(manaRules || {});
-    const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
-    const [choosingRuleForId, setChoosingRuleForId] = useState<string | null>(null);
-
-    // Sync state with prop initially or if prop changes (but allow internal override)
-    useEffect(() => {
-        if (manaRules) setManaRulesState(manaRules);
-    }, [manaRules]);
 
     // --- Undo System ---
     const [undoHistory, setUndoHistory] = useState<UndoableAction[]>([]);
@@ -989,14 +905,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         localStorage.setItem('planeswalker_auto_tap', String(autoTapEnabled));
     }, [autoTapEnabled]);
-
-    useEffect(() => {
-        localStorage.setItem('planeswalker_sounds_enabled', String(soundsEnabled));
-    }, [soundsEnabled]);
-
-    useEffect(() => {
-        localStorage.setItem('planeswalker_search_card_size', String(searchCardSize));
-    }, [searchCardSize]);
 
     // Local Table Host Logic
     useEffect(() => {
@@ -1104,6 +1012,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [isLocalTableHost, roomId, localOpponents]);
 
+    // Override localOpponents handling for Open Slots
     // Override localOpponents handling for Open Slots and Local Table
     useEffect(() => {
         if (isLocal && localOpponents) {
@@ -1171,47 +1080,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
-    const [aiVoice, setAiVoice] = useState(localStorage.getItem('planeswalker_ai_voice') || 'Aoede');
-    const [isMicPressed, setIsMicPressed] = useState(false);
-
-    const handleMicDown = () => {
-        setIsMicPressed(true);
-        aiManagerRef.current?.startMic();
-    };
-
-    const handleMicUp = () => {
-        setIsMicPressed(false);
-        aiManagerRef.current?.stopMic();
-    };
-
-    useEffect(() => {
-        if (!geminiApiKey || gamePhase === 'SETUP') return;
-
-        let isShiftDown = false;
-        const onGlobalKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Shift') {
-                if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
-                if (!isShiftDown) {
-                    isShiftDown = true;
-                    handleMicDown();
-                }
-            }
-        };
-        const onGlobalKeyUp = (e: KeyboardEvent) => {
-            if (e.key === 'Shift') {
-                isShiftDown = false;
-                handleMicUp();
-            }
-        };
-
-        window.addEventListener('keydown', onGlobalKeyDown);
-        window.addEventListener('keyup', onGlobalKeyUp);
-        return () => {
-            window.removeEventListener('keydown', onGlobalKeyDown);
-            window.removeEventListener('keyup', onGlobalKeyUp);
-        };
-    }, [geminiApiKey, gamePhase]);
-
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -1226,6 +1094,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const logsRef = useRef(logs);
     // Refs
     const dragStartRef = useRef<{ x: number, y: number } | null>(null);
+    const isSpacePressed = useRef(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
     const opponentContainerRef = useRef<HTMLDivElement>(null);
@@ -1271,7 +1140,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { turnStartTimeRef.current = turnStartTime; }, [turnStartTime]);
     useEffect(() => { gamePhaseRef.current = gamePhase; }, [gamePhase]);
 
-    const manaInfoRef = useRef<any>(null);
     useEffect(() => { boardObjectsRef.current = boardObjects; }, [boardObjects]);
     useEffect(() => { turnRef.current = turn; }, [turn]);
     useEffect(() => { roundRef.current = round; }, [round]);
@@ -1281,17 +1149,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { lifeRef.current = life; }, [life]);
     useEffect(() => { logsRef.current = logs; }, [logs]);
     useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
-
-    const hoveredCardIdRef = useRef<string | null>(null);
-    const lastPlayedCardRef = useRef<CardData | null>(null);
-    useEffect(() => { hoveredCardIdRef.current = hoveredCardId; }, [hoveredCardId]);
-    useEffect(() => { lastPlayedCardRef.current = lastPlayedCard; }, [lastPlayedCard]);
-
-    // Stable refs for functions used in window event listeners (avoids stale closures)
-    const handleAutoTapRef = useRef<(card: CardData, xValue?: number) => void>(() => { });
-    const handleKeyDownRef = useRef<(e: React.KeyboardEvent) => void>(() => { });
-    const nextTurnRef = useRef<() => void>(() => { });
-
 
     // --- Persistence & Auto-Restore ---
     useEffect(() => {
@@ -1318,11 +1175,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             opponentsLife,
             opponentsCounts,
             opponentsCommanders,
-            currentTurnPlayerId,
-            manaRules: manaRulesState // Use local state for backup
+            currentTurnPlayerId
         };
         localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
-    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId, manaRules]);
+    }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId]);
 
     const restoreGameFromBackup = () => {
         const backup = localStorage.getItem(`planeswalker_backup_${roomId}`);
@@ -1363,7 +1219,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setRound(data.round || 1);
             setTurnStartTime(data.turnStartTime || Date.now());
             setCommanderDamage(data.commanderDamage || {});
-            if (data.manaRules) setManaRulesState(data.manaRules);
 
             // Sync to Server
             socket.emit('game_action', {
@@ -1375,7 +1230,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     currentTurnPlayerId: myNewId,
                     turnStartTime: data.turnStartTime,
                     commanderDamage: data.commanderDamage,
-                    manaRules: data.manaRules,
                     turnOrder: [myNewId],
                     logs: data.logs
                 }
@@ -1494,22 +1348,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         localStorage.setItem('planeswalker_control_mode', controlMode);
     }, [controlMode]);
 
-    // Auto-switch view to active player
-    useEffect(() => {
-        if (isLocal || gamePhase !== 'PLAYING') return;
-
-        if (currentTurnPlayerId && currentTurnPlayerId !== socket.id) {
-            const opponents = playersList.filter(p => p.id !== socket.id);
-            const idx = opponents.findIndex(p => p.id === currentTurnPlayerId);
-            if (idx !== -1) {
-                setSelectedOpponentIndex(idx);
-                setIsOpponentViewOpen(true);
-            }
-        } else if (currentTurnPlayerId === socket.id) {
-            setIsOpponentViewOpen(false);
-        }
-    }, [currentTurnPlayerId, isLocal, gamePhase]);
-
     // ...
     // ...
     const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
@@ -1524,39 +1362,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         checkMobile();
         window.addEventListener('resize', checkMobile);
-
-        const onKeyPress = (e: KeyboardEvent) => {
-            if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
-
-            const key = e.key.toLowerCase();
-            if (key === 'tab') {
-                e.preventDefault();
-                // Use refs to get latest values (avoids stale closure)
-                const currentHoveredId = hoveredCardIdRef.current;
-                const currentLastPlayed = lastPlayedCardRef.current;
-                const currentBoardObjects = boardObjectsRef.current;
-
-                const cardToTapFor = currentHoveredId
-                    ? currentBoardObjects.find(o => o.id === currentHoveredId)?.cardData
-                    : currentLastPlayed;
-
-                if (cardToTapFor) {
-                    handleAutoTapRef.current(cardToTapFor);
-                }
-            } else if (key === 'enter') {
-                nextTurnRef.current();
-            } else {
-                // Use ref to call latest handleKeyDown (avoids stale closure)
-                handleKeyDownRef.current(e as any);
-            }
-        };
-
-        window.addEventListener('keydown', onKeyPress);
-
-        return () => {
-            window.removeEventListener('resize', checkMobile);
-            window.removeEventListener('keydown', onKeyPress);
-        };
+        return () => window.removeEventListener('resize', checkMobile);
     }, [controlMode]);
 
     useEffect(() => {
@@ -1613,14 +1419,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             localOpponents.forEach((opp, idx) => {
                 // Ensure we have a valid ID, fallback to player-X if needed
                 const pid = opp.id || playersList[idx + 1]?.id || `player-${idx + 1}`;
-
-                // Use opponent's deck if available, otherwise log warning and use fallback
-                if (opp.deck && opp.deck.length > 0) {
-                    states[pid] = createInitialState(pid, opp.deck, opp.tokens || []);
-                } else {
-                    console.warn(`[AI] Opponent ${opp.name} (${pid}) has no deck provided. Falling back to initialDeck.`);
-                    states[pid] = createInitialState(pid, initialDeck, opp.tokens || []);
-                }
+                states[pid] = createInitialState(pid, opp.deck, opp.tokens);
             });
 
             localPlayerStates.current = states;
@@ -1719,6 +1518,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         onExit();
     };
 
+    // Emit life changes
     // Emit life changes (Remote)
     useEffect(() => {
         if (!isLocal && (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN')) {
@@ -1787,8 +1587,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 mySeatIndex,
                 opponentsLife,
                 opponentsCounts,
-                opponentsCommanders,
-                manaRules: manaRulesState // Use local state for backup
+                opponentsCommanders
             };
             // Backup state to the current seat index, include userId for matching on reconnect
             socket.emit('backup_state', { room: roomId, seatIndex: mySeatIndex, state, userId });
@@ -1872,6 +1671,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else if (action === 'UPDATE_OBJECT' && data.updates && data.updates.controllerId === 'local-player') {
             payload = { ...data, updates: { ...data.updates, controllerId: socket.id } };
         }
+        socket.emit('game_action', { room: roomId, action, data: payload });
         socket.emit('game_action', { room: roomId, action, data: payload });
     };
 
@@ -1981,7 +1781,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             // Detect new players and Sync Game State if Host
             const newPlayers = roomPlayers.filter(rp => !prevPlayers.find(p => p.id === rp.id));
-            if (newPlayers.length > 0) playSound('JOIN_LEAVE');
             if (newPlayers.length > 0 && amIHost && gamePhaseRef.current !== 'SETUP') {
                 console.log("New/reconnected player joined game in progress, syncing state...");
 
@@ -2198,7 +1997,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 if (data.nextPlayerSocketId) {
                     setCurrentTurnPlayerId(data.nextPlayerSocketId);
                     setTurn(data.turnNumber);
-                    setTurnStep('UNTAP'); // Reset to UNTAP on player change
                     const prevDuration = data.prevDuration;
                     if (prevDuration && sender) {
                         addLog(`${sender.name} ended their turn (Duration: ${prevDuration})`, 'SYSTEM');
@@ -2211,21 +2009,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     checkDamageTracking();
                 }
             }
-            else if (action === 'UPDATE_TURN_STEP') {
-                setTurnStep(data.turnStep);
-            }
             else if (action === 'UPDATE_LIFE') {
-                const targetId = data.proxyId || (sender ? sender.id : null);
-                if (targetId && targetId !== socket.id) {
-                    setOpponentsLife(prev => ({ ...prev, [targetId]: data.life }));
+                if (sender && sender.id !== socket.id) {
+                    setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
                 }
             }
             else if (action === 'UPDATE_COUNTS') {
-                const effectiveSenderId = data.proxyId || (sender ? sender.id : null);
-                if (effectiveSenderId && effectiveSenderId !== socket.id) {
+                if (sender && sender.id !== socket.id) {
                     setOpponentsCounts(prev => ({
                         ...prev,
-                        [effectiveSenderId]: {
+                        [sender.id]: {
                             library: data.library,
                             graveyard: data.graveyard,
                             exile: data.exile,
@@ -2234,7 +2027,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         }
                     }));
                     if (data.commanders) {
-                        setOpponentsCommanders(prev => ({ ...prev, [effectiveSenderId]: data.commanders }));
+                        setOpponentsCommanders(prev => ({ ...prev, [sender.id]: data.commanders }));
                     }
                 }
             }
@@ -2246,7 +2039,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         requesterName: requester ? requester.name : 'Unknown',
                         zone: data.zone
                     });
-                    playSound('REQUEST');
                 }
             }
             else if (action === 'ALLOW_VIEW') {
@@ -2289,7 +2081,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 }
             }
             else if (action === 'ADD_OBJECT') {
-                playSound('PLAY');
                 setBoardObjects(prev => {
                     if (prev.some(o => o.id === data.id)) return prev;
                     return [...prev, data as BoardObject];
@@ -2345,7 +2136,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setCurrentTurnPlayerId(data.currentTurnPlayerId);
                 setTurnStartTime(data.turnStartTime);
                 if (data.commanderDamage) setCommanderDamage(data.commanderDamage);
-                if (data.manaRules) setManaRulesState(data.manaRules);
                 if (data.turnOrder) {
                     setTurnOrder(data.turnOrder);
                     setPlayersList(prev => sortPlayers(prev, data.turnOrder));
@@ -2449,15 +2239,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         if (data.opponentsLife) setOpponentsLife(data.opponentsLife);
                         if (data.opponentsCounts) setOpponentsCounts(data.opponentsCounts);
                         if (data.opponentsCommanders) setOpponentsCommanders(data.opponentsCommanders);
-                        if (data.manaRules) {
-                            console.log("Restoring custom mana rules from backup...");
-                            setManaRulesState(data.manaRules);
-                        }
-                        // Restoring mana rules is usually handled by App.tsx initialization, 
-                        // but if we are in a sub-view (Reconnect), we should ensure they are here.
-                        // However, manaRules is a prop in Tabletop. So we can't 'set' it.
-                        // The parent (App.tsx) needs to provide it.
-                        // So the fix is primarily ensuring they ARE in the backup so App.tsx can find them.
 
                         // Remap board objects: old socket id for us -> new socket id
                         const myNewId = socket.id;
@@ -2489,65 +2270,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             y: window.innerHeight / 2 - (matCenterY * startScale),
             scale: startScale
         });
-    }, [initialDeck, initialGameStarted, magicRulesText, geminiApiKey]);
-
-    const requestedAiIds = useRef<Set<string>>(new Set());
-
-    useEffect(() => {
-        if (!isLocal && isHost && localOpponents && playersList) {
-            localOpponents.forEach(opp => {
-                if (opp.type === 'ai' && !playersList.find(rp => rp.id === opp.id) && !requestedAiIds.current.has(opp.id)) {
-                    requestedAiIds.current.add(opp.id);
-                    socket.emit('add_ai_player', {
-                        room: roomId,
-                        name: opp.name,
-                        color: opp.color,
-                        aiId: opp.id
-                    });
-                } else if (opp.type === 'ai' && playersList.find(rp => rp.id === opp.id)) {
-                    // Initialize AI state if it was added mid-game
-                    // Check if state exists AND has cards - if not, reinitialize
-                    const existingState = localPlayerStates.current[opp.id];
-                    const needsInit = !existingState || existingState.library.length === 0;
-
-                    if (gamePhase !== 'SETUP' && needsInit) {
-                        console.log(`[AI] Initializing state for ${opp.name}, deck has ${opp.deck?.length || 0} cards`);
-
-                        const aiState = createInitialState(opp.id, opp.deck || [], opp.tokens || []);
-                        if (aiState.library.length >= 7) {
-                            const aiStartHand = aiState.library.slice(0, 7);
-                            aiState.library = aiState.library.slice(7);
-                            const aiStartTokens = aiState.hand.filter(c => c.isToken);
-                            aiState.hand = [...aiStartHand, ...aiStartTokens];
-                        }
-                        localPlayerStates.current[opp.id] = aiState;
-                        sendAIStateUpdate(opp.id);
-                    }
-
-                    // If AI manager isn't running, start it (even in SETUP phase)
-                    if (!aiManagerRef.current && geminiApiKey) {
-                        aiManagerRef.current = new GeminiAIManager({
-                            apiKey: geminiApiKey,
-                            selectedVoice: aiVoice,
-                            playerName: playerName,
-                            aiName: opp.name,
-                            aiDeckMarkdown: generateDeckMarkdown(opp.deck || []),
-                            opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
-                            magicRulesMarkdown: magicRulesText,
-                            onGameCommand: (cmds) => {
-                                cmds.forEach(cmd => handleAIGameCommand(cmd, opp.id || ''));
-                            },
-                            onConnected: () => {
-                                addLog(`${opp.name} (Gemini AI) Connected!`, 'SYSTEM', opp.name);
-                            },
-                            onError: (err) => console.error(err)
-                        });
-                        aiManagerRef.current.connectAll();
-                    }
-                }
-            });
-        }
-    }, [isLocal, isHost, localOpponents, playersList, roomId]);
+    }, [initialDeck, initialGameStarted]);
 
     // Auto-center opponent view
     useEffect(() => {
@@ -2612,266 +2335,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         sendHandUpdate(currentId, hand, gamePhase, mulliganCount);
     }, [hand, gamePhase, mulliganCount, isLocal, mySeatIndex, playersList]);
 
-    const sendAIStateUpdate = (aiPlayerId: string) => {
-        const state = localPlayerStates.current[aiPlayerId];
-        if (!state) return;
-
-        socket.emit('game_action', {
-            room: roomId,
-            action: 'UPDATE_COUNTS',
-            data: {
-                proxyId: aiPlayerId,
-                library: state.library.length,
-                graveyard: state.graveyard.length,
-                exile: state.exile.length,
-                hand: state.hand.filter(c => !c.isToken).length,
-                command: state.commandZone.length,
-                commanders: state.commandZone
-            }
-        });
-
-        socket.emit('game_action', {
-            room: roomId,
-            action: 'UPDATE_LIFE',
-            data: {
-                proxyId: aiPlayerId,
-                life: state.life
-            }
-        });
-    };
-
-    const handleAIGameCommand = (cmd: GameCommand, aiPlayerId: string) => {
-        console.log(`[Gemini AI] executing command: ${cmd.action}`, cmd.args);
-        const aiName = localOpponents?.find(o => o.id === aiPlayerId)?.name || 'AI';
-        try {
-            switch (cmd.action) {
-                case 'draw_card': {
-                    const amount = cmd.args.amount || 1;
-                    const state = localPlayerStates.current[aiPlayerId];
-                    if (!state) return;
-                    let drawn = 0;
-                    for (let i = 0; i < amount; i++) {
-                        if (state.library.length > 0) {
-                            const card = state.library.shift()!;
-                            state.hand.push(card);
-                            drawn++;
-                        }
-                    }
-                    sendAIStateUpdate(aiPlayerId);
-                    addLog(`drew ${drawn} card(s)`, 'ACTION', aiName);
-                    break;
-                }
-                case 'move_card': {
-                    const { cardName, zone } = cmd.args;
-                    const state = localPlayerStates.current[aiPlayerId];
-                    if (!state) return;
-
-                    if (zone === 'battlefield') {
-                        const idx = state.hand.findIndex(c => c.name.toLowerCase() === cardName.toLowerCase());
-                        if (idx !== -1) {
-                            const card = state.hand[idx];
-                            state.hand.splice(idx, 1);
-                            sendAIStateUpdate(aiPlayerId);
-
-                            const seatIdx = playersList.findIndex(p => p.id === aiPlayerId);
-                            const mat = layout[seatIdx] || { x: 0, y: 0, rot: 0 };
-
-                            const obj: BoardObject = {
-                                id: crypto.randomUUID(),
-                                type: 'CARD',
-                                cardData: card,
-                                x: mat.x + MAT_W / 2 + (Math.random() * 50 - 25),
-                                y: mat.y + MAT_H / 2 + (Math.random() * 50 - 25),
-                                z: Date.now(),
-                                rotation: mat.rot || 0,
-                                isFaceDown: false,
-                                isTransformed: false,
-                                counters: {},
-                                commanderDamage: {},
-                                controllerId: aiPlayerId,
-                                quantity: 1,
-                                tappedQuantity: 0
-                            };
-                            socket.emit('game_action', { room: roomId, action: 'ADD_OBJECT', data: obj });
-                            addLog(`played ${card.name}`, 'ACTION', aiName);
-                        }
-                    }
-                    else if (zone === 'graveyard') {
-                        addLog(`discarded ${cardName} to graveyard`, 'ACTION', aiName);
-                        // Similar to user hitting delete
-                    }
-                    break;
-                }
-                case 'pass_turn': {
-                    addLog(`passed the turn`, 'ACTION', aiName);
-                    socket.emit('game_action', { room: roomId, action: 'END_TURN', data: { playerId: aiPlayerId } });
-                    break;
-                }
-                case 'no_action': {
-                    console.log(`[Gemini AI] Passed priority (No Action).`);
-                    break;
-                }
-                case 'tap_untap': {
-                    const { cardName } = cmd.args;
-                    // Find object on board belonging to ai
-                    let obj = boardObjects.find(o => o.controllerId === aiPlayerId && o.cardData.name.toLowerCase() === cardName.toLowerCase() && o.rotation === 0);
-                    if (!obj) obj = boardObjects.find(o => o.controllerId === aiPlayerId && o.cardData.name.toLowerCase() === cardName.toLowerCase()); // fallback to any
-
-                    if (obj) {
-                        const newRot = obj.rotation === 0 ? 90 : 0;
-                        socket.emit('game_action', {
-                            room: roomId, action: 'UPDATE_OBJECT', data: {
-                                id: obj.id, updates: { rotation: newRot, tappedQuantity: newRot === 90 ? obj.quantity : 0 }
-                            }
-                        });
-                        addLog(`${newRot === 90 ? 'tapped' : 'untapped'} ${cardName}`, 'ACTION', aiName);
-                    }
-                    break;
-                }
-                case 'change_life': {
-                    const { amount } = cmd.args;
-                    const state = localPlayerStates.current[aiPlayerId];
-                    if (state) {
-                        state.life += amount;
-                        addLog(`changed life by ${amount}`, 'ACTION', aiName);
-                        sendAIStateUpdate(aiPlayerId);
-                    }
-                    break;
-                }
-                case 'mulligan': {
-                    const { keep } = cmd.args;
-                    if (keep) {
-                        addLog(`kept their hand`, 'ACTION', aiName);
-                        // Emit set hand kept
-                        socket.emit('game_action', { room: roomId, action: 'KEEP_HAND', data: { playerId: aiPlayerId } });
-                    } else {
-                        addLog(`took a mulligan`, 'ACTION', aiName);
-                        // For AI mulligan, just simplify:
-                        const state = localPlayerStates.current[aiPlayerId];
-                        if (state) {
-                            state.library = [...state.library, ...state.hand].sort(() => Math.random() - 0.5);
-                            state.hand = [];
-                            state.mulliganCount++;
-                            for (let i = 0; i < 7; i++) state.hand.push(state.library.shift()!);
-                            sendAIStateUpdate(aiPlayerId);
-                        }
-                    }
-                    break;
-                }
-            }
-        } catch (e) {
-            console.error("AI command failed:", e);
-        }
-    };
-
-    // AI Mulligan Hook
-    useEffect(() => {
-        if (!aiManagerRef.current || gamePhase !== 'MULLIGAN') return;
-        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
-        if (aiOpponent) {
-            const aiState = localPlayerStates.current[aiOpponent.id];
-            if (aiState) {
-                const prompt = `It is the mulligan phase. You go ${playersList[0].id === aiOpponent.id ? 'first' : 'second'}. Your hand is: ${aiState.hand.map(c => c.name).join(', ')}. Do you want to keep or mulligan? Reply with action "mulligan" and args { "keep": true/false }.`;
-                aiManagerRef.current.sendGameState(prompt);
-            }
-        }
-    }, [gamePhase, localOpponents, playersList]);
-
-    // AI Conversational & Priority Interrupt Hook
-    useEffect(() => {
-        if (!aiManagerRef.current || logs.length === 0 || gamePhase !== 'PLAYING') return;
-        const lastLog = logs[0];
-        const aiOpponent = localOpponents?.find(o => o.type === 'ai');
-
-        // Skip if we've already processed this log (prevents duplicate reactions)
-        if (!lastLog || lastProcessedLogIdRef.current === lastLog.id) return;
-
-        if (aiOpponent && lastLog.playerName !== aiOpponent.name && lastLog.type === 'ACTION') {
-            // Mark this log as processed
-            lastProcessedLogIdRef.current = lastLog.id;
-
-            // Only send priority interrupt for significant actions, not every small action
-            // Filter out actions that don't require interrupt (like life changes, drawing, or tapping mana)
-            const isMinorAction = /tapped|untapped|draw|shuffled|life|counter/i.test(lastLog.message);
-            const isMajorAction = /cast|attack|block|played|destroyed|exiled|targeted/i.test(lastLog.message);
-            const requiresInterrupt = isMajorAction && !isMinorAction;
-
-            if (requiresInterrupt && currentTurnPlayerId !== aiOpponent.id) {
-                const aiState = localPlayerStates.current[aiOpponent.id];
-                const p1Id = playersList[0].id;
-                const p1State = localPlayerStates.current[p1Id];
-
-                const getBoard = (pid: string) => {
-                    const objs = boardObjects.filter(o => o.controllerId === pid);
-                    if (objs.length === 0) return "Board is empty.";
-                    return `Board: ${objs.map(o => `${o.quantity}x ${o.cardData.name} ${o.rotation === 90 ? '(Tapped)' : '(Untapped)'}`).join(', ')}`;
-                };
-
-                const prompt = `PRIORITY INTERRUPT! Player ${lastLog.playerName} just performed an action: "${lastLog.message}".
-Do you want to respond by casting an Instant, playing a Flash card, or activating an ability?
-
-Your Status:
-Life: ${aiState?.life || 40}
-Hand: ${aiState?.hand.length || 0} cards. ${(aiState?.hand || []).map(c => c.name).join(', ')}
-${getBoard(aiOpponent.id)}
-
-Opponent Status (${playersList[0].name}):
-Life: ${p1State?.life || 40}
-${getBoard(p1Id)}
-
-Respond with a JSON block containing the action you want to take. If you do not want to respond, execute a single "no_action" action!`;
-
-                console.log("Sending Priority Interrupt to AI...");
-                aiManagerRef.current.sendGameState(prompt);
-            }
-        }
-    }, [logs, localOpponents, gamePhase, currentTurnPlayerId, boardObjects, playersList]);
-
-    // AI Strategy Hook
-    useEffect(() => {
-        if (!aiManagerRef.current || gamePhase !== 'PLAYING') return;
-        const aiOpponent = localOpponents?.find(o => o.id === currentTurnPlayerId && o.type === 'ai');
-
-        if (aiOpponent && turnStep === 'UNTAP') {
-            const aiState = localPlayerStates.current[aiOpponent.id];
-            const p1Id = playersList[0].id;
-            const p1State = localPlayerStates.current[p1Id];
-
-            const getBoard = (pid: string) => {
-                const objs = boardObjects.filter(o => o.controllerId === pid);
-                if (objs.length === 0) return "Board is empty.";
-                return `Board: ${objs.map(o => `${o.quantity}x ${o.cardData.name} ${o.rotation === 90 ? '(Tapped)' : '(Untapped)'}`).join(', ')}`;
-            };
-
-            const prompt = `It is now your turn! Turn ${round}, Step: ${turnStep}.
-Your Status:
-Life: ${aiState?.life || 40}
-Hand: ${aiState?.hand.length || 0} cards. ${(aiState?.hand || []).map(c => c.name).join(', ')}
-${getBoard(aiOpponent.id)}
-
-Opponent Status (${playersList[0].name}):
-Life: ${p1State?.life || 40}
-Hand: ${p1State?.hand.length || 0} cards.
-${getBoard(p1Id)}
-
-Please decide your plays and issue JSON commands. When you are done taking actions, issue a "pass_turn" action command to end your turn!`;
-
-            console.log("Sending Strategy Prompt to AI...");
-            aiManagerRef.current.sendGameState(prompt);
-        }
-    }, [currentTurnPlayerId, turnStep, gamePhase, round, boardObjects, localOpponents, playersList]);
-
     // --- Game Flow Methods ---
     const handleStartGameLogic = (options?: { mulligansAllowed: boolean, trackDamage?: boolean }) => {
         const shouldUseMulligans = options?.mulligansAllowed ?? true;
         setMulligansAllowed(shouldUseMulligans);
         if (options?.trackDamage !== undefined) setTrackDamage(options.trackDamage);
 
-        // Always ensure we have states ready, even in multiplayer for AI
-        const states: Record<string, LocalPlayerState> = {};
-
         if (isLocal) {
-            // Local game populates everyone's state
+            // Re-initialize states to ensure fresh deck data
+            const states: Record<string, LocalPlayerState> = {};
             playersList.forEach((p, idx) => {
                 if (p.id === 'player-0' || p.id === 'local-player') {
                     states[p.id] = createInitialState(p.id, initialDeck, initialTokens);
@@ -2882,18 +2354,9 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                         opp = localOpponents[idx - 1];
                     }
 
-                    // Log for debugging if AI opponent not found
-                    if (p.isAi && !opp) {
-                        console.warn(`[AI] Opponent ${p.name} (${p.id}) found in playersList but not in localOpponents. localOpponents:`, localOpponents);
-                    }
-
-                    if (opp && opp.deck && opp.deck.length > 0) {
-                        states[p.id] = createInitialState(p.id, opp.deck, opp.tokens || []);
-                    } else if (opp) {
-                        console.warn(`[AI] Opponent ${opp.name} has empty deck. Falling back to initialDeck.`);
-                        states[p.id] = createInitialState(p.id, initialDeck, opp.tokens || []);
+                    if (opp) {
+                        states[p.id] = createInitialState(p.id, opp.deck, opp.tokens);
                     } else {
-                        console.warn(`[AI] No opponent found for player ${p.name}, creating empty state`);
                         states[p.id] = createInitialState(p.id, [], []);
                     }
                 }
@@ -2908,9 +2371,9 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     // Keep tokens if any
                     const tokens = state.hand.filter(c => c.isToken);
                     state.hand = [...initialHand, ...tokens];
-                } else if (state.library.length === 0) {
-                    console.warn(`[AI] Player ${state.id} has 0 cards in library at game start!`);
                 }
+                // Send update to mobile if applicable
+                sendHandUpdate(state.id, state.hand, 'MULLIGAN', state.mulliganCount);
             });
 
             // Ensure P1 state exists before loading
@@ -2920,29 +2383,12 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             // Load P1 state
             loadLocalPlayerState(playersList[0].id);
         } else {
-            // Normal Multiplayer
             const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
             if (lib.length >= 7) {
                 const initialHand = lib.slice(0, 7);
                 const remaining = lib.slice(7);
                 setHand([...initialHand, ...initialTokens]);
                 setLibrary(remaining);
-            }
-
-            // Populate AI state for host if there is an AI
-            const aiOpponent = localOpponents?.find(o => o.type === 'ai');
-            if (aiOpponent && isHost) {
-                // The AI needs its library ready
-                const aiState = createInitialState(aiOpponent.id || '', aiOpponent.deck, aiOpponent.tokens);
-                if (aiState.library.length >= 7) {
-                    const aiStartHand = aiState.library.slice(0, 7);
-                    aiState.library = aiState.library.slice(7);
-                    const aiStartTokens = aiState.hand.filter(c => c.isToken);
-                    aiState.hand = [...aiStartHand, ...aiStartTokens];
-                }
-                states[aiOpponent.id || ''] = aiState;
-                Object.assign(localPlayerStates.current, states);
-                sendAIStateUpdate(aiOpponent.id || '');
             }
         }
 
@@ -2956,8 +2402,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             setTurnOrder(playersList.map(p => p.id));
             setCurrentTurnPlayerId(playersList[0].id);
         }
-
-        // Note: AI Manager initialization is now handled by a separate useEffect that waits for magicRulesText
 
         addLog("Game Started", "SYSTEM", "Host");
 
@@ -3113,7 +2557,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             const newLib = cardsToShuffle.slice(7);
             setHand([...newHandCards, ...currentTokensInHand]);
             setLibrary(newLib);
-            playSound('DRAW');
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
         }
@@ -3169,7 +2612,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
-        playSound('PLAY');
 
         addLog(`played ${card.name} from mobile`, 'ACTION', playersList[playerIdx].name);
 
@@ -3356,38 +2798,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         emitAction('UPDATE_SETTINGS', { trackDamage: val });
     };
 
-    const playSound = useCallback((type: 'TURN' | 'PLAY' | 'DRAW' | 'REQUEST' | 'JOIN_LEAVE') => {
-        if (!soundsEnabled) return;
-        const sounds = {
-            TURN: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c9766e4a64.mp3', // Simple notify
-            PLAY: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Card flip
-            DRAW: 'https://cdn.pixabay.com/audio/2022/03/15/audio_1e00e81f19.mp3', // Draw/Flip
-            REQUEST: 'https://cdn.pixabay.com/audio/2022/01/21/audio_4eb6046e7f.mp3', // Chime
-            JOIN_LEAVE: 'https://cdn.pixabay.com/audio/2021/11/25/audio_91b325ef01.mp3' // Pop
-        };
-        try {
-            const audio = new Audio(sounds[type]);
-            audio.volume = 0.4;
-            audio.play().catch(() => { }); // Ignore errors (e.g. user hasn't interacted)
-        } catch (e) {
-            console.error("Audio error:", e);
-        }
-    }, [soundsEnabled]);
-
     const nextTurn = () => {
-        // Restriction: Only current player can advance turn/step
-        const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
-        if (currentTurnPlayerId !== myId) return;
-
-        // Advantage sub-phases
-        const currentStepIndex = TURN_STEPS.indexOf(turnStep);
-        if (currentStepIndex < TURN_STEPS.length - 1) {
-            const nextStep = TURN_STEPS[currentStepIndex + 1];
-            setTurnStep(nextStep);
-            emitAction('UPDATE_TURN_STEP', { turnStep: nextStep });
-            return;
-        }
-
         if (isLocal) {
             checkDamageTracking();
             damageTakenThisTurn.current = 0;
@@ -3398,20 +2809,12 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             saveLocalPlayerState(viewedPlayerId);
 
             const currentIndex = playersList.findIndex(p => p.id === currentTurnPlayerId);
-
-            // skip disconnected players
-            let nextIndex = (currentIndex + 1) % playersList.length;
-            while (playersList[nextIndex].disconnected && nextIndex !== currentIndex) {
-                nextIndex = (nextIndex + 1) % playersList.length;
-            }
-
+            const nextIndex = (currentIndex + 1) % playersList.length;
             const nextPlayer = playersList[nextIndex];
 
             setCurrentTurnPlayerId(nextPlayer.id);
             if (gamePhase === 'PLAYING') setTurn(turn + 1);
-            setTurnStep('UNTAP');
             setTurnStartTime(Date.now());
-            playSound('TURN');
 
             // Switch View to Next Player
             setMySeatIndex(nextIndex);
@@ -3420,16 +2823,8 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         }
 
         if (playersList.length <= 1) return;
-        const currentIndex = playersList.findIndex(p => p.id === currentTurnPlayerId);
-        if (currentIndex === -1) return;
-
-        // skip disconnected players
-        let nextIndex = (currentIndex + 1) % playersList.length;
-        while (playersList[nextIndex].disconnected && nextIndex !== currentIndex) {
-            nextIndex = (nextIndex + 1) % playersList.length;
-        }
-
-        const nextPlayer = playersList[nextIndex];
+        const myIndex = playersList.findIndex(p => p.id === socket.id);
+        const nextPlayer = playersList[(myIndex + 1) % playersList.length];
         const nextTurnNum = turn + 1;
         const duration = formatTime(Date.now() - turnStartTime);
         const durationMs = Date.now() - turnStartTime;
@@ -3451,9 +2846,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         // Optimistic update
         setCurrentTurnPlayerId(nextPlayer.id);
         setTurn(nextTurnNum);
-        setTurnStep('UNTAP');
         setTurnStartTime(Date.now());
-        playSound('TURN');
 
         checkDamageTracking();
         damageTakenThisTurn.current = 0;
@@ -3541,106 +2934,13 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         addLog(`split 1 ${obj.cardData.name} from stack`);
     };
 
-    const produceMana = (source: ManaSource, skipRotation: boolean = false) => {
-        // Don't early return - allow tap-to-mana to trigger modal even when showManaCalculator is false
-        // The showManaCalculator controls UI display, but shouldn't prevent activation
-
-        // Check if this source has an activation cost and we need to pay it
-        if (source.activationCost) {
-            const cost = parseManaCost(source.activationCost);
-            const poolRes = subtractFromPool(floatingMana, cost, (manaInfoRef.current || manaInfo).cmdColors);
-
-            if (!poolRes) {
-                // Not enough mana in pool - show payment sidebar for the cost
-                const virtualCard = {
-                    id: 'virtual-cost-' + source.objectId,
-                    name: `Activate ${source.cardName}`,
-                    manaCost: source.activationCost,
-                    imageUrl: boardObjects.find(o => o.id === source.objectId)?.cardData.imageUrl,
-                    type: 'Ability',
-                    producedMana: []
-                } as any;
-                setPendingPaymentCard(virtualCard);
-                return;
-            } else {
-                // Auto-paid from pool
-                setFloatingMana(poolRes);
-                addLog(`paid {${source.activationCost}} for ${source.cardName} ability`);
-            }
-        }
-
-        const produced = source.producedMana;
-
-        // Check if this source has an alternative rule OR is an OR option (e.g. canopy vista)
-        // OR sources must show a modal to choose which branch to use
-        if ((source.alternativeRule || source.hasOROption) && !choosingRuleForId) {
-            setChoosingRuleForId(source.objectId);
-            return;
-        }
-
-        // Use the pre-computed needsChoice flag from ManaSource
-        // - Standard mode: produces ALL listed colors simultaneously → no choice needed
-        //   EXCEPT: CMD mana always requires a color choice (only WUBRG is wildcard)
-        // - chooseColor/commander/available: user must pick one color → choice needed
-        // - OR sources: handled above with rule choice modal
-        const hasCMD = produced.includes('CMD');
-        const cmdNeedsChoice = hasCMD && (manaInfo.cmdColors?.length || 0) > 1;
-        const needsColorChoice = (source.needsChoice || cmdNeedsChoice) && !source.hasOROption;
-
-        if (!needsColorChoice && produced.length > 0) {
-            // Fixed mana production - add directly to pool
-            setFloatingMana(prev => {
-                const next = { ...prev };
-                produced.forEach(c => {
-                    next[c] = (next[c] || 0) + 1;
-                });
-                return next;
-            });
-
-            if (produced.length > 0) {
-                const displayStr = produced.map(c => `{${c}}`).join('');
-                addLog(`added ${displayStr} to mana pool (via ${source.cardName})`);
-            }
-
-            if (!skipRotation && source.abilityType === 'tap') {
-                const obj = boardObjects.find(o => o.id === source.objectId);
-                if (obj) {
-                    const controllerIdx = playersList.findIndex(p => p.id === obj.controllerId);
-                    const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
-
-                    if (obj.quantity > 1) {
-                        const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true, true);
-                    } else {
-                        const isTapped = obj.rotation !== defaultRotation;
-                        if (!isTapped) {
-                            const newRotation = (defaultRotation + 90) % 360;
-                            updateBoardObject(obj.id, { rotation: newRotation }, true, true);
-                        }
-                    }
-                }
-            }
-        } else if (needsColorChoice) {
-            // Flexible mana - show color picker
-            setChoosingColorForId(source.objectId);
-        }
-    };
-
-    const handleManaButtonClick = (source: ManaSource) => {
-        produceMana(source, false);
-    };
-
-
-
-    const updateBoardObject = (id: string, updates: Partial<BoardObject>, silent: boolean = false, skipMana: boolean = false) => {
+    const updateBoardObject = (id: string, updates: Partial<BoardObject>) => {
         setBoardObjects(prev => {
             const movingObj = prev.find(o => o.id === id);
-            if (!movingObj) return prev;
-
             let nextState = prev;
             const changes: { id: string, updates: Partial<BoardObject> }[] = [];
 
-            if (movingObj.type === 'CARD' && updates.x !== undefined && updates.y !== undefined) {
+            if (movingObj && movingObj.type === 'CARD' && updates.x !== undefined && updates.y !== undefined) {
                 const dx = updates.x - movingObj.x;
                 const dy = updates.y - movingObj.y;
                 if (dx !== 0 || dy !== 0) {
@@ -3661,55 +2961,42 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                         }
                         return obj;
                     });
+                } else {
+                    changes.push({ id, updates });
+                    nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
                 }
             } else {
-                changes.push({ id, updates });
-                nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
+                // Check for Tapping
+                const myId = isLocal ? playersList[mySeatIndex].id : socket.id;
+                if (movingObj && movingObj.controllerId === myId) {
+                    const isTap = (updates.rotation === 90 && movingObj.rotation === 0) ||
+                        (updates.tappedQuantity !== undefined && updates.tappedQuantity > movingObj.tappedQuantity);
+                    if (isTap) {
+                        const cardName = movingObj.cardData.name;
+                        updateMyStats({
+                            tappedCounts: {
+                                ...gameStats[myId]?.tappedCounts,
+                                [cardName]: (gameStats[myId]?.tappedCounts?.[cardName] || 0) + 1
+                            }
+                        });
 
-                // --- Tap-to-Mana Detection ---
-                // Check if this is a tap action (rotation or tappedQuantity change)
-                const myControllerIdx = playersList.findIndex(p => p.id === movingObj.controllerId);
-                const defaultRot = (myControllerIdx !== -1 && layout[myControllerIdx]) ? layout[myControllerIdx].rot : 0;
+                        // Record undo for tap
+                        pushUndo({
+                            type: 'TAP_CARD',
+                            objectId: id,
+                            previousRotation: movingObj.rotation,
+                            previousTappedQuantity: movingObj.tappedQuantity
+                        });
 
-                const wasTapped = movingObj.rotation !== defaultRot || movingObj.tappedQuantity === movingObj.quantity;
-                const isNowTapped = (updates.rotation !== undefined ? updates.rotation !== defaultRot : wasTapped) ||
-                    (updates.tappedQuantity !== undefined && updates.tappedQuantity > movingObj.tappedQuantity && updates.tappedQuantity !== movingObj.quantity ? true : wasTapped);
-
-                // Trigger mana production when tapping (regardless of isLocal)
-                // STOP MANA PRODUCTION DURING DRAG/MOVE OR IF skipMana IS TRUE
-                if (!wasTapped && isNowTapped && !isDraggingRef.current && !skipMana) {
-                    // Use manaInfoRef to get the latest calculated info
-                    const currentManaInfo = manaInfoRef.current || manaInfo;
-
-                    // Find the mana source for this object
-                    const source = currentManaInfo?.sources?.find((s: any) => s.objectId === id);
-
-                    if (source) {
-                        // Check if we should auto-produce
-                        // 1. It is a land (always auto-produce if tap ability)
-                        // 2. Or it is a rock/dork with 'tap' ability and NOT hideManaButton (unless user explicitly hid it, but usually we want to auto-prod if they tap it physically)
-                        // Actually, if they tap it physically, they probably want mana.
-                        // Exception: Attacking with a creature that produces mana?
-                        // But usually you tap to attack in combat phase.
-                        // For now, let's auto-produce if it has a 'tap' ability.
-
-                        // Trigger mana production only if it doesn't have a button (like Lands)
-                        // This prevents double triggering and respects user's wish to tap for other reasons (e.g. attacking)
-                        if (source.abilityType === 'tap' && (source.hideManaButton || source.isLand)) {
-                            console.log(`[Tap Detection] Triggering mana production for ${source.cardName}`);
-                            // Use setTimeout to ensure state update happens first so visual tap is clear
-                            setTimeout(() => produceMana(source, true), 50);
-                        }
                     }
                 }
+                changes.push({ id, updates });
+                nextState = prev.map(obj => obj.id === id ? { ...obj, ...updates } : obj);
             }
 
-            if (!silent) {
-                changes.forEach(change => {
-                    emitAction('UPDATE_OBJECT', change);
-                });
-            }
-
+            changes.forEach(change => {
+                emitAction('UPDATE_OBJECT', change);
+            });
             return nextState;
         });
     };
@@ -3755,11 +3042,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
-
-        // Apply enters tapped rule
-        if (manaRulesState[card.scryfallId]?.entersTapped) {
-            newObject.rotation = (newObject.rotation + 90) % 360;
-        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
@@ -3769,52 +3051,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         // Track last played card for auto-tap
         setLastPlayedCard(card);
 
-        if (autoTapEnabled && showManaCalculator && !card.isLand) {
-            handleAutoTap(card);
-        }
-
         // Record undo
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });
 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
-
-        // Show mana payment sidebar if it has a cost and calculator is ENABLED
-        // BUT skip if auto-tap already handled it successfully
-        if (showManaCalculator && !card.isToken && !card.isLand && !(autoTapEnabled)) {
-            const cost = parseManaCost(card.manaCost || "");
-            if (cost.cmc > 0) {
-                setAllocatedMana(EMPTY_POOL);
-                setPendingPaymentCard(card);
-            }
-        }
     };
-
-    const payManaForCard = useCallback((card: CardData, xValue: number = 0): boolean => {
-        const cost = parseManaCost(card.manaCost || "{0}");
-        // Simplistic payment check - could be improved for specific colors
-        const requiredTotal = cost.cmc + xValue;
-        const availableInPool = Object.values(floatingMana).reduce((a, b) => a + b, 0);
-
-        if (availableInPool >= requiredTotal) {
-            // Subtract mana from pool (simplistic generic first)
-            setFloatingMana(prev => {
-                const next = { ...prev };
-                let remaining = requiredTotal;
-
-                // Try to subtract from colorless first, then others
-                const colors: (keyof ManaPool)[] = ['C', 'W', 'U', 'B', 'R', 'G'];
-                for (const color of colors) {
-                    if (remaining <= 0) break;
-                    const took = Math.min(next[color] || 0, remaining);
-                    next[color] = (next[color] || 0) - took;
-                    remaining -= took;
-                }
-                return next;
-            });
-            return true;
-        }
-        return false;
-    }, [floatingMana]);
 
     // --- Mana Calculator Functions ---
     const myDefaultRotation = useMemo(() => layout[mySeatIndex]?.rot || 0, [layout, mySeatIndex]);
@@ -3861,19 +3102,15 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
             // Handle W/U etc.
         }
-        const info = calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors, manaRulesState);
-        manaInfoRef.current = info;
-        return info;
-    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation, manaRulesState]);
+        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors);
+    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation]);
 
     // Reset floating mana on turn change
     useEffect(() => {
         setFloatingMana({ ...EMPTY_POOL });
-        setAllocatedMana(EMPTY_POOL);
     }, [turn, currentTurnPlayerId]);
 
     const handleAddMana = (type: keyof ManaPool) => {
-        if (!showManaCalculator) return;
         setFloatingMana(prev => ({
             ...prev,
             [type]: (prev[type] || 0) + 1
@@ -3888,8 +3125,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
     };
 
     // Handle auto-tap when Tab is pressed
-    const handleAutoTap = useCallback((card: CardData, xValue: number = 0) => {
-        if (!showManaCalculator || !autoTapEnabled) return; // Only run if setting is active and tracker shown
+    const handleAutoTap = useCallback((card: CardData) => {
         if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
 
         const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
@@ -3897,9 +3133,14 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         const cost = parseManaCost(card.manaCost);
         if (cost.symbols.length === 0) return;
 
+        // X spells: skip auto-tap (user needs to manually decide X value)
+        if (cost.hasX) {
+            addLog(`${card.name} has X in its cost — tap mana manually`);
+            return;
+        }
+
         // 1. Try to pay with Floating Mana first
-        const untappedSources = [...manaInfo.availableSources, ...manaInfo.potentialSources];
-        const result = autoTapForCost(cost, untappedSources, floatingMana, xValue, manaInfo.cmdColors);
+        const result = autoTapForCost(cost, manaInfo.sources, floatingMana);
 
         if (!result.success) {
             addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
@@ -3920,23 +3161,16 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             tapCounts[id] = (tapCounts[id] || 0) + 1;
         });
 
-        setBoardObjects(prev => {
-            const next = [...prev];
-            Object.entries(tapCounts).forEach(([id, count]) => {
-                const idx = next.findIndex(o => o.id === id);
-                if (idx !== -1) {
-                    const obj = next[idx];
-                    const updates: Partial<BoardObject> = {};
-                    if (obj.quantity > 1) {
-                        updates.tappedQuantity = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
-                    } else {
-                        updates.rotation = tappedRotation;
-                    }
-                    next[idx] = { ...obj, ...updates };
-                    emitAction('UPDATE_OBJECT', { id, ...updates });
-                }
-            });
-            return next;
+        Object.entries(tapCounts).forEach(([id, count]) => {
+            const obj = boardObjects.find(o => o.id === id);
+            if (!obj) return;
+
+            if (obj.quantity > 1) {
+                const newTappedQty = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
+                updateBoardObject(id, { tappedQuantity: newTappedQty });
+            } else {
+                updateBoardObject(id, { rotation: tappedRotation });
+            }
         });
 
         // Update floating mana — subtract what was spent and add any excess produced
@@ -3965,7 +3199,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             type: 'AUTO_TAP',
             tappedIds: result.tappedIds,
             previousStates,
-            previousFloatingMana: { ...floatingMana }, // Save copy of previous floating mana
+            previousFloatingMana: floatingMana, // Save previous floating mana for undo
         });
 
         // Visual flash feedback
@@ -3976,27 +3210,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
         addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
         setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, manaInfo.availableSources, manaInfo.potentialSources, manaInfo.cmdColors, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats, autoTapEnabled, showManaCalculator]);
-
-    // Handle UI auto-tap for a specific color (from ManaDisplay)
-    const handleAutoTapColor = useCallback((color: string) => {
-        if (!showManaCalculator || !autoTapEnabled) return; // Only run if setting is active and tracker shown
-        // Find an untapped source that produces this color and is in 'availableSources'
-        // We prefer sources that produce ONLY this color if possible, to save flexible sources
-        const source = manaInfo.availableSources.find(s =>
-            s.producedMana.includes(color as ManaColor) &&
-            !s.isFlexible // Prefer simple sources first
-        ) || manaInfo.availableSources.find(s =>
-            s.producedMana.includes(color as ManaColor)
-        );
-
-        if (source) {
-            produceMana(source, true); // true = isTapped (trigger tap animation/update)
-            // Note: produceMana handles the actual state update and logging
-        } else {
-            addLog(`No available ${color} source to auto-tap`);
-        }
-    }, [manaInfo.availableSources, produceMana, autoTapEnabled]);
+    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats]);
 
     // Handle undo (Ctrl+Z)
     const handleUndo = useCallback(() => {
@@ -4042,32 +3256,19 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                 break;
             }
             case 'AUTO_TAP': {
-                // Restore all tapped cards to their previous state in a single update
-                setBoardObjects(prev => {
-                    const next = [...prev];
-                    action.previousStates.forEach(state => {
-                        const idx = next.findIndex(o => o.id === state.id);
-                        if (idx !== -1) {
-                            const updates = {
-                                rotation: state.rotation,
-                                tappedQuantity: state.tappedQuantity
-                            };
-                            next[idx] = { ...next[idx], ...updates };
-                            emitAction('UPDATE_OBJECT', { id: state.id, updates });
-                        }
+                // Restore all tapped cards to their previous state
+                action.previousStates.forEach(state => {
+                    updateBoardObject(state.id, {
+                        rotation: state.rotation,
+                        tappedQuantity: state.tappedQuantity
                     });
-                    return next;
                 });
-
-                if (action.previousFloatingMana) {
-                    setFloatingMana(action.previousFloatingMana);
-                }
                 setAutoTappedIds([]);
                 addLog('undid auto-tap');
                 break;
             }
         }
-    }, [undoHistory, boardObjects, floatingMana]);
+    }, [undoHistory, boardObjects]);
 
     const spawnCounter = () => {
         const myPos = layout[mySeatIndex];
@@ -4083,7 +3284,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
-
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
@@ -4131,17 +3331,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
-
-        // Apply enters tapped rule
-        if (manaRulesState[card.scryfallId]?.entersTapped) {
-            newObject.rotation = (newObject.rotation + 90) % 360;
-        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`cast commander ${card.name}`);
-        handleAutoTap(card);
     };
 
     const handleDamageReport = (damageReport: Record<string, number>, healingReport: Record<string, number>) => {
@@ -4193,25 +3387,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
-
-        // Apply enters tapped rule
-        if (manaRulesState[card.scryfallId]?.entersTapped) {
-            newObject.rotation = (newObject.rotation + 90) % 360;
-        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`played top card of library`);
-
-        const cost = parseManaCost(card.manaCost || "");
-        if (cost.hasX && showManaCalculator) {
-            setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
-        } else if (autoTapEnabled && showManaCalculator) {
-            handleAutoTap(card);
-        } else if (showManaCalculator) {
-            setPendingPaymentCard(card);
-        }
     };
 
     const playTopGraveyard = () => {
@@ -4228,25 +3408,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             counters: {}, commanderDamage: {}, controllerId: getControllerId(),
             quantity: 1, tappedQuantity: 0
         };
-
-        // Apply enters tapped rule
-        if (manaRulesState[card.scryfallId]?.entersTapped) {
-            newObject.rotation = (newObject.rotation + 90) % 360;
-        }
         setMaxZ(prev => prev + 1);
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`returned ${card.name} from graveyard to battlefield`);
-
-        const cost = parseManaCost(card.manaCost || "");
-        if (cost.hasX && showManaCalculator) {
-            setPendingPaymentCard(card); setAllocatedMana(EMPTY_POOL);
-        } else if (autoTapEnabled && showManaCalculator) {
-            handleAutoTap(card);
-        } else if (showManaCalculator) {
-            setPendingPaymentCard(card);
-        }
     };
 
     const returnToHand = (id: string) => {
@@ -4424,6 +3590,12 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
 
         switch (e.key.toLowerCase()) {
+            case ' ':
+                if (!isSpacePressed.current) {
+                    isSpacePressed.current = true;
+                    setView(v => ({ ...v })); // Force re-render for cursor update
+                }
+                break;
             case 'd': drawCard(1); break;
             case 'u': untapAll(); break;
             case 's': shuffleLibrary(); break;
@@ -4436,7 +3608,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     const myId = isLocal ? currentTurnPlayerId : socket.id;
                     const myCmd = boardObjects.find(o => o.controllerId === myId && o.cardData.isCommander);
                     if (myCmd) {
-                        setCommandZone(prev => [...prev, myCmd.cardData]);
+                        setCommandZone(prev => [myCmd.cardData, ...prev]);
                         setBoardObjects(prev => prev.filter(o => o.id !== myCmd.id));
                         emitAction('REMOVE_OBJECT', { id: myCmd.id });
                         addLog(`returned commander ${myCmd.cardData.name} to command zone`);
@@ -4446,30 +3618,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             case 'x': openSearch('LIBRARY'); break;
             case 'e': openSearch('EXILE'); break;
             case 'g': openSearch('GRAVEYARD'); break;
-            case 't': {
-                const targetId = hoveredCardIdRef.current;
-                if (targetId) {
-                    const obj = boardObjectsRef.current.find(o => o.id === targetId);
-                    if (obj) {
-                        const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
-                        if (obj.controllerId === myId) {
-                            if (obj.quantity > 1) {
-                                const allTapped = obj.tappedQuantity === obj.quantity;
-                                updateBoardObject(obj.id, { tappedQuantity: allTapped ? 0 : obj.quantity });
-                            } else {
-                                const playerIdx = playersListRef.current.findIndex(p => p.id === obj.controllerId);
-                                const defaultRot = layout[playerIdx]?.rot || 0;
-                                const isTapped = (obj.rotation % 360) !== (defaultRot % 360);
-                                updateBoardObject(obj.id, { rotation: isTapped ? defaultRot : (defaultRot + 90) % 360 });
-                            }
-                        }
-                    }
-                } else {
-                    openSearch('TOKENS');
-                }
-                break;
-            }
-            case 'k': openSearch('TOKENS'); break;
+            case 't': openSearch('TOKENS'); break;
             case 'alt':
                 if (e.location === 1) { // Left Alt
                     e.preventDefault();
@@ -4478,60 +3627,36 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                 break;
             case 'r': rollDice(6); break;
             case 'f': spawnCounter(); break;
+            case 'enter': nextTurn(); break;
             case 'arrowup': handleLifeChange(1); break;
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
-            case 'm':
-                setShowManaCalculator(prev => {
-                    const next = !prev;
-                    if (!next) {
-                        setFloatingMana({ ...EMPTY_POOL });
-                        setPendingPaymentCard(null);
-                        setAllocatedMana(EMPTY_POOL);
+            case 'm': setShowManaCalculator(prev => !prev); break;
+            case 'tab': {
+                e.preventDefault();
+                if (hoveredCardId) {
+                    const obj = boardObjects.find(o => o.id === hoveredCardId);
+                    if (obj) {
+                        handleAutoTap(obj.cardData);
+                        return;
                     }
-                    return next;
-                });
+                }
+                if (autoTapEnabled && lastPlayedCard) {
+                    handleAutoTap(lastPlayedCard);
+                }
                 break;
-            case 'z':
+            }
+            case 'z': {
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
                     handleUndo();
                 }
                 break;
-            case 'v': {
-                if (isOpponentViewOpen) setIsOpponentViewOpen(false);
-                else {
-                    const opponents = playersList.filter(p => (isLocal ? p.id !== playersList[mySeatIndex].id : p.id !== socket.id));
-                    if (opponents.length > 0) {
-                        const nextIdx = (selectedOpponentIndex + 1) % opponents.length;
-                        setSelectedOpponentIndex(nextIdx);
-                        setIsOpponentViewOpen(true);
-                    }
-                }
-                break;
             }
-            case 'p': {
-                const activeId = isLocal ? currentTurnPlayerId : socket.id;
-                const myHand = isLocal ? localPlayerStates.current[activeId]?.hand : hand;
-                if (myHand.length > 0) playCardFromHand(myHand[0]);
-                break;
-            }
-            case 'o': {
-                const hosts = playersList.filter(p => !p.id.startsWith('player-') && !p.id.startsWith('ai-') && p.id !== 'local-player');
-                if (hosts.length > 0) {
-                    emitAction('REQUEST_VIEW_HAND', { targetId: hosts[0].id });
-                    addLog(`requested to view ${hosts[0].name}'s hand`);
-                }
-                break;
-            }
-            case 'enter': {
-                const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
-                if (currentTurnPlayerId === myId) {
-                    nextTurn();
-                }
-                break;
-            }
+            case 'v': setIsOpponentViewOpen(prev => !prev); break;
+            case 'arrowleft': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev - 1 + (playersList.length - 1)) % (playersList.length - 1)); break;
+            case 'arrowright': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev + 1) % (playersList.length - 1)); break;
             default:
                 const num = parseInt(e.key);
                 if (!isNaN(num)) {
@@ -4544,12 +3669,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
     };
 
     const handleKeyUp = (e: React.KeyboardEvent) => {
+        if (e.key === ' ') {
+            isSpacePressed.current = false;
+            setView(v => ({ ...v })); // Force re-render for cursor update
+        }
     };
-
-    // Keep function refs in sync for stable window event listeners
-    useEffect(() => { handleAutoTapRef.current = handleAutoTap; }, [handleAutoTap]);
-    useEffect(() => { handleKeyDownRef.current = handleKeyDown; });
-    useEffect(() => { nextTurnRef.current = nextTurn; });
 
     const requestViewZone = (zone: string, targetPlayerId: string) => {
         const target = playersList.find(p => p.id === targetPlayerId);
@@ -4713,12 +3837,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
 
     const handleContainerPointerDown = (e: React.PointerEvent) => {
         if (mobileActionCardId) setMobileActionCardId(null);
-
-        // Detect if clicking a card/object to avoid panning when interacting
-        if ((e.target as HTMLElement).closest('[data-object-id]')) {
-            if (e.button === 0) return; // Left click on card -> interact
-        }
-
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -4734,8 +3852,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
             isDraggingView.current = false;
         } else if (activePointers.current.size === 1) {
             const isMouse = e.pointerType === 'mouse';
-            // Only Right Click (2) or Touch (non-mouse)
-            if (e.button === 2 || (e.button === 0 && (isMobile || !isMouse))) {
+            if (e.button === 1 || (e.button === 0 && (isMobile || !isMouse || isSpacePressed.current))) {
                 isDraggingView.current = true;
                 lastMousePos.current = { x: e.clientX, y: e.clientY };
                 e.preventDefault();
@@ -4792,26 +3909,13 @@ Please decide your plays and issue JSON commands. When you are done taking actio
 
     const handleWheel = (e: React.WheelEvent) => {
         if (isDraggingView.current) return;
-
-        // Hover-based counter adjustment
-        if (hoveredCardIdRef.current) {
-            const obj = boardObjectsRef.current.find(o => o.id === hoveredCardIdRef.current);
-            const myId = isLocal ? playersListRef.current[mySeatIndex]?.id : socket.id;
-            if (obj && obj.controllerId === myId) {
-                const delta = e.deltaY < 0 ? 1 : -1;
-                const current = obj.counters["+1/+1"] || 0;
-                updateBoardObject(obj.id, { counters: { ...obj.counters, "+1/+1": current + delta } });
-                return;
-            }
-        }
-
         const rect = e.currentTarget.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
         const delta = -e.deltaY * 0.001;
 
         setView(prev => {
-            const newScale = Math.min(Math.max(0.1, prev.scale + 0.1 * (delta > 0 ? 1 : -1)), 5); // Adjust sensitivity
+            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
             const scaleRatio = newScale / prev.scale;
             const newX = mx - (mx - prev.x) * scaleRatio;
             const newY = my - (my - prev.y) * scaleRatio;
@@ -4821,7 +3925,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
 
     const handleOpponentPointerDown = (e: React.PointerEvent) => {
         const isMouse = e.pointerType === 'mouse';
-        if (e.button === 2 || (e.button === 0 && (isMobile || !isMouse))) {
+        if (e.button === 1 || (e.button === 0 && (!isMouse || isSpacePressed.current))) {
             isDraggingOpponentView.current = true;
             lastOpponentMousePos.current = { x: e.clientX, y: e.clientY };
             (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -4852,7 +3956,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         const delta = -e.deltaY * 0.001;
 
         setOpponentView(prev => {
-            const newScale = Math.min(Math.max(0.1, prev.scale + 0.1 * (delta > 0 ? 1 : -1)), 5); // Adjust sensitivity
+            const newScale = Math.min(Math.max(0.1, prev.scale + delta), 5);
             const scaleRatio = newScale / prev.scale;
             const newX = mx - (mx - prev.x) * scaleRatio;
             const newY = my - (my - prev.y) * scaleRatio;
@@ -4884,11 +3988,11 @@ Please decide your plays and issue JSON commands. When you are done taking actio
         <div
             ref={containerRefToUse}
             className="w-full h-full touch-none relative overflow-hidden bg-[#1a1410]"
+            style={{ cursor: isSpacePressed.current ? 'grab' : 'default' }}
             onPointerDown={handlers.onDown}
             onPointerMove={handlers.onMove}
             onPointerUp={handlers.onUp}
             onWheel={handlers.onWheel}
-            onContextMenu={(e) => e.preventDefault()}
         >
             <div
                 className="absolute inset-0 opacity-100 pointer-events-none"
@@ -4951,7 +4055,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                 commanders={isMe ? commandZone : (isLocal ? (localPlayerStates.current[p.id]?.commandZone || []) : (opponentsCommanders[p.id] || []))}
                                 onDraw={isMe ? () => drawCard(1) : (isLocal ? () => { } : () => requestViewZone('LIBRARY', p.id))}
                                 onShuffle={isMe ? shuffleLibrary : () => { }}
-                                onOpenSearch={isMe ? openSearch : (source) => (isLocal || source === 'GRAVEYARD' || source === 'EXILE') ? openSearch(source, p.id) : requestViewZone(source, p.id)}
+                                onOpenSearch={isMe ? openSearch : (source) => isLocal ? openSearch(source, p.id) : requestViewZone(source, p.id)}
                                 onPlayCommander={isMe ? playCommander : (isLocal ? () => { } : () => { })}
                                 onPlayTopLibrary={isMe ? playTopLibrary : () => { }}
                                 onPlayTopGraveyard={isMe ? playTopGraveyard : () => { }}
@@ -5038,14 +4142,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                 defaultRotation={defaultRotation}
                                 isHandVisible={isHandVisible}
                                 onHover={(id) => setHoveredCardId(id)}
-                                manaSource={(manaInfo.sources.find(s => s.objectId === obj.id && s.abilityType !== 'passive') || manaInfo.potentialSources.find(s => s.objectId === obj.id)) as ManaSource}
-                                manaRule={manaRulesState[obj.cardData.scryfallId]}
-                                onManaClick={() => {
-                                    const source = manaInfo.sources.find(s => s.objectId === obj.id) || manaInfo.potentialSources.find(s => s.objectId === obj.id);
-                                    if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
-                                }}
-                                onDragChange={(dragging) => { isDraggingRef.current = dragging; }}
-                                showManaCalculator={showManaCalculator}
                             />
                         </div>
                     );
@@ -5063,6 +4159,8 @@ Please decide your plays and issue JSON commands. When you are done taking actio
     return (
         <div
             ref={rootRef}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
             className="relative w-full h-full overflow-hidden select-none bg-[#1a1410] flex flex-col outline-none"
         >
@@ -5090,25 +4188,9 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wide mb-4 flex justify-between items-center">
                                 <span>Connected Players ({playersList.length})</span>
                                 {isHost && (
-                                    <div className="flex gap-2">
-                                        {!isLocal && localOpponents.filter(o => o.type === 'ai').length === 0 && onAddAIRequest && (
-                                            <button
-                                                onClick={() => {
-                                                    if (!geminiApiKey) {
-                                                        alert("Please configure a Gemini API Key in the Lobby first to use the AI.");
-                                                        return;
-                                                    }
-                                                    onAddAIRequest();
-                                                }}
-                                                className="text-xs bg-purple-700 hover:bg-purple-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors"
-                                            >
-                                                <Zap size={12} /> Add AI
-                                            </button>
-                                        )}
-                                        <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
-                                            <Shuffle size={12} /> Shuffle Order
-                                        </button>
-                                    </div>
+                                    <button onClick={handleShufflePlayers} className="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-white flex items-center gap-1 transition-colors">
+                                        <Shuffle size={12} /> Shuffle Order
+                                    </button>
                                 )}
                             </h3>
                             <div className="space-y-2">
@@ -5317,207 +4399,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     )}
                 </div>
             )}
-
-            {/* Color Choice Modal (Runtime) */}
-            {choosingColorForId && (
-                <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6">
-                        <h3 className="text-xl font-bold text-white">Choose Color</h3>
-                        <div className="flex gap-4">
-                            {(() => {
-                                const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) ||
-                                    manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
-                                if (!source) return null;
-
-                                const colors = new Set<ManaColor>();
-                                source.producedMana.forEach(c => {
-                                    if (c === 'WUBRG') {
-                                        (['W', 'U', 'B', 'R', 'G'] as ManaColor[]).forEach(color => colors.add(color));
-                                    } else if (c === 'CMD') {
-                                        if (manaInfo.cmdColors && manaInfo.cmdColors.length > 0) {
-                                            manaInfo.cmdColors.forEach(color => colors.add(color));
-                                        } else {
-                                            colors.add('C');
-                                        }
-                                    } else {
-                                        colors.add(c as ManaColor);
-                                    }
-                                });
-
-                                return Array.from(colors).map(color => (
-                                    <button
-                                        key={color}
-                                        onClick={() => {
-                                            setFloatingMana(prev => {
-                                                const next = { ...prev };
-                                                const amount = source.manaCount || 1;
-                                                next[color] = (next[color] || 0) + amount;
-                                                return next;
-                                            });
-                                            const amount = source.manaCount || 1;
-                                            addLog(`added ${amount > 1 ? `${amount}x {${color}}` : `{${color}}`} to mana pool`);
-
-                                            if (source && source.abilityType === 'tap' && choosingColorForId) {
-                                                const obj = boardObjects.find(o => o.id === choosingColorForId);
-                                                if (obj) {
-                                                    const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
-                                                        ? mySeatIndex
-                                                        : playersList.findIndex(p => p.id === obj.controllerId);
-                                                    const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
-
-                                                    if (obj.quantity > 1) {
-                                                        const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                                                        updateBoardObject(obj.id, { tappedQuantity: newTapped }, true, true);
-                                                    } else {
-                                                        const isTapped = obj.rotation !== defaultRotation;
-                                                        if (!isTapped) {
-                                                            const newRotation = (defaultRotation + 90) % 360;
-                                                            updateBoardObject(obj.id, { rotation: newRotation }, true, true); // silent = true, skipMana = true
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            setChoosingColorForId(null);
-                                        }}
-                                        className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
-                                    >
-                                        <img src={getIconPath(color)} className="w-full h-full object-contain" />
-                                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
-                                            {color}
-                                        </div>
-                                    </button>
-                                ));
-                            })()}
-                        </div>
-                        <button
-                            onClick={() => setChoosingColorForId(null)}
-                            className="text-sm text-gray-400 hover:text-white underline mt-2"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Rule Choice Modal (Alternative Rule or OR Picker) */}
-            {choosingRuleForId && (
-                <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6 max-w-sm">
-                        {(() => {
-                            const source = manaInfo.sources.find(s => s.objectId === choosingRuleForId) ||
-                                manaInfo.potentialSources.find(s => s.objectId === choosingRuleForId);
-                            if (!source) return null;
-
-                            // Handle "OR" branches (e.g. canopy vista or complex OR sources)
-                            if (source.hasOROption && source.orColors) {
-                                return (
-                                    <div className="flex flex-col items-center gap-4">
-                                        <h3 className="text-xl font-bold text-white">Choose Ability</h3>
-                                        <div className="grid grid-cols-1 gap-3 w-full">
-                                            {source.orColors.map((branch, branchIdx) => (
-                                                <button
-                                                    key={branchIdx}
-                                                    onClick={() => {
-                                                        const newSource = {
-                                                            ...source,
-                                                            producedMana: branch,
-                                                            hasOROption: false,
-                                                            alternativeRule: undefined
-                                                        };
-                                                        setChoosingRuleForId(null);
-                                                        // skipRotation: true because card is already tapped
-                                                        produceMana(newSource, true);
-                                                    }}
-                                                    className="flex items-center justify-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-gray-600 hover:border-blue-500 transition-all group"
-                                                >
-                                                    <div className="flex gap-1 items-center">
-                                                        {branch.length > 0 ? (() => {
-                                                            // Group by color and show counts
-                                                            const counts: Record<string, number> = {};
-                                                            branch.forEach(c => { counts[c] = (counts[c] || 0) + 1; });
-                                                            return Object.entries(counts).map(([c, count]) => (
-                                                                <div key={c} className="flex items-center gap-0.5">
-                                                                    {count > 1 && <span className="text-white font-bold text-sm">{count}×</span>}
-                                                                    <img src={getIconPath(c)} className="w-6 h-6 object-contain" />
-                                                                </div>
-                                                            ));
-                                                        })() : <span className="text-gray-400 italic text-xs">No mana</span>}
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                );
-                            }
-
-                            // Handle Alternative Rule
-                            return (
-                                <div className="flex flex-col items-center gap-4 w-full max-w-lg">
-                                    <h3 className="text-xl font-bold text-white mb-2">Choose Ability</h3>
-                                    <div className="flex gap-4 w-full">
-                                        <button
-                                            onClick={() => {
-                                                const primarySource = { ...source, alternativeRule: undefined };
-                                                setChoosingRuleForId(null);
-                                                produceMana(primarySource, false);
-                                            }}
-                                            className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
-                                        >
-                                            <span className="text-sm font-bold text-amber-400">Primary Option</span>
-                                            <div className="flex gap-1 flex-wrap justify-center">
-                                                {source.producedMana.slice(0, 5).map((c, i) => (
-                                                    <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
-                                                ))}
-                                                {source.producedMana.length > 5 && <span className="text-white font-bold ml-1">...</span>}
-                                            </div>
-                                            <div className="text-[10px] text-gray-400 space-y-0.5 mt-1">
-                                                <div>{source.producedMana.join(', ')}</div>
-                                            </div>
-                                        </button>
-
-                                        <button
-                                            onClick={() => {
-                                                if (source.alternativeRule) {
-                                                    const altSource = {
-                                                        ...source,
-                                                        producedMana: ruleToColors(source.alternativeRule),
-                                                        activationCost: ruleToActivationString(source.alternativeRule),
-                                                        alternativeRule: undefined
-                                                    };
-                                                    setChoosingRuleForId(null);
-                                                    produceMana(altSource, false);
-                                                }
-                                            }}
-                                            className="flex-1 flex flex-col items-center gap-2 p-4 bg-gray-700/50 hover:bg-gray-700 rounded-xl border border-amber-800/30 hover:border-amber-500 transition-all group"
-                                        >
-                                            <span className="text-sm font-bold text-amber-400">Alternative Option</span>
-                                            <div className="flex gap-1 flex-wrap justify-center">
-                                                {source.alternativeRule ? ruleToColors(source.alternativeRule).slice(0, 5).map((c, i) => (
-                                                    <img key={i} src={getIconPath(c)} className="w-6 h-6 object-contain" />
-                                                )) : <span className="text-xs text-gray-500 italic">Special Rule</span>}
-                                                {source.alternativeRule && ruleToColors(source.alternativeRule).length > 5 && <span className="text-white font-bold ml-1">...</span>}
-                                            </div>
-                                            <div className="text-[10px] text-gray-400 space-y-0.5 mt-1">
-                                                <div>{source.alternativeRule ? Object.entries(source.alternativeRule.produced)
-                                                    .filter(([_, count]) => count > 0)
-                                                    .map(([color, count]) => `${count}${color}`)
-                                                    .join(', ') : 'No mana'}</div>
-                                            </div>
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                        <button
-                            onClick={() => setChoosingRuleForId(null)}
-                            className="text-sm text-gray-400 hover:text-white underline"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            )}
-
 
             {/* --- UI: Top Bar --- */}
             <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
@@ -5784,17 +4665,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     <div className="absolute top-4 right-4 flex flex-col gap-2 z-10 hidden md:flex">
                         <button onClick={() => setView(v => ({ ...v, scale: Math.min(v.scale + 0.1, 3) }))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomIn size={18} /></button>
                         <button onClick={() => setView(v => ({ ...v, scale: Math.max(v.scale - 0.1, 0.1) }))} className="p-2 bg-gray-800/80 border border-gray-600 hover:bg-gray-700 rounded text-gray-300"><ZoomOut size={18} /></button>
-                        {isLocal && localOpponents?.some(o => o.type === 'ai') && (
-                            <button
-                                onMouseDown={() => aiManagerRef.current?.startMic()}
-                                onMouseUp={() => aiManagerRef.current?.stopMic()}
-                                onMouseLeave={() => aiManagerRef.current?.stopMic()}
-                                title="Push to talk to AI"
-                                className="p-2 bg-blue-600 hover:bg-blue-500 rounded text-white shadow-lg flex items-center justify-center transition"
-                            >
-                                <Mic size={18} />
-                            </button>
-                        )}
                     </div>
 
                     {/* Hand UI (Only visible in Setup/Playing) */}
@@ -5813,7 +4683,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                     <div
                                         className={`pointer-events-auto transition-transform ${isLandscape
                                             ? `h-full w-8 flex items-center justify-center ${!isHandVisible ? '-translate-x-12' : '-ml-6'}`
-                                            : `w-full h-8 flex items-center justify-center ${!isHandVisible ? 'translate-y-12' : '-mt-6'}`
+                                            : `w-full h-8 flex items-center justify-center ${!isHandVisible ? '-translate-y-12' : '-mt-6'}`
                                             }`}
                                         onClick={() => setIsHandVisible(!isHandVisible)}
                                     >
@@ -5935,83 +4805,17 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     )}
                 </div>
 
-                {/* --- RIGHT SIDE MANA UI --- */}
+                {/* Mana Display */}
                 {(gamePhase === 'PLAYING' && showManaCalculator) && (
-                    <div className="fixed right-2 top-24 flex flex-col items-end gap-2 z-[90] pointer-events-none">
-                        <ManaDisplay
-                            manaInfo={manaInfo}
-                            floatingMana={floatingMana}
-                            onAddMana={handleAddMana}
-                            onRemoveMana={handleRemoveMana}
-                            onAutoTapColor={handleAutoTapColor}
-                        />
-                    </div>
+                    <ManaDisplay
+                        pool={manaInfo.pool}
+                        potentialPool={manaInfo.potentialPool}
+                        floatingMana={floatingMana}
+                        onAddMana={handleAddMana}
+                        onRemoveMana={handleRemoveMana}
+                    />
                 )}
 
-                {/* Mana Payment Sidebar — shown independently so activation costs work even with calculator hidden */}
-                {gamePhase === 'PLAYING' && (
-                    <div className="fixed right-2 top-24 flex flex-col items-end gap-2 z-[91] pointer-events-none"
-                        style={{ marginTop: showManaCalculator ? '200px' : '0px' }}>
-
-                        {/* New Mana Payment Sidebar */}
-                        {pendingPaymentCard && (
-                            <ManaPaymentSidebar
-                                card={pendingPaymentCard}
-                                floatingMana={floatingMana}
-                                allocatedMana={allocatedMana}
-                                availableMana={manaInfo.available}
-                                requiredTotal={pendingPaymentCard.manaCost ? parseManaCost(pendingPaymentCard.manaCost).cmc + (pendingPaymentCard.userXValue || 0) : 0}
-                                onAllocate={(type) => {
-                                    // PREVENT OVER-PAYMENT: Handled by sidebar disabling UI,
-                                    // but we block here too.
-                                    // Note: we don't block if we aren't "paid" yet (might be swapping colors)
-                                    // However, without easy access to 'isPaid' here, we'll check total.
-                                    const currentTotal = Object.values(allocatedMana).reduce((a, b) => a + b, 0);
-                                    const cost = parseManaCost(pendingPaymentCard.manaCost || '0');
-                                    const targetTotal = cost.cmc + (pendingPaymentCard.userXValue || 0);
-
-                                    // If we are already over the target, definitely block.
-                                    // If we are AT the target, we only allow if the sidebar hasn't
-                                    // disabled the button (which it does if isPaid).
-                                    if (currentTotal > targetTotal) return;
-
-                                    // Check if we have enough in pool that isn't already allocated
-                                    const count = floatingMana[type] || 0;
-                                    const allocated = allocatedMana[type] || 0;
-                                    if (count > allocated) {
-                                        setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
-                                    }
-                                }}
-                                onUnallocate={(type) => {
-                                    if (allocatedMana[type] > 0) {
-                                        setAllocatedMana(prev => ({ ...prev, [type]: (prev[type] || 0) - 1 }));
-                                    }
-                                }}
-                                onXValueChange={(xVal) => {
-                                    setPendingPaymentCard(prev => prev ? { ...prev, userXValue: xVal } as any : null);
-                                }}
-                                onDismiss={() => {
-                                    setAllocatedMana(EMPTY_POOL);
-                                    setPendingPaymentCard(null);
-                                }}
-                                onConfirm={() => {
-                                    // SUBTRACT FROM POOL ONLY ON CONFIRM
-                                    setFloatingMana(prev => {
-                                        const next = { ...prev };
-                                        BASE_COLORS.forEach(c => {
-                                            const amount = allocatedMana[c] || 0;
-                                            next[c] = Math.max(0, next[c] - amount);
-                                        });
-                                        return next;
-                                    });
-                                    setAllocatedMana(EMPTY_POOL);
-                                    setPendingPaymentCard(null);
-                                    addLog(`paid mana for ${pendingPaymentCard.name}`);
-                                }}
-                            />
-                        )}
-                    </div>
-                )}
                 {/* Auto-Tap Flash Overlay — highlights tapped cards */}
                 {autoTappedIds.length > 0 && (
                     <style>{`
@@ -6440,19 +5244,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                 </div>
 
                                 <div className="flex items-center gap-4">
-                                    {!isMobile && (
-                                        <div className="flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-700">
-                                            <span className="text-xs text-gray-400 font-bold uppercase tracking-wider">Card Size</span>
-                                            <input
-                                                type="range"
-                                                min="100"
-                                                max="400"
-                                                value={searchCardSize}
-                                                onChange={(e) => setSearchCardSize(Number(e.target.value))}
-                                                className="w-24 accent-blue-500"
-                                            />
-                                        </div>
-                                    )}
                                     {searchModal.source === 'LIBRARY' && (
                                         <>
                                             <button onClick={revealAll} className={`flex items-center gap-2 ${isMobile ? 'p-2' : 'px-4 py-2'} bg-gray-700 hover:bg-gray-600 rounded-lg text-white transition`}>
@@ -6470,10 +5261,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
 
                         const Grid = (
                             <div className={`flex-1 overflow-y-auto custom-scrollbar ${isMobile ? 'p-2' : 'pr-2 pb-60'}`}>
-                                <div
-                                    className={`grid gap-4 ${isMobile ? 'grid-cols-4 gap-2' : ''}`}
-                                    style={!isMobile ? { gridTemplateColumns: `repeat(auto-fill, minmax(${searchCardSize}px, 1fr))` } : {}}
-                                >
+                                <div className={`grid ${isMobile ? 'grid-cols-4 gap-2' : 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4'}`}>
                                     {searchModal.items.map((item, idx) => (
                                         <div key={item.card.id} className="relative group aspect-[2.5/3.5] bg-gray-800 rounded-lg">
                                             {searchModal.source !== 'TOKENS' && (
@@ -6669,21 +5457,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                             <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
                                 <label className="flex justify-between items-center cursor-pointer">
                                     <div>
-                                        <h4 className="font-bold text-white flex items-center gap-2"><Droplets size={16} className="text-blue-400" /> Sound Effects</h4>
-                                        <p className="text-xs text-gray-400">Play audio notifications for game events.</p>
-                                    </div>
-                                    <div
-                                        onClick={() => setSoundsEnabled(prev => !prev)}
-                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${soundsEnabled ? 'bg-blue-600 justify-end' : 'bg-gray-600 justify-start'}`}
-                                    >
-                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
-                                    </div>
-                                </label>
-                            </div>
-
-                            <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
-                                <label className="flex justify-between items-center cursor-pointer">
-                                    <div>
                                         <h4 className="font-bold text-white flex items-center gap-2"><Zap size={16} className="text-yellow-400" /> Auto-Tap Mana</h4>
                                         <p className="text-xs text-gray-400">Press Tab after playing a card to auto-tap lands/mana sources. Basics first.</p>
                                     </div>
@@ -6695,32 +5468,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                                     </div>
                                 </label>
                             </div>
-
-                            {geminiApiKey && (
-                                <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
-                                    <label className="flex justify-between items-center cursor-pointer">
-                                        <div>
-                                            <h4 className="font-bold text-white flex items-center gap-2"><Mic size={16} className="text-purple-400" /> AI Voice Profile</h4>
-                                            <p className="text-xs text-gray-400">Select the Gemini voice persona. (Changes apply on next game setup).</p>
-                                        </div>
-                                        <select
-                                            value={aiVoice}
-                                            onChange={(e) => {
-                                                setAiVoice(e.target.value);
-                                                localStorage.setItem('planeswalker_ai_voice', e.target.value);
-                                            }}
-                                            className="bg-gray-900 border border-gray-600 rounded p-1 text-white text-sm outline-none cursor-pointer focus:ring-1 focus:ring-purple-500"
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            <option value="Aoede">Aoede</option>
-                                            <option value="Puck">Puck</option>
-                                            <option value="Charon">Charon</option>
-                                            <option value="Kore">Kore</option>
-                                            <option value="Fenrir">Fenrir</option>
-                                        </select>
-                                    </label>
-                                </div>
-                            )}
 
                             <button
                                 onClick={() => { setShowShortcuts(true); setShowSettingsModal(false); }}
@@ -6744,20 +5491,6 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                     title="Exit Full Screen"
                 >
                     <Minimize size={24} />
-                </button>
-            )}
-
-            {geminiApiKey && localOpponents?.some(o => o.type === 'ai') && gamePhase !== 'SETUP' && (
-                <button
-                    onMouseDown={handleMicDown}
-                    onMouseUp={handleMicUp}
-                    onMouseLeave={handleMicUp}
-                    onTouchStart={handleMicDown}
-                    onTouchEnd={handleMicUp}
-                    className={`fixed bottom-[130px] right-24 z-[9000] p-4 rounded-full shadow-2xl transition-all duration-200 ${isMicPressed ? 'bg-red-600 scale-110 shadow-red-500/50' : 'bg-purple-600 hover:bg-purple-500 shadow-purple-500/30'}`}
-                    title="Push to Talk (Shift)"
-                >
-                    <Mic className={`text-white ${isMicPressed ? 'animate-pulse' : ''}`} size={28} />
                 </button>
             )}
         </div>
