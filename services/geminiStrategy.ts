@@ -37,31 +37,46 @@ export class GeminiStrategyClient {
         this.onError = options.onError;
     }
 
+    private pendingRequest: { gameState: string, resolve: (v: void) => void, reject: (e: any) => void } | null = null;
+    private pendingTimeoutId: any = null;
+
     /**
      * Send game state to AI and get strategic response
+     * Debounces rapidly incoming states so the AI only responds to the latest one
      */
     public async sendGameState(gameState: string): Promise<void> {
-        // Rate limiting: Ensure at least 3 seconds between requests to avoid hitting API limits
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        const minRequestInterval = 3000; // 3 seconds minimum between requests
+        return new Promise((resolve, reject) => {
+            const now = Date.now();
+            const timeSinceLastRequest = now - this.lastRequestTime;
+            const minRequestInterval = 3000;
 
-        if (timeSinceLastRequest < minRequestInterval) {
-            const delay = minRequestInterval - timeSinceLastRequest;
-            console.log(`[Rate Limit] Throttling request for ${delay}ms`);
-            return new Promise((resolve, reject) => {
-                setTimeout(async () => {
+            if (timeSinceLastRequest < minRequestInterval) {
+                const delay = minRequestInterval - timeSinceLastRequest;
+                console.log(`[Rate Limit] Throttling request for ${delay}ms. Replacing pending queue.`);
+
+                if (this.pendingRequest) {
+                    this.pendingRequest.resolve(); // Silently drop old state
+                    clearTimeout(this.pendingTimeoutId);
+                }
+
+                this.pendingRequest = { gameState, resolve, reject };
+
+                this.pendingTimeoutId = setTimeout(async () => {
+                    if (!this.pendingRequest) return;
+                    const req = this.pendingRequest;
+                    this.pendingRequest = null;
+
                     try {
-                        await this.executeRequest(gameState);
-                        resolve();
-                    } catch (error) {
-                        reject(error);
+                        await this.executeRequest(req.gameState);
+                        req.resolve();
+                    } catch (err) {
+                        req.reject(err);
                     }
                 }, delay);
-            });
-        }
-
-        return this.executeRequest(gameState);
+            } else {
+                this.executeRequest(gameState).then(resolve).catch(reject);
+            }
+        });
     }
 
     private async executeRequest(gameState: string): Promise<void> {

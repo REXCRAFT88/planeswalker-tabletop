@@ -2791,8 +2791,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             lastProcessedLogIdRef.current = lastLog.id;
 
             // Only send priority interrupt for significant actions, not every small action
-            // Filter out actions that don't require interrupt (like life changes, etc.)
-            const requiresInterrupt = /draw|play|cast|activate|tap|attack|block/i.test(lastLog.message);
+            // Filter out actions that don't require interrupt (like life changes, drawing, or tapping mana)
+            const isMinorAction = /tapped|untapped|draw|shuffled|life|counter/i.test(lastLog.message);
+            const isMajorAction = /cast|attack|block|played|destroyed|exiled|targeted/i.test(lastLog.message);
+            const requiresInterrupt = isMajorAction && !isMinorAction;
 
             if (requiresInterrupt && currentTurnPlayerId !== aiOpponent.id) {
                 const aiState = localPlayerStates.current[aiOpponent.id];
