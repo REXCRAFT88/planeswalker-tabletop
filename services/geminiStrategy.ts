@@ -68,8 +68,8 @@ export class GeminiStrategyClient {
         this.lastRequestTime = Date.now();
 
         try {
-            // Using gemini-1.5-flash for free tier (15 requests per minute)
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.apiKey}`;
+            // Using gemini-2.0-flash for general commands and large free tier limit
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`;
 
             const payload = {
                 contents: [{
