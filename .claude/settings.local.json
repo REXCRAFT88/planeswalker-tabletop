@@ -10,7 +10,8 @@
       "Bash(cd:*)",
       "Bash(echo Node not found in PATH:*)",
       "Bash(npx tsc:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cat:*)"
     ]
   }
 }
