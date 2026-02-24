@@ -2522,27 +2522,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         }
                         localPlayerStates.current[opp.id] = aiState;
                         sendAIStateUpdate(opp.id);
+                    }
 
-                        // If AI manager isn't running, start it
-                        if (!aiManagerRef.current && geminiApiKey) {
-                            aiManagerRef.current = new GeminiAIManager({
-                                apiKey: geminiApiKey,
-                                selectedVoice: aiVoice,
-                                playerName: playerName,
-                                aiName: opp.name,
-                                aiDeckMarkdown: generateDeckMarkdown(opp.deck || []),
-                                opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
-                                magicRulesMarkdown: magicRulesText,
-                                onGameCommand: (cmds) => {
-                                    cmds.forEach(cmd => handleAIGameCommand(cmd, opp.id || ''));
-                                },
-                                onConnected: () => {
-                                    addLog(`${opp.name} (Gemini AI) Connected!`, 'SYSTEM', opp.name);
-                                },
-                                onError: (err) => console.error(err)
-                            });
-                            aiManagerRef.current.connectAll();
-                        }
+                    // If AI manager isn't running, start it (even in SETUP phase)
+                    if (!aiManagerRef.current && geminiApiKey) {
+                        aiManagerRef.current = new GeminiAIManager({
+                            apiKey: geminiApiKey,
+                            selectedVoice: aiVoice,
+                            playerName: playerName,
+                            aiName: opp.name,
+                            aiDeckMarkdown: generateDeckMarkdown(opp.deck || []),
+                            opponentDeckMarkdown: generateDeckMarkdown(initialDeck),
+                            magicRulesMarkdown: magicRulesText,
+                            onGameCommand: (cmds) => {
+                                cmds.forEach(cmd => handleAIGameCommand(cmd, opp.id || ''));
+                            },
+                            onConnected: () => {
+                                addLog(`${opp.name} (Gemini AI) Connected!`, 'SYSTEM', opp.name);
+                            },
+                            onError: (err) => console.error(err)
+                        });
+                        aiManagerRef.current.connectAll();
                     }
                 }
             });
@@ -2940,6 +2940,7 @@ Please decide your plays and issue JSON commands. When you are done taking actio
                 }
                 states[aiOpponent.id || ''] = aiState;
                 Object.assign(localPlayerStates.current, states);
+                sendAIStateUpdate(aiOpponent.id || '');
             }
         }
 

@@ -87,7 +87,7 @@ export class GeminiConversationClient {
         console.log("Sending Gemini Conversation Setup message...");
         const setupMessage = {
             setup: {
-                model: "models/gemini-2.5-flash", // Using 2.5-flash for audio support
+                model: "models/gemini-2.0-flash", // Using 2.0-flash for audio support and large free tier limit
                 generationConfig: {
                     responseModalities: ["AUDIO"], // Audio responses only
                     speechConfig: {
