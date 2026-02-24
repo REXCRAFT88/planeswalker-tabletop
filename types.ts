@@ -38,6 +38,7 @@ export interface BoardObject {
   counters: { [key: string]: number }; // e.g., "+1/+1": 2
   commanderDamage: { [playerId: string]: number }; // Damage dealt BY this commander TO specific players
   controllerId: string;
+  isCopy?: boolean; // Copies get a white border and "Delete" instead of "Return to Hand"
   // Stacking properties
   quantity: number;
   tappedQuantity: number;

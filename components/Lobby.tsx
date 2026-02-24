@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Settings, Image, ZoomIn, ZoomOut, RotateCcw, RefreshCcw } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -11,6 +11,10 @@ interface LobbyProps {
     setPlayerName: (name: string) => void;
     playerSleeve: string;
     setPlayerSleeve: (color: string) => void;
+    customMatUrl: string;
+    setCustomMatUrl: (url: string) => void;
+    customSleeveUrl: string;
+    setCustomSleeveUrl: (url: string) => void;
     onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
     onLocalGame: () => void;
     onImportDeck: () => void;
@@ -21,12 +25,14 @@ interface LobbyProps {
     savedDecks: SavedDeck[];
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
-    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
+    onLoadDeck: (deck: CardData[], tokens: CardData[], sideboard: CardData[], shouldSave?: boolean, name?: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
     playerName, setPlayerName,
     playerSleeve, setPlayerSleeve,
+    customMatUrl, setCustomMatUrl,
+    customSleeveUrl, setCustomSleeveUrl,
     onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
     savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
@@ -40,6 +46,72 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [showReconnectModal, setShowReconnectModal] = useState(false);
     const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
     const hasAutoAttempted = useRef(false);
+
+    // Customization Modal State
+    const [showCustomizeModal, setShowCustomizeModal] = useState(false);
+    const [matPreviewUrl, setMatPreviewUrl] = useState(customMatUrl);
+    const [sleevePreviewUrl, setSleevePreviewUrl] = useState(customSleeveUrl);
+    const [matTransform, setMatTransform] = useState({ scale: 1, x: 0, y: 0 });
+    const [sleeveTransform, setSleeveTransform] = useState({ scale: 1, x: 0, y: 0 });
+    const matImageRef = useRef<HTMLImageElement>(null);
+    const sleeveImageRef = useRef<HTMLImageElement>(null);
+    const isDraggingMat = useRef(false);
+    const isDraggingSleeve = useRef(false);
+    const dragStartMat = useRef({ x: 0, y: 0 });
+    const dragStartSleeve = useRef({ x: 0, y: 0 });
+
+    // Pan/Zoom handlers for mat
+    const handleMatWheel = (e: React.WheelEvent) => {
+        e.preventDefault();
+        const newScale = Math.min(Math.max(0.5, matTransform.scale + (e.deltaY > 0 ? -0.1 : 0.1)), 3);
+        setMatTransform(prev => ({ ...prev, scale: newScale }));
+    };
+
+    const handleMatMouseDown = (e: React.MouseEvent) => {
+        isDraggingMat.current = true;
+        dragStartMat.current = { x: e.clientX - matTransform.x, y: e.clientY - matTransform.y };
+    };
+
+    const handleMatMouseMove = (e: React.MouseEvent) => {
+        if (!isDraggingMat.current) return;
+        setMatTransform(prev => ({
+            ...prev,
+            x: e.clientX - dragStartMat.current.x,
+            y: e.clientY - dragStartMat.current.y
+        }));
+    };
+
+    const handleMatMouseUp = () => {
+        isDraggingMat.current = false;
+    };
+
+    // Pan/Zoom handlers for sleeve
+    const handleSleeveWheel = (e: React.WheelEvent) => {
+        e.preventDefault();
+        const newScale = Math.min(Math.max(0.5, sleeveTransform.scale + (e.deltaY > 0 ? -0.1 : 0.1)), 3);
+        setSleeveTransform(prev => ({ ...prev, scale: newScale }));
+    };
+
+    const handleSleeveMouseDown = (e: React.MouseEvent) => {
+        isDraggingSleeve.current = true;
+        dragStartSleeve.current = { x: e.clientX - sleeveTransform.x, y: e.clientY - sleeveTransform.y };
+    };
+
+    const handleSleeveMouseMove = (e: React.MouseEvent) => {
+        if (!isDraggingSleeve.current) return;
+        setSleeveTransform(prev => ({
+            ...prev,
+            x: e.clientX - dragStartSleeve.current.x,
+            y: e.clientY - dragStartSleeve.current.y
+        }));
+    };
+
+    const handleSleeveMouseUp = () => {
+        isDraggingSleeve.current = false;
+    };
+
+    const resetMatTransform = () => setMatTransform({ scale: 1, x: 0, y: 0 });
+    const resetSleeveTransform = () => setSleeveTransform({ scale: 1, x: 0, y: 0 });
 
     // Library State
     const [isLibraryOpen, setIsLibraryOpen] = useState(false);
@@ -92,19 +164,21 @@ export const Lobby: React.FC<LobbyProps> = ({
         setTokenImportError(null);
         const parsed = parseDeckList(tokenImportText);
 
-        if (parsed.length === 0) {
+        const allParsed = [...parsed.main, ...parsed.sideboard, ...parsed.commander];
+
+        if (allParsed.length === 0) {
             setTokenImportError("No cards found in list.");
             setIsImportingTokens(false);
             return;
         }
 
-        const uniqueNames = parsed.map(p => p.name);
+        const uniqueNames = allParsed.map(p => p.name);
 
         try {
             // Here, we don't care about type, as any card can be a token.
             const cardMap = await fetchBatch(uniqueNames);
             const newTokens: CardData[] = [];
-            for (const item of parsed) {
+            for (const item of allParsed) {
                 let data = cardMap.get(item.name.toLowerCase());
                 if (data) {
                     for (let i = 0; i < item.count; i++) {
@@ -200,7 +274,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         // If no deck is active, load the most recent one.
         if (activeDeck.length === 0 && savedDecks.length > 0) {
             const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens);
+            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, mostRecentDeck.sideboard || []);
         }
 
         onLocalGame();
@@ -215,7 +289,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck([...deck.deck], [...deck.tokens]);
+        onLoadDeck([...deck.deck], [...deck.tokens], [...(deck.sideboard || [])]);
         setIsLibraryOpen(false);
     };
 
@@ -230,14 +304,14 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
-        onLoadDeck(deck.deck, deck.tokens);
+        onLoadDeck(deck.deck, deck.tokens, deck.sideboard || []);
         // Then go to builder
         onImportDeck();
     };
 
     const handleCreateNewDeck = () => {
         // Clear current active deck if needed, or just go to builder
-        onLoadDeck([], []);
+        onLoadDeck([], [], []);
         onImportDeck();
     };
 
@@ -346,6 +420,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 >
                                     <BookOpen className="text-purple-500 group-hover:scale-110 transition-transform" size={18} />
                                     <span className="text-sm font-medium text-gray-300">Deck Library / Manage Decks</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowCustomizeModal(true)}
+                                    className="flex items-center justify-center gap-3 p-4 bg-gray-900 hover:bg-gray-750 border border-gray-700 hover:border-teal-500 rounded-xl transition-all group"
+                                >
+                                    <Settings className="text-teal-500 group-hover:scale-110 transition-transform" size={18} />
+                                    <span className="text-sm font-medium text-gray-300">Customize Mat & Sleeves</span>
                                 </button>
                             </div>
                         </div>
@@ -497,6 +578,210 @@ export const Lobby: React.FC<LobbyProps> = ({
             )}
         </div>
     );
+
+    {/* Customization Modal */}
+    {showCustomizeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-gray-800 border border-gray-600 w-full max-w-4xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                    <h3 className="font-bold text-white flex items-center gap-2"><Settings className="text-teal-500" /> Customize Mat & Sleeves</h3>
+                    <button onClick={() => setShowCustomizeModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto flex flex-col md:flex-row gap-6 p-6">
+                    {/* Mat Customization */}
+                    <div className="flex-1 flex flex-col gap-4">
+                        <h4 className="text-lg font-bold text-white">Playmat</h4>
+                        <div className="relative aspect-[16/10] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                            {matPreviewUrl ? (
+                                <div
+                                    className="w-full h-full overflow-hidden cursor-move"
+                                    onWheel={handleMatWheel}
+                                    onMouseDown={handleMatMouseDown}
+                                    onMouseMove={handleMatMouseMove}
+                                    onMouseUp={handleMatMouseUp}
+                                    onMouseLeave={handleMatMouseUp}
+                                >
+                                    <img
+                                        ref={matImageRef}
+                                        src={matPreviewUrl}
+                                        alt="Mat Preview"
+                                        className="absolute top-0 left-0 object-cover transition-transform"
+                                        style={{
+                                            width: '100%',
+                                            height: '100%',
+                                            transform: `translate(${matTransform.x}px, ${matTransform.y}px) scale(${matTransform.scale})`,
+                                            transformOrigin: 'center center'
+                                        }}
+                                        onError={() => setMatPreviewUrl('')}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                    <div className="text-center">
+                                        <Image size={48} className="mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">No custom mat set</p>
+                                    </div>
+                                </div>
+                            )}
+                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={resetMatTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
+                                    <RefreshCcw size={14} />
+                                </button>
+                                <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
+                                    {Math.round(matTransform.scale * 100)}%
+                                </div>
+                            </div>
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <button
+                                    onClick={() => {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*';
+                                        input.onchange = (e) => {
+                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                            if (file) {
+                                                const reader = new FileReader();
+                                                reader.onload = (e) => setMatPreviewUrl(e.target?.result as string);
+                                                reader.readAsDataURL(file);
+                                            }
+                                        };
+                                        input.click();
+                                    }}
+                                    className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                >
+                                    <Image size={16} /> Upload Image
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                placeholder="Or paste image URL..."
+                                value={matPreviewUrl || customMatUrl}
+                                onChange={(e) => setMatPreviewUrl(e.target.value)}
+                                className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                            />
+                            <button
+                                onClick={() => {
+                                    setCustomMatUrl(matPreviewUrl);
+                                    setMatPreviewUrl('');
+                                }}
+                                disabled={!matPreviewUrl}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Check size={16} />
+                            </button>
+                        </div>
+                        {customMatUrl && (
+                            <button
+                                onClick={() => setCustomMatUrl('')}
+                                className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
+                            >
+                                <Trash2 size={16} className="inline mr-2" /> Remove Custom Mat
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Sleeve Customization */}
+                    <div className="flex-1 flex flex-col gap-4">
+                        <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
+                        <div className="relative aspect-[2.5/3.5] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                            {sleevePreviewUrl ? (
+                                <div
+                                    className="w-full h-full overflow-hidden cursor-move"
+                                    onWheel={handleSleeveWheel}
+                                    onMouseDown={handleSleeveMouseDown}
+                                    onMouseMove={handleSleeveMouseMove}
+                                    onMouseUp={handleSleeveMouseUp}
+                                    onMouseLeave={handleSleeveMouseUp}
+                                >
+                                    <img
+                                        ref={sleeveImageRef}
+                                        src={sleevePreviewUrl}
+                                        alt="Sleeve Preview"
+                                        className="absolute top-0 left-0 object-cover transition-transform"
+                                        style={{
+                                            width: '100%',
+                                            height: '100%',
+                                            transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale})`,
+                                            transformOrigin: 'center center'
+                                        }}
+                                        onError={() => setSleevePreviewUrl('')}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: playerSleeve }}>
+                                    <div className="text-center">
+                                        <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-2">
+                                            <div className="w-12 h-12 rounded-full border-2 border-white/20"></div>
+                                        </div>
+                                        <p className="text-sm text-white/60">Current: {playerSleeve}</p>
+                                    </div>
+                                </div>
+                            )}
+                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
+                                    <RefreshCcw size={14} />
+                                </button>
+                                <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
+                                    {Math.round(sleeveTransform.scale * 100)}%
+                                </div>
+                            </div>
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <button
+                                    onClick={() => {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = 'image/*';
+                                        input.onchange = (e) => {
+                                            const file = (e.target as HTMLInputElement).files?.[0];
+                                            if (file) {
+                                                const reader = new FileReader();
+                                                reader.onload = (e) => setSleevePreviewUrl(e.target?.result as string);
+                                                reader.readAsDataURL(file);
+                                            }
+                                        };
+                                        input.click();
+                                    }}
+                                    className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                >
+                                    <Image size={16} /> Upload Image
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                placeholder="Or paste image URL..."
+                                value={sleevePreviewUrl || customSleeveUrl}
+                                onChange={(e) => setSleevePreviewUrl(e.target.value)}
+                                className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                            />
+                            <button
+                                onClick={() => {
+                                    setCustomSleeveUrl(sleevePreviewUrl);
+                                    setSleevePreviewUrl('');
+                                }}
+                                disabled={!sleevePreviewUrl}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Check size={16} />
+                            </button>
+                        </div>
+                        {customSleeveUrl && (
+                            <button
+                                onClick={() => setCustomSleeveUrl('')}
+                                className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
+                            >
+                                <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
 };
 
 const UserIcon = ({ className, size }: { className?: string, size?: number }) => (

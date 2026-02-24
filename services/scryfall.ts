@@ -272,16 +272,32 @@ const detectManaAbilityType = (data: any): { manaAbilityType?: 'tap' | 'activate
 };
 
 
-export const parseDeckList = (text: string): { count: number; name: string }[] => {
+export interface ParsedDeck {
+    main: { count: number; name: string }[];
+    sideboard: { count: number; name: string }[];
+    commander: { count: number; name: string }[];
+}
+
+export const parseDeckList = (text: string): ParsedDeck => {
     const lines = text.split('\n');
-    const cards: { count: number; name: string }[] = [];
+    const result: ParsedDeck = { main: [], sideboard: [], commander: [] };
+    let currentSection: keyof ParsedDeck = 'main';
 
     for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
+        const lower = trimmed.toLowerCase();
+        if (lower === 'sideboard') { currentSection = 'sideboard'; continue; }
+        if (lower === 'commander') { currentSection = 'commander'; continue; }
+        if (lower === 'deck' || lower === 'mainboard') { currentSection = 'main'; continue; }
+        if (lower === 'maybeboard') continue; // Skip maybeboard for now
+
+        // Check for "Sideboard:" format
+        if (lower.startsWith('sideboard:')) { currentSection = 'sideboard'; continue; }
+        if (lower.startsWith('commander:')) { currentSection = 'commander'; continue; }
+
         // Match "1 Sol Ring" or "1x Sol Ring"
-        // Also strip set codes like "(SET) 123" or "[SET] #123" at the end
         const match = trimmed.match(/^(\d+x?|x\d+)?\s*(.+?)(?:\s*[\(\[]\w+[\)\]]\s*\S+)?$/);
 
         if (match) {
@@ -289,13 +305,12 @@ export const parseDeckList = (text: string): { count: number; name: string }[] =
             const count = parseInt(countStr, 10) || 1;
             let name = match[2].trim();
 
-            // Additional cleanup for specific formats if regex didn't catch all
-            // Remove trailing set codes in parentheses if they are at the end
+            // Additional cleanup
             name = name.replace(/\s*\(.*?\)\s*\d+.*$/, '');
             name = name.replace(/\s*\[.*?\]\s*#?\d+.*$/, '');
 
-            cards.push({ count, name });
+            result[currentSection].push({ count, name });
         }
     }
-    return cards;
+    return result;
 };

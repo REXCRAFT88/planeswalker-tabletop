@@ -23,9 +23,12 @@ export interface SavedDeck {
     id: string;
     name: string;
     deck: CardData[];
+    sideboard: CardData[];
     tokens: CardData[];
     sleeveColor: string;
     createdAt?: number;
+    matUrl?: string;
+    sleeveUrl?: string;
 }
 
 function App() {
@@ -49,6 +52,8 @@ function App() {
     // Initialize state from Local Storage using lazy initialization
     const [playerName, setPlayerName] = useState<string>(() => loadState('playerName', 'Planeswalker'));
     const [playerSleeve, setPlayerSleeve] = useState<string>(() => loadState('playerSleeve', PLAYER_COLORS[0]));
+    const [customMatUrl, setCustomMatUrl] = useState<string>(() => loadState('customMatUrl', ''));
+    const [customSleeveUrl, setCustomSleeveUrl] = useState<string>(() => loadState('customSleeveUrl', ''));
     const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
     const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
@@ -70,6 +75,15 @@ function App() {
         }
         return [];
     });
+    const [activeSideboard, setActiveSideboard] = useState<CardData[]>(() => {
+        const loaded = loadState<CardData[]>('activeSideboard', []);
+        if (loaded.length > 0) return loaded;
+        if (savedDecks.length > 0) {
+            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            return sorted[0].sideboard || [];
+        }
+        return [];
+    });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
     const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
@@ -81,12 +95,15 @@ function App() {
         const settings = {
             playerName,
             playerSleeve,
+            customMatUrl,
+            customSleeveUrl,
             activeDeck,
+            activeSideboard,
             lobbyTokens,
             savedDecks
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
+    }, [playerName, playerSleeve, customMatUrl, customSleeveUrl, activeDeck, activeSideboard, lobbyTokens, savedDecks]);
 
     // Prevent Render.com from sleeping by pinging the server
     useEffect(() => {
@@ -96,15 +113,17 @@ function App() {
         return () => clearInterval(interval);
     }, []);
 
-    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string) => {
+    const handleDeckReady = (deck: CardData[], tokens: CardData[], sideboard: CardData[] = [], shouldSave?: boolean, deckName?: string) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
+        setActiveSideboard(sideboard);
 
         if (shouldSave) {
             const newDeck: SavedDeck = {
                 id: crypto.randomUUID(),
                 name: deckName || `Deck ${new Date().toLocaleDateString()}`,
                 deck,
+                sideboard,
                 tokens,
                 sleeveColor: playerSleeve,
                 createdAt: Date.now()
@@ -135,6 +154,7 @@ function App() {
         if (savedDecks.length === 1) {
             setActiveDeck([...savedDecks[0].deck]);
             setLobbyTokens([...savedDecks[0].tokens]);
+            setActiveSideboard([...(savedDecks[0].sideboard || [])]);
         }
 
         if (gameType === 'local_table') {
@@ -147,6 +167,7 @@ function App() {
     const handleDeckSelected = (deck: SavedDeck) => {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
+        setActiveSideboard([...(deck.sideboard || [])]);
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);
@@ -192,6 +213,10 @@ function App() {
                     setPlayerName={setPlayerName}
                     playerSleeve={playerSleeve}
                     setPlayerSleeve={setPlayerSleeve}
+                    customMatUrl={customMatUrl}
+                    setCustomMatUrl={setCustomMatUrl}
+                    customSleeveUrl={customSleeveUrl}
+                    setCustomSleeveUrl={setCustomSleeveUrl}
                     onJoin={handleJoinGame}
                     onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
                     onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
@@ -210,6 +235,7 @@ function App() {
                 <DeckBuilder
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
+                    initialSideboard={activeSideboard}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
                 />
@@ -226,9 +252,12 @@ function App() {
             {currentView === View.GAME && (
                 <Tabletop
                     initialDeck={activeDeck}
+                    initialSideboard={activeSideboard}
                     initialTokens={lobbyTokens}
                     playerName={playerName}
                     sleeveColor={playerSleeve}
+                    customMatUrl={customMatUrl}
+                    customSleeveUrl={customSleeveUrl}
                     roomId={roomId}
                     initialGameStarted={isGameStarted}
                     onExit={() => setCurrentView(View.LOBBY)}
@@ -238,9 +267,12 @@ function App() {
             {currentView === View.LOCAL_GAME && (
                 <Tabletop
                     initialDeck={activeDeck}
+                    initialSideboard={activeSideboard}
                     initialTokens={lobbyTokens}
                     playerName={playerName}
                     sleeveColor={playerSleeve}
+                    customMatUrl={customMatUrl}
+                    customSleeveUrl={customSleeveUrl}
                     roomId={isLocalTableHost ? roomId : "LOCAL"}
                     isLocal={true}
                     isLocalTableHost={isLocalTableHost}

@@ -1,0 +1,54 @@
+# Implementation Plan - Planeswalker Tabletop Expansion
+
+This plan outlines the technical approach for implementing 30+ new features and refinements.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Combat Trays (Phase 4)**: This is a massive UI change. Targeted players will see cards "fly" to their tray area. This requires synchronized animations across clients.
+> **Customization (Phase 2)**: Storing custom images in `localStorage` works locally, but for others to see your sleeves/mats, we must broadcast the URLs in the socket `join_room` and `room_players_update` events.
+
+## Proposed Changes
+
+---
+
+### [Component] Deck Editor & Sideboard (Phase 1)
+- **A1/A6**: [DONE] Modified [DeckBuilder.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/DeckBuilder.tsx) with search bar and tokens tab.
+- **A3**: Add a `size` display in [Lobby.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Lobby.tsx) and [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx) library counts.
+- **A4**: [IN PROGRESS] Added `sideboard` to [SavedDeck](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/App.tsx#22-31) and plumbing in [App](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/App.tsx#32-320), [Lobby](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Lobby.tsx#27-503), [LocalSetup](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/LocalSetup.tsx#22-258). Next: [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx) sideboard UI.
+- **A8**: Update [Card.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Card.tsx) to replace "Return to Hand" with "Delete" for tokens/copies.
+
+### [Component] Visuals & Customization (Phase 2)
+- **C1/C2**: Create `CustomizeModal.tsx` in [Lobby.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Lobby.tsx). Use CSS `object-fit` and `object-position` for the preview. Add sliders for scale/offset.
+- **C3**: Update [Card.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Card.tsx) to use `sleeveImage` for face-down cards.
+- **C4**: Implement luminace check in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx) `renderMat` to toggle player name text color.
+- **B1**: Add `changeCardArt` function in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx). Fetches alternate printings from Scryfall and updates `imageUrl` globally.
+
+### [Component] Gameplay Systems (Phase 3)
+- **D1/D2**: Refactor [nextTurn](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx#2801-2855) and add `advanceSubPhase` in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx). Manual progression via Enter or HUD button.
+- **D3**: Update `StackedCard` badge logic to show [(quantity - tapped) / quantity](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx#261-283).
+- **D4/D5/D6**: Update [handleKeyDown](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx#3589-3670) and `onWheel` in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx) to use a `hoveredObjectId` ref. Map `T` to toggle tap and [Wheel](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx#4123-4138) to counter adjustment.
+- **D8/D9**: Add mulligan cap guard and solo-pass logic to [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx).
+
+### [Component] Combat Trays (Phase 4)
+- **E1-E6**: Introduce `AttackerTray` and `BlockerTray` zones in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx). 
+- Implement multi-select state.
+- Create SVG layer for tether lines between blockers and attackers.
+- Add "Resolve" button that triggers animations and moves phase to MAIN2.
+
+### [Component] Multiplayer & Sounds (Phase 5 & 6)
+- **F1/F3**: Add "Follow Active Player" cam logic. Update turn passing to skip `disconnected` players.
+- **G1-G5**: Wire procedural sound triggers into [handleAction](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx#1988-2238) for turn changes, card plays, and system events.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- `npm run lint` to ensure no syntax regressions in [Tabletop.tsx](file:///c:/Users/TriCityPC/OneDrive/Documents/My%20programs/planeswalker-tabletop-2.9.26%20restored/components/Tabletop.tsx).
+- Type checking: `npx tsc --noEmit`.
+
+### Manual Verification
+- **Sideboard**: Export/Import a deck with a sideboard; verify it appears in-game.
+- **Combat**: Assign 3 attackers to 2 different opponents; verify both see cards in their respective trays.
+- **Customization**: Change mat URL; verify local and remote players see the updated mat.

@@ -7,6 +7,7 @@ import { PLAYER_COLORS } from '../constants';
 interface Opponent {
     name: string;
     deck: CardData[];
+    sideboard: CardData[];
     tokens: CardData[];
     color: string;
     type: 'ai' | 'human_local' | 'open_slot';
@@ -20,7 +21,7 @@ interface LocalSetupProps {
 
 export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, savedDecks }) => {
     const [opponents, setOpponents] = useState<Opponent[]>([
-        { name: 'AI Opponent', deck: [], tokens: [], color: PLAYER_COLORS[1], type: 'ai' }
+        { name: 'AI Opponent', deck: [], sideboard: [], tokens: [], color: PLAYER_COLORS[1], type: 'ai' }
     ]);
     const [gameMode, setGameMode] = useState<'solo' | 'local_table'>('solo');
 
@@ -35,6 +36,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
         setOpponents(prev => [...prev, {
             name: defaultName,
             deck: [],
+            sideboard: [],
             tokens: [],
             color: PLAYER_COLORS[colorIndex],
             type
@@ -53,6 +55,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
         setOpponents(prev => prev.map((o, i) => i === index ? {
             ...o,
             deck: [...deck.deck],
+            sideboard: [...(deck.sideboard || [])],
             tokens: [...deck.tokens],
             name: o.name
         } : o));
@@ -62,6 +65,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
         const validOpponents = opponents.map(o => ({
             ...o,
             deck: o.type !== 'ai' ? o.deck : (savedDecks.length > 0 ? [...savedDecks[0].deck] : []),
+            sideboard: o.type !== 'ai' ? o.sideboard : (savedDecks.length > 0 ? [...(savedDecks[0].sideboard || [])] : []),
             tokens: o.type !== 'ai' ? o.tokens : (savedDecks.length > 0 ? [...savedDecks[0].tokens] : []),
         }));
         onStartGame(validOpponents, gameMode === 'local_table');

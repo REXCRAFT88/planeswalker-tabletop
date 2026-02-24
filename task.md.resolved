@@ -1,0 +1,56 @@
+# Planeswalker Tabletop - Development Task Checklist
+
+## Phase A: Deck Editor & Sideboard
+- [x] A1. Fix Deck Editor "Done" button & state flow (sideboard support)
+- [x] A2. Correct Deck Import validation for ParsedDeck
+- [x] A3. Add Deck/Sideboard size display (Lobby & Tabletop)
+- [x] A4. Implement Tabletop Sideboard UI & Search additions
+- [x] A5. Tokens/Copies display "Delete" instead of "Return to Hand"
+- [x] A6. Refactor DeckBuilder for better state management
+
+## Phase B: Card Interactions & Art
+- [x] B1. Change Card Art (Scryfall versions search modal)
+- [x] B2. Reveal option for Library/Pile (view-only shared reveal)
+- [x] B3. Inspect Commanders directly in the Command Zone
+- [x] B4. Copy Card (White border, delete button)
+- [x] B5. Steal cards from Hand, Deck, Pile, or Mat
+
+## Phase C: Customization & Visuals
+- [x] C1. Customize Modal (Lobby) for Mat + Sleeve URLs
+- [x] C2. Visual Preview + Resize/Move (Pan/Zoom) for Mat/Sleeve images
+- [x] C3. Display custom sleeves on board (card backs/decks)
+- [x] C4. Dynamic Name Color on Mat for best contrast/visibility
+- [x] C5. Fix Bug: Action buttons clipped on stacked cards
+
+## Phase D: Core Gameplay Systems
+- [x] D1. Turn Sub-Phases: UNTAP -> UPKEEP -> DRAW -> MAIN1 -> COMBAT -> MAIN2 -> END
+- [x] D2. Manual Advancement: Press Enter to move between sub-phases
+- [x] D3. Stacked Mana Counter: Show Untapped/Total (e.g., 2/2 -> 1/2)
+- [x] D4. Shortcut: 'T' toggles Tap/Untap on HOVERED card
+- [x] D5. Mouse: Right-click Pan (override context menu)
+- [x] D6. Mouse: Scroll-wheel on card to adjust counters (+1/+1 default)
+- [x] D7. Restriction: Block 'Enter' shortcut if not your turn
+- [x] D8. Cap mulligans at 7
+- [x] D9. Solo Mode: Allow passing turn to self
+
+## Phase E: Advanced Combat & Trays
+- [ ] E1. Multi-select attackers (Click+Hold first, single click others)
+- [ ] E2. Assign Attackers: Click target player Mat/Name -> Colored Outline
+- [ ] E3. Attacker Tray: Display attackers above defender's mat
+- [ ] E4. Declare Blockers: Defender clicks card -> clicks attacker -> tether line
+- [ ] E5. Blocker Tray: Display blockers with tethers
+- [ ] E6. Combat Resolution: "Resolve" button + Enter to move to MAIN2
+
+## Phase F: Multiplayer & Integrity
+- [x] F1. Opponent View Switch: Auto-center on current player's turn
+- [x] F2. Permissions: Remove request required for Graveyard/Exile search
+- [x] F3. Disconnection: Skip disconnected players in turn order (re-add on return)
+- [x] F4. Kick/Remove: Remove kicked player's cards from board
+- [x] F5. Kick/Remove: Reflow mat positions correctly
+
+## Phase G: Notifications & Polish
+- [x] G1. Notification Sounds: Your Turn
+- [x] G2. Notification Sounds: Card Played
+- [x] G3. Notification Sounds: Card Drawn
+- [ ] G4. Notification Sounds: Player Request Received
+- [x] G5. Notification Sounds: Player Join/Leave
