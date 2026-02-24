@@ -159,3 +159,13 @@ export interface LogEntry {
   message: string;
   type: 'ACTION' | 'CHAT' | 'SYSTEM';
 }
+
+export interface SavedDeck {
+  id: string;
+  name: string;
+  deck: CardData[];
+  tokens: CardData[];
+  sleeveColor: string;
+  createdAt?: number;
+  manaRules?: Record<string, ManaRule>;
+}

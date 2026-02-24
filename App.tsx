@@ -4,7 +4,8 @@ import { DeckBuilder } from './components/DeckBuilder';
 import { Tabletop } from './components/Tabletop';
 
 import { MobileController } from './components/MobileController';
-import { CardData, ManaRule } from './types';
+import { CardData, ManaRule, SavedDeck } from './types';
+
 import { PLAYER_COLORS } from './constants';
 
 enum View {
@@ -16,16 +17,6 @@ enum View {
 }
 
 const STORAGE_KEY = 'planeswalker_tabletop_settings_v1';
-
-export interface SavedDeck {
-    id: string;
-    name: string;
-    deck: CardData[];
-    tokens: CardData[];
-    sleeveColor: string;
-    createdAt?: number;
-    manaRules?: Record<string, ManaRule>; // keyed by scryfallId
-}
 
 function App() {
     const [currentView, setCurrentView] = useState<View>(View.LOBBY);
@@ -275,7 +266,7 @@ function App() {
                     setPlayerSleeve={setPlayerSleeve}
                     onJoin={handleJoinGame}
                     onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
-                    savedDeckCount={activeDeck.length}
+                    savedDeckCount={savedDecks.length}
                     currentTokens={lobbyTokens}
                     onTokensChange={setLobbyTokens}
                     activeDeck={activeDeck}

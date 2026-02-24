@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Bot, User as UserIcon } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, User as UserIcon } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 
 import { connectSocket } from '../services/socket';
-import type { SavedDeck } from '../App';
+import type { SavedDeck } from '../types';
+
 import { ManaRulesModal } from './ManaRulesModal';
 
 interface LobbyProps {
@@ -58,7 +59,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // AI Opponent State
+    // AI Opponent State (kept for future use but UI button removed)
     const [selectedAIDeck, setSelectedAIDeck] = useState<SavedDeck | null>(null);
     const [showAIOption, setShowAIOption] = useState(false);
 
@@ -415,13 +416,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                             <div className="pt-4 border-t border-gray-700">
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                                    <button
-                                        onClick={handlePlayWithAI}
-                                        className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                                    >
-                                        <Bot size={20} /> Play vs AI
-                                    </button>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                                     <button
                                         onClick={handleHostLocalTableClick}
                                         className="bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
@@ -438,23 +433,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     </button>
                                 </div>
 
-                                {selectedAIDeck && (
-                                    <div className="bg-purple-900/30 border border-purple-500/50 p-3 rounded-lg mb-4">
-                                        <div className="flex items-center gap-3">
-                                            <Bot size={20} className="text-purple-400" />
-                                            <div className="flex-1">
-                                                <p className="text-sm font-bold text-purple-300">AI Opponent Selected</p>
-                                                <p className="text-xs text-purple-400">{selectedAIDeck.name} ({selectedAIDeck.deck.length} cards)</p>
-                                            </div>
-                                            <button
-                                                onClick={() => setSelectedAIDeck(null)}
-                                                className="text-purple-400 hover:text-white"
-                                            >
-                                                <X size={16} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
 
 
                                 {/* Join Existing Game */}
