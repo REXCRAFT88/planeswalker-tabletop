@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Bot } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Bot, User as UserIcon } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 
 import { connectSocket } from '../services/socket';
-import { SavedDeck } from '../App';
+import type { SavedDeck } from '../App';
 import { ManaRulesModal } from './ManaRulesModal';
 
 interface LobbyProps {
@@ -456,28 +456,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     </div>
                                 )}
 
-                                <div className="flex items-center gap-3 mb-4">
-                                    <button
-                                        onClick={handleHostLocalTableClick}
-                                        className="flex-1 bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                                    >
-                                        <Layers size={20} /> Local Sandbox
-                                    </button>
-                                    <button
-                                        onClick={() => handleCreateRoom()}
-                                        disabled={isJoining}
-                                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                                    >
-                                        {isJoining ? <Loader className="animate-spin" /> : <Play size={20} />}
-                                        {isJoining ? (joinStatus || 'Joining...') : 'Create Online Table'}
-                                    </button>
-                                </div>
-
-                                <div className="flex items-center gap-3 mb-4">
-                                    <div className="h-px bg-gray-700 flex-1" />
-                                    <span className="text-gray-500 text-xs uppercase font-bold">OR</span>
-                                    <div className="h-px bg-gray-700 flex-1" />
-                                </div>
 
                                 {/* Join Existing Game */}
                                 <div className="bg-gray-900 p-3 rounded-xl border border-gray-700 mb-4">
@@ -748,20 +726,3 @@ export const Lobby: React.FC<LobbyProps> = ({
     );
 };
 
-const UserIcon = ({ className, size }: { className?: string, size?: number }) => (
-    <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={className}
-    >
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-        <circle cx="12" cy="7" r="4"></circle>
-    </svg>
-);
