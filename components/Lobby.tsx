@@ -783,6 +783,8 @@ export const Lobby: React.FC<LobbyProps> = ({
         </div>
         </div>
         </div>
+        </div>
+        </div>
     )
 };
 
