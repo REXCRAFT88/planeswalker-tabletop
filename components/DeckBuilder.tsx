@@ -32,6 +32,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const [addCardQuery, setAddCardQuery] = useState('');
     const [addCardResults, setAddCardResults] = useState<CardData[]>([]);
     const [isSearchingAdd, setIsSearchingAdd] = useState(false);
+    const [alternateArts, setAlternateArts] = useState<CardData[] | null>(null);
+    const [artTargetId, setArtTargetId] = useState<string | null>(null);
+    const [isSearchingArt, setIsSearchingArt] = useState(false);
 
     const isNewDeck = !initialDeck || initialDeck.length === 0;
     const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : '');
@@ -210,6 +213,26 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const removeToken = (id: string) => {
         setStagedTokens(prev => prev.filter(t => t.id !== id));
+    };
+
+    const handleRightClick = async (e: React.MouseEvent, card: CardData) => {
+        e.preventDefault();
+        setArtTargetId(card.id);
+        setIsSearchingArt(true);
+        const results = await searchCards(`!"${card.name}" unique:prints`);
+        setAlternateArts(results);
+        setIsSearchingArt(false);
+    };
+
+    const changeArt = (newImageUrl: string) => {
+        if (!artTargetId) return;
+        if (activeSection === 'main' && stagedDeck) {
+            setStagedDeck(prev => prev ? prev.map(c => c.id === artTargetId ? { ...c, imageUrl: newImageUrl } : c) : null);
+        } else {
+            setStagedSideboard(prev => prev.map(c => c.id === artTargetId ? { ...c, imageUrl: newImageUrl } : c));
+        }
+        setAlternateArts(null);
+        setArtTargetId(null);
     };
 
     const filteredDeck = stagedDeck
@@ -533,6 +556,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                             src={card.imageUrl}
                                             className="w-full h-full object-cover rounded-md"
                                             onClick={() => setCommander(card.id)}
+                                            onContextMenu={(e) => handleRightClick(e, card)}
                                         />
                                         {card.isCommander && (
                                             <div className="absolute top-2 right-2 bg-amber-500 text-black p-1 rounded-full shadow-lg">
@@ -561,6 +585,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                         <img
                                             src={card.imageUrl}
                                             className="w-full h-full object-cover rounded-md"
+                                            onContextMenu={(e) => handleRightClick(e, card)}
                                         />
                                         <button
                                             onClick={(e) => { e.stopPropagation(); removeCardFromSideboard(card.id); }}
@@ -580,6 +605,42 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                 <div className="col-span-full text-center text-gray-500 py-12">
                                     {searchQuery ? `No cards found matching "${searchQuery}"` : 'This section is empty.'}
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Art Selection Overlay */}
+            {artTargetId && (
+                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+                            <h3 className="font-bold text-white flex items-center gap-2">Select New Art</h3>
+                            <button onClick={() => { setArtTargetId(null); setAlternateArts(null); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                            {isSearchingArt ? (
+                                <div className="flex flex-col items-center justify-center py-20 gap-4">
+                                    <Loader2 className="animate-spin text-blue-500" size={48} />
+                                    <p className="text-gray-400">Fetching alternate versions...</p>
+                                </div>
+                            ) : alternateArts && alternateArts.length > 0 ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
+                                    {alternateArts.map((art, idx) => (
+                                        <div
+                                            key={`${art.scryfallId}-${idx}`}
+                                            onClick={() => changeArt(art.imageUrl)}
+                                            className="cursor-pointer group relative"
+                                        >
+                                            <img src={art.imageUrl} className="w-full rounded shadow-md group-hover:ring-2 ring-blue-500 transition-all" />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded">
+                                                <Check className="text-white" size={32} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-20 text-gray-500">No alternate art found for this card.</div>
                             )}
                         </div>
                     </div>

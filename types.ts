@@ -97,3 +97,31 @@ export interface LogEntry {
   message: string;
   type: 'ACTION' | 'CHAT' | 'SYSTEM';
 }
+
+export type UndoableAction = {
+  type: 'TAP_CARD';
+  objectId: string;
+  previousRotation: number;
+  previousTappedQuantity: number;
+} | {
+  type: 'UNTAP_ALL';
+  objects: { id: string; previousRotation: number; previousTappedQuantity: number }[];
+} | {
+  type: 'PLAY_CARD';
+  objectId: string;
+  card: any; // CardData
+  fromZone: 'HAND' | 'COMMAND';
+} | {
+  type: 'MOVE_CARD';
+  objectId: string;
+  previousX: number;
+  previousY: number;
+} | {
+  type: 'SEND_TO_ZONE';
+  objectId: string;
+  card: any;
+  fromZone: string;
+  toZone: string;
+};
+
+export const MAX_UNDO_HISTORY = 20;

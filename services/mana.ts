@@ -438,39 +438,6 @@ export const poolTotal = (pool: ManaPool): number => {
     return MANA_COLORS.reduce((sum, c) => sum + pool[c], 0);
 };
 
-// --- Undo System ---
-export type UndoableAction = {
-    type: 'TAP_CARD';
-    objectId: string;
-    previousRotation: number;
-    previousTappedQuantity: number;
-} | {
-    type: 'UNTAP_ALL';
-    objects: { id: string; previousRotation: number; previousTappedQuantity: number }[];
-} | {
-    type: 'PLAY_CARD';
-    objectId: string;
-    card: any; // CardData
-    fromZone: 'HAND' | 'COMMAND';
-} | {
-    type: 'MOVE_CARD';
-    objectId: string;
-    previousX: number;
-    previousY: number;
-} | {
-    type: 'SEND_TO_ZONE';
-    objectId: string;
-    card: any;
-    fromZone: string;
-    toZone: string;
-} | {
-    type: 'AUTO_TAP';
-    tappedIds: string[];
-    previousStates: { id: string; rotation: number; tappedQuantity: number }[];
-    previousFloatingMana: ManaPool;
-};
-
-export const MAX_UNDO_HISTORY = 20;
 
 
 // --- Mana Production Estimation ---

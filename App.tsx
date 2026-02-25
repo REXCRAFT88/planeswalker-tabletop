@@ -86,7 +86,7 @@ function App() {
     });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
-    const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
+    const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], sideboard: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
 
@@ -176,16 +176,22 @@ function App() {
         }
     };
 
-    const handleStartLocalGame = (opponents: any[], isLocalTable: boolean = false) => {
-        setLocalOpponents(opponents);
-        setIsLocalTableHost(isLocalTable);
-        if (isLocalTable) {
-            // Generate a 4-letter room code
-            const code = crypto.randomUUID().slice(0, 6).toUpperCase();
-            setRoomId(code);
-        } else {
-            setRoomId("LOCAL");
+    const handleStartLocalGame = (participants: any[]) => {
+        // Separate host from opponents
+        const host = participants.find(p => p.id === 'player-0');
+        const opponents = participants.filter(p => p.id !== 'player-0');
+
+        if (host) {
+            setActiveDeck(host.deck);
+            setActiveSideboard(host.sideboard);
+            setLobbyTokens(host.tokens);
+            setPlayerSleeve(host.color);
+            setPlayerName(host.name);
         }
+
+        setLocalOpponents(opponents);
+        setIsLocalTableHost(false);
+        setRoomId("LOCAL");
         setCurrentView(View.LOCAL_GAME);
     };
 
@@ -246,6 +252,11 @@ function App() {
                     onStartGame={handleStartLocalGame}
                     onBack={() => setCurrentView(View.LOBBY)}
                     savedDecks={savedDecks}
+                    playerName={playerName}
+                    playerSleeve={playerSleeve}
+                    activeDeck={activeDeck}
+                    activeSideboard={activeSideboard}
+                    activeTokens={lobbyTokens}
                 />
             )}
 

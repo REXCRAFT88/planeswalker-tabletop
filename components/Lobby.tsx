@@ -51,8 +51,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
     const [matPreviewUrl, setMatPreviewUrl] = useState(customMatUrl);
     const [sleevePreviewUrl, setSleevePreviewUrl] = useState(customSleeveUrl);
-    const [matTransform, setMatTransform] = useState({ scale: 1, x: 0, y: 0 });
-    const [sleeveTransform, setSleeveTransform] = useState({ scale: 1, x: 0, y: 0 });
+    const [matTransform, setMatTransform] = useState({ scale: 1, x: 0, y: 0, rotation: 0 });
+    const [sleeveTransform, setSleeveTransform] = useState({ scale: 1, x: 0, y: 0, rotation: 0 });
     const matImageRef = useRef<HTMLImageElement>(null);
     const sleeveImageRef = useRef<HTMLImageElement>(null);
     const isDraggingMat = useRef(false);
@@ -110,8 +110,8 @@ export const Lobby: React.FC<LobbyProps> = ({
         isDraggingSleeve.current = false;
     };
 
-    const resetMatTransform = () => setMatTransform({ scale: 1, x: 0, y: 0 });
-    const resetSleeveTransform = () => setSleeveTransform({ scale: 1, x: 0, y: 0 });
+    const resetMatTransform = () => setMatTransform({ scale: 1, x: 0, y: 0, rotation: 0 });
+    const resetSleeveTransform = () => setSleeveTransform({ scale: 1, x: 0, y: 0, rotation: 0 });
 
     // Library State
     const [isLibraryOpen, setIsLibraryOpen] = useState(false);
@@ -371,7 +371,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                             <div className="flex flex-col md:flex-row gap-4 mb-4">
                                 <button
                                     onClick={handleLocalGame}
-                                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                                    className="flex-1 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                                 >
                                     <Users size={20} /> Local Game
                                 </button>
@@ -380,8 +380,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     disabled={isJoining}
                                     className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
                                 >
-                                    {isJoining ? <Loader className="animate-spin" /> : <Play size={20} />}
-                                    {isJoining ? (joinStatus || 'Joining...') : 'Create Online Table'}
+                                    {isJoining ? <Loader className="animate-spin" /> : <Users size={20} />}
+                                    {isJoining ? (joinStatus || 'Joining...') : 'Online Table'}
                                 </button>
                             </div>
 
@@ -608,7 +608,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                 style={{
                                                     width: '100%',
                                                     height: '100%',
-                                                    transform: `translate(${matTransform.x}px, ${matTransform.y}px) scale(${matTransform.scale})`,
+                                                    transform: `translate(${matTransform.x}px, ${matTransform.y}px) scale(${matTransform.scale}) rotate(${matTransform.rotation}deg)`,
                                                     transformOrigin: 'center center'
                                                 }}
                                                 onError={() => setMatPreviewUrl('')}
@@ -622,7 +622,16 @@ export const Lobby: React.FC<LobbyProps> = ({
                                             </div>
                                         </div>
                                     )}
-                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                        <button onClick={() => setMatTransform(prev => ({ ...prev, scale: Math.min(prev.scale + 0.1, 5) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom In">
+                                            <ZoomIn size={14} />
+                                        </button>
+                                        <button onClick={() => setMatTransform(prev => ({ ...prev, scale: Math.max(prev.scale - 0.1, 0.1) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom Out">
+                                            <ZoomOut size={14} />
+                                        </button>
+                                        <button onClick={() => setMatTransform(prev => ({ ...prev, rotation: (prev.rotation + 90) % 360 }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Rotate">
+                                            <RotateCcw size={14} />
+                                        </button>
                                         <button onClick={resetMatTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
                                             <RefreshCcw size={14} />
                                         </button>
@@ -704,7 +713,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                 style={{
                                                     width: '100%',
                                                     height: '100%',
-                                                    transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale})`,
+                                                    transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale}) rotate(${sleeveTransform.rotation}deg)`,
                                                     transformOrigin: 'center center'
                                                 }}
                                                 onError={() => setSleevePreviewUrl('')}
@@ -720,7 +729,16 @@ export const Lobby: React.FC<LobbyProps> = ({
                                             </div>
                                         </div>
                                     )}
-                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.min(prev.scale + 0.1, 5) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom In">
+                                            <ZoomIn size={14} />
+                                        </button>
+                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.max(prev.scale - 0.1, 0.1) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom Out">
+                                            <ZoomOut size={14} />
+                                        </button>
+                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, rotation: (prev.rotation + 90) % 360 }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Rotate">
+                                            <RotateCcw size={14} />
+                                        </button>
                                         <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
                                             <RefreshCcw size={14} />
                                         </button>

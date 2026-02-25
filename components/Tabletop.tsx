@@ -1,19 +1,13 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats, UndoableAction, MAX_UNDO_HISTORY } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { ManaDisplay } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import * as SFX from '../services/sounds';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
-import {
-    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
-    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
-    type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
-} from '../services/mana';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
@@ -41,6 +35,7 @@ interface LocalPlayerState {
     hand: CardData[];
     library: CardData[];
     graveyard: CardData[];
+    exile: CardData[];
     commandZone: CardData[];
     sideboard: CardData[];
     life: number;
@@ -528,26 +523,6 @@ const Playmat: React.FC<PlaymatProps> = ({
                 <div className="absolute -top-6 w-full text-center text-xs text-gray-500 font-bold uppercase">Library</div>
             </div>
 
-            {/* Sideboard Zone */}
-            <div
-                className="absolute group"
-                style={{ left: zones.library.x, top: zones.library.y - CARD_HEIGHT - 20, width: CARD_WIDTH, height: CARD_HEIGHT }}
-            >
-                <div
-                    className="w-full h-full rounded bg-gray-800/30 border-2 border-dashed border-white/10 flex items-center justify-center hover:border-yellow-400 transition relative overflow-hidden cursor-pointer active:scale-95"
-                    onClick={() => isControlled && !disconnected && onOpenSearch('SIDEBOARD')}
-                >
-                    <div className="text-white/20 font-bold text-xl z-10 pointer-events-none">{counts.sideboard}</div>
-                    <div className={`absolute inset-0 bg-black/60 opacity-0 ${!isMobile ? 'group-hover:opacity-100' : 'hidden'} transition-opacity flex flex-col items-center justify-center gap-2 z-30`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <button onClick={() => onOpenSearch('SIDEBOARD')} className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded-full" title="Search Sideboard">
-                            <Search size={14} />
-                        </button>
-                    </div>
-                </div>
-                <div className="absolute -top-6 w-full text-center text-xs text-gray-500 font-bold uppercase">Sideboard</div>
-            </div>
 
             {/* Graveyard Zone */}
             <div
@@ -901,7 +876,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [turnSubPhase, setTurnSubPhase] = useState<TurnSubPhase>('MAIN1');
     const [soundEnabled, setSoundEnabled] = useState(true);
     const [roomLocked, setRoomLocked] = useState(false);
-    const [hostOnlyDeckLoading, setHostOnlyDeckLoading] = useState(false);
     const [kickVotes, setKickVotes] = useState<Record<string, string[]>>({}); // targetId -> array of voterIds
     const [activeKickVote, setActiveKickVote] = useState<string | null>(null);
 
@@ -932,7 +906,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-    const [showManaCalculator, setShowManaCalculator] = useState(true);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
 
@@ -971,13 +944,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
-        return localStorage.getItem('planeswalker_auto_tap') === 'true';
-    });
-    const [floatingMana, setFloatingMana] = useState<ManaPool>({ ...EMPTY_POOL });
-    const [lastPlayedCard, setLastPlayedCard] = useState<CardData | null>(null);
-    const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
-    const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
 
     // --- Undo System ---
     const [undoHistory, setUndoHistory] = useState<UndoableAction[]>([]);
@@ -986,9 +952,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     }, []);
 
     // Persist mana settings
-    useEffect(() => {
-        localStorage.setItem('planeswalker_auto_tap', String(autoTapEnabled));
-    }, [autoTapEnabled]);
 
     // Local Table Host Logic
     useEffect(() => {
@@ -1072,6 +1035,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     graveyard: [],
                     exile: [],
                     commandZone: deck.filter(c => c.isCommander),
+                    sideboard: [],
                     life: 40,
                     counters: {},
                     commanderDamage: {},
@@ -1103,24 +1067,22 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             // Merge localOpponents into playersList
             // This is primarily for "Local Table" where we have "Open Slots" passed in
 
-            const newPlayers = localOpponents.map((opp, index) => ({
-                id: opp.id || `opponent-${index}`,
+            const host = {
+                id: 'player-0',
+                name: playerName,
+                color: sleeveColor,
+                life: 40
+            };
+
+            const opponents = localOpponents.map((opp, index) => ({
+                id: opp.id || `opponent-${index + 1}`,
                 name: opp.name,
-                isAi: opp.type === 'ai',
                 color: opp.color,
-                life: 40, // standard starting life
-                // We could map other fields if needed
+                life: 40,
             }));
 
-            // If we are the host, we might want to ensure WE are in the list too?
-            // Actually Tabletop usually puts the main player in the list or handles it separately.
-            // In "Standard" local game, `playersList` is usually empty or just AI?
-            // Let's look at how standard local initializes. 
-            // It seems standard local might not use `playersList` extensively for the main view?
-            // actually `playersList` is used for rendering the board opponents.
-
-            // Let's set the players list
-            setPlayersList(newPlayers);
+            const allPlayers = [host, ...opponents];
+            setPlayersList(allPlayers);
 
             // Also initialize their state containers
             const newCounts: Record<string, any> = {};
@@ -1147,6 +1109,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     graveyard: [],
                     exile: [],
                     commandZone: opp.deck ? opp.deck.filter(c => c.isCommander) : [],
+                    sideboard: [],
                     life: 40,
                     counters: {},
                     commanderDamage: {},
@@ -1164,9 +1127,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
-    const [artSelectionTarget, setArtSelectionTarget] = useState<string | null>(null);
-    const [artSelectionPrints, setArtSelectionPrints] = useState<CardData[]>([]);
-    const [isSearchingArt, setIsSearchingArt] = useState(false);
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -2512,6 +2472,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     const tokens = state.hand.filter(c => c.isToken);
                     state.hand = [...initialHand, ...tokens];
                 }
+
                 // Send update to mobile if applicable
                 sendHandUpdate(state.id, state.hand, 'MULLIGAN', state.mulliganCount);
             });
@@ -2691,7 +2652,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         setGamePhase('PLAYING');
                         // Switch back to P1 view if needed, or stay. Usually P1 starts.
                     } else {
-                        nextTurn(); // Switch to next player for mulligan
+                        passTurnToNextPlayer(); // Switch to next player for mulligan
                     }
                 } else {
                     setGamePhase('PLAYING');
@@ -2699,6 +2660,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 }
             }
         } else {
+            if (mulliganCount >= 7) {
+                addLog("Maximum mulligans reached (7). You must keep this hand.");
+                return;
+            }
             const currentDeckCardsInHand = hand.filter(c => !c.isToken);
             const currentTokensInHand = hand.filter(c => c.isToken);
 
@@ -2790,6 +2755,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 addLog("All players have kept their hands. Game Start!", 'SYSTEM');
             }
         } else {
+            if (state.mulliganCount >= 7) {
+                addLog(`Maximum mulligans reached for ${playersList.find(p => p.id === playerId)?.name}`, 'SYSTEM');
+                return;
+            }
             // Mulligan Logic
             const currentHand = state.hand.filter(c => !c.isToken);
             const currentTokens = state.hand.filter(c => c.isToken);
@@ -2905,7 +2874,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             addLog(`${currentPlayer.name} kept hand`);
             const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
             if (allKept) setGamePhase('PLAYING');
-            else nextTurn();
+            else passTurnToNextPlayer();
         } else {
             setGamePhase('PLAYING');
             addLog(`kept hand and put ${requiredCount} cards on bottom`);
@@ -2959,8 +2928,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             // Auto-actions for phases
             if (next === 'UNTAP') {
                 untapAll();
-            } else if (next === 'DRAW') {
-                drawCard(1);
             }
             return; // stay on this player's turn
         }
@@ -3011,13 +2978,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             prevDuration: duration
         });
 
-        if (currentTurnPlayerId === socket.id) {
-            setGameStats(prev => {
-                const current = prev[socket.id] || emptyStats;
-                return { ...prev, [socket.id]: { ...current, totalTurnTime: current.totalTurnTime + durationMs } };
-            });
-            updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
-        }
 
         setCurrentTurnPlayerId(nextPlayer.id);
         setTurn(nextTurnNum);
@@ -3050,42 +3010,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         if (soundEnabled) SFX.soundTap();
     };
 
-    const openArtSelection = async (objId: string) => {
-        const obj = boardObjects.find(o => o.id === objId);
-        if (!obj) return;
-
-        setArtSelectionTarget(objId);
-        setIsSearchingArt(true);
-        setArtSelectionPrints([]);
-
-        // Use unique=prints to get all versions
-        const query = `!"${obj.cardData.name}"`;
-        const prints = await searchCards(query, 50);
-        setArtSelectionPrints(prints);
-        setIsSearchingArt(false);
-    };
-
-    const handleArtSelection = (print: CardData) => {
-        if (!artSelectionTarget) return;
-        const obj = boardObjects.find(o => o.id === artSelectionTarget);
-        if (!obj) {
-            setArtSelectionTarget(null);
-            return;
-        }
-
-        const updates = {
-            cardData: {
-                ...obj.cardData,
-                imageUrl: print.imageUrl,
-                backImageUrl: print.backImageUrl,
-                scryfallId: print.scryfallId
-            }
-        };
-
-        updateBoardObject(artSelectionTarget, updates);
-        addLog(`changed art for ${obj.cardData.name}`);
-        setArtSelectionTarget(null);
-    };
 
     const startKickVote = (targetId: string) => {
         if (targetId === socket.id) return;
@@ -3131,7 +3055,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         }
 
         // Clear floating mana on untap all
-        setFloatingMana({ ...EMPTY_POOL });
         addLog("untapped all permanents");
     };
 
@@ -3294,7 +3217,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         if (soundEnabled) SFX.soundCardPlay();
 
         // Track last played card for auto-tap
-        setLastPlayedCard(card);
 
         // Record undo
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });
@@ -3302,160 +3224,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
     };
 
-    // --- Mana Calculator Functions ---
-    const myDefaultRotation = useMemo(() => layout[mySeatIndex]?.rot || 0, [layout, mySeatIndex]);
-
-    // Compute available mana from untapped sources
-    const manaInfo = useMemo(() => {
-        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-
-        // Determine commander colors for Command Tower logic
-        // Look for commander in command zone or on board
-        const myPlayer = playersList.find(p => p.id === myId);
-        let commander: CardData | undefined;
-        // Check if I am the controller
-        const amIController = (isLocal && myId === (playersList[mySeatIndex]?.id || 'player-0')) || (!isLocal && myId === (socket.id || 'local-player'));
-
-        if (amIController) {
-            // Use local state
-            commander = commandZone.find(c => c.isCommander);
-        } else {
-            // Check opponents commanders
-            const oppCmds = opponentsCommanders[myId];
-            if (oppCmds) {
-                commander = oppCmds.find(c => c.isCommander);
-            }
-        }
-
-        // Fallback to board search
-        if (!commander) {
-            commander = boardObjects.find(o => o.controllerId === myId && o.cardData.isCommander)?.cardData;
-        }
-
-        let cmdColors: ManaColor[] | undefined;
-        if (commander) {
-            // Estimate colors from mana cost
-            // This is a simplification; ideally we parse mana cost symbols
-            // For now, let's use producedMana if available, or just infer from cost string
-            const cost = commander.manaCost || "";
-            cmdColors = [];
-            if (cost.includes('W')) cmdColors.push('W');
-            if (cost.includes('U')) cmdColors.push('U');
-            if (cost.includes('B')) cmdColors.push('B');
-            if (cost.includes('R')) cmdColors.push('R');
-            if (cost.includes('G')) cmdColors.push('G');
-            if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
-            // Handle W/U etc.
-        }
-        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors);
-    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation]);
-
-    // Reset floating mana on turn change
-    useEffect(() => {
-        setFloatingMana({ ...EMPTY_POOL });
-    }, [turn, currentTurnPlayerId]);
-
-    const handleAddMana = (type: keyof ManaPool) => {
-        setFloatingMana(prev => ({
-            ...prev,
-            [type]: (prev[type] || 0) + 1
-        }));
-    };
-
-    const handleRemoveMana = (type: keyof ManaPool) => {
-        setFloatingMana(prev => ({
-            ...prev,
-            [type]: Math.max(0, (prev[type] || 0) - 1)
-        }));
-    };
-
-    // Handle auto-tap when Tab is pressed
-    const handleAutoTap = useCallback((card: CardData) => {
-        if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
-
-        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-
-        const cost = parseManaCost(card.manaCost);
-        if (cost.symbols.length === 0) return;
-
-        // X spells: skip auto-tap (user needs to manually decide X value)
-        if (cost.hasX) {
-            addLog(`${card.name} has X in its cost — tap mana manually`);
-            return;
-        }
-
-        // 1. Try to pay with Floating Mana first
-        const result = autoTapForCost(cost, manaInfo.sources, floatingMana);
-
-        if (!result.success) {
-            addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
-            return;
-        }
-
-        // Save previous states for undo
-        const previousStates = result.tappedIds.map(id => {
-            const obj = boardObjects.find(o => o.id === id);
-            return { id, rotation: obj?.rotation || 0, tappedQuantity: obj?.tappedQuantity || 0 };
-        });
-
-        // Tap each source
-        // Tap sources (handling stacks)
-        const tappedRotation = (myDefaultRotation + 90) % 360;
-        const tapCounts: Record<string, number> = {};
-        result.tappedIds.forEach(id => {
-            tapCounts[id] = (tapCounts[id] || 0) + 1;
-        });
-
-        Object.entries(tapCounts).forEach(([id, count]) => {
-            const obj = boardObjects.find(o => o.id === id);
-            if (!obj) return;
-
-            if (obj.quantity > 1) {
-                const newTappedQty = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
-                updateBoardObject(id, { tappedQuantity: newTappedQty });
-            } else {
-                updateBoardObject(id, { rotation: tappedRotation });
-            }
-        });
-
-        // Update floating mana — subtract what was spent and add any excess produced
-        setFloatingMana(result.floatingManaRemaining);
-
-        // Track mana stats
-        const addProduced: Record<string, number> = {};
-        const addUsed: Record<string, number> = {};
-        MANA_COLORS.forEach(c => {
-            // Mana produced from tapping
-            if (result.manaProducedFromTap[c] > 0) {
-                addProduced[c] = (gameStats[myId]?.manaProduced?.[c] || 0) + result.manaProducedFromTap[c];
-            }
-            // Mana used from floating or tapping
-            if (result.manaUsed[c] > 0) {
-                addUsed[c] = (gameStats[myId]?.manaUsed?.[c] || 0) + result.manaUsed[c];
-            }
-        });
-        updateMyStats({
-            manaProduced: { ...gameStats[myId]?.manaProduced, ...addProduced },
-            manaUsed: { ...gameStats[myId]?.manaUsed, ...addUsed },
-        });
-
-        // Record undo
-        pushUndo({
-            type: 'AUTO_TAP',
-            tappedIds: result.tappedIds,
-            previousStates,
-            previousFloatingMana: floatingMana, // Save previous floating mana for undo
-        });
-
-        // Visual flash feedback
-        setAutoTappedIds(result.tappedIds);
-        if (autoTapFlashTimer.current) clearTimeout(autoTapFlashTimer.current);
-        autoTapFlashTimer.current = setTimeout(() => setAutoTappedIds([]), 1500);
-
-        const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
-        addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
-        setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats]);
 
     // Handle undo (Ctrl+Z)
     const handleUndo = useCallback(() => {
@@ -3498,18 +3266,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     }
                 }
                 addLog(`undid playing ${action.card.name}`);
-                break;
-            }
-            case 'AUTO_TAP': {
-                // Restore all tapped cards to their previous state
-                action.previousStates.forEach(state => {
-                    updateBoardObject(state.id, {
-                        rotation: state.rotation,
-                        tappedQuantity: state.tappedQuantity
-                    });
-                });
-                setAutoTappedIds([]);
-                addLog('undid auto-tap');
                 break;
             }
         }
@@ -3722,10 +3478,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         const rollerIdx = playersList.findIndex(p => p.id === rollerId);
         if (rollerIdx === -1) return;
 
-        const pos = layout[rollerIdx];
-        if (!pos) return;
-        const x = pos.x + MAT_W / 2;
-        const y = pos.y + MAT_H / 2;
+        const x = window.innerWidth / 2;
+        const y = window.innerHeight / 2;
 
         const result = Math.floor(Math.random() * sides) + 1;
         const rollData: DieRoll = {
@@ -3937,21 +3691,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
-            case 'm': setShowManaCalculator(prev => !prev); break;
-            case 'tab': {
-                e.preventDefault();
-                if (hoveredCardId) {
-                    const obj = boardObjects.find(o => o.id === hoveredCardId);
-                    if (obj) {
-                        handleAutoTap(obj.cardData);
-                        return;
-                    }
-                }
-                if (autoTapEnabled && lastPlayedCard) {
-                    handleAutoTap(lastPlayedCard);
-                }
-                break;
-            }
             case 'z': {
                 if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
@@ -4116,7 +3855,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
         setLibrary(newLib); setGraveyard(newGrave); setExile(newExile); setHand(newHand); setSideboard(newSideboard);
         if (searchModal.source === 'LIBRARY') openSearch('LIBRARY');
-        else if (searchModal.source === 'SIDEBOARD') openSearch('SIDEBOARD');
         else setSearchModal(prev => ({ ...prev, tray: [] }));
     };
     const toggleRevealItem = (index: number) => {
@@ -4312,7 +4050,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const renderWorld = (viewState: ViewState, containerRefToUse: React.RefObject<HTMLDivElement>, handlers: any, rotation: number = 0, isOpponent: boolean = false) => (
         <div
             ref={containerRefToUse}
-            className="w-full h-full touch-none relative overflow-hidden bg-[#1a1410]"
+            className="w-full h-full touch-none relative overflow-hidden bg-[#3d2b1f]"
             style={{ cursor: isSpacePressed.current ? 'grab' : 'default' }}
             onPointerDown={handlers.onDown}
             onPointerMove={handlers.onMove}
@@ -4323,11 +4061,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             }}
         >
             <div
-                className="absolute inset-0 opacity-100 pointer-events-none"
+                className="absolute inset-0 opacity-50 pointer-events-none"
                 style={{
                     backgroundImage: `url("/table_texture.png")`,
                     backgroundRepeat: 'repeat',
-                    backgroundSize: `${512 * viewState.scale}px`,
+                    backgroundSize: `${768 * viewState.scale}px`,
                     backgroundPosition: `${viewState.x}px ${viewState.y}px`
                 }}
             />
@@ -4469,7 +4207,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                 onCopy={copyCard}
                                 onSteal={stealCard}
                                 onReveal={revealBoardCard}
-                                onChangeArt={openArtSelection}
                                 onKick={controller && socket.id !== controller.id ? () => startKickVote(controller.id) : undefined}
                                 onUnstack={unstackCards}
                                 onRemoveOne={removeCardFromStack}
@@ -5159,26 +4896,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     )}
                 </div>
 
-                {/* Mana Display */}
-                {(gamePhase === 'PLAYING' && showManaCalculator) && (
-                    <ManaDisplay
-                        pool={manaInfo.pool}
-                        potentialPool={manaInfo.potentialPool}
-                        floatingMana={floatingMana}
-                        onAddMana={handleAddMana}
-                        onRemoveMana={handleRemoveMana}
-                    />
-                )}
-
-                {/* Auto-Tap Flash Overlay — highlights tapped cards */}
-                {autoTappedIds.length > 0 && (
-                    <style>{`
-                        ${autoTappedIds.map(id => `[data-object-id="${id}"]`).join(', ')} {
-                            box-shadow: 0 0 20px 6px rgba(250, 204, 21, 0.5) !important;
-                            transition: box-shadow 0.3s ease !important;
-                        }
-                    `}</style>
-                )}
 
                 {/* Right / Opponent Pane */}
                 {isOpponentViewOpen && (
@@ -5271,7 +4988,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                     <button onClick={() => { drawCard(1); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Hand size={24} className="text-green-400" /><span className="text-sm text-white">Draw</span></button>
                                     <button onClick={() => { playTopLibrary(); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Play size={24} className="text-blue-400" /><span className="text-sm text-white">Play Top</span></button>
                                     <button onClick={() => { openSearch('LIBRARY'); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Search size={24} className="text-white" /><span className="text-sm text-white">Search Library</span></button>
-                                    <button onClick={() => { openSearch('SIDEBOARD'); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Layers size={24} className="text-white" /><span className="text-sm text-white">Sideboard</span></button>
                                     <button onClick={() => { openSearch('GLOBAL'); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Globe size={24} className="text-white" /><span className="text-sm text-white">Global Card</span></button>
                                     <button onClick={() => { shuffleLibrary(); setMobileZoneMenu(null); }} className="flex flex-col items-center gap-2 p-4 bg-gray-800 rounded-xl active:bg-blue-600"><Shuffle size={24} className="text-purple-400" /><span className="text-sm text-white">Shuffle</span></button>
                                 </>
@@ -5822,20 +5538,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                 </label>
                             </div>
 
-                            <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
-                                <label className="flex justify-between items-center cursor-pointer">
-                                    <div>
-                                        <h4 className="font-bold text-white flex items-center gap-2"><Zap size={16} className="text-yellow-400" /> Auto-Tap Mana</h4>
-                                        <p className="text-xs text-gray-400">Press Tab after playing a card to auto-tap lands/mana sources. Basics first.</p>
-                                    </div>
-                                    <div
-                                        onClick={() => setAutoTapEnabled(prev => !prev)}
-                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${autoTapEnabled ? 'bg-yellow-500 justify-end' : 'bg-gray-600 justify-start'}`}
-                                    >
-                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
-                                    </div>
-                                </label>
-                            </div>
 
                             <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
                                 <label className="flex justify-between items-center cursor-pointer">
@@ -5873,25 +5575,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                             </div>
                                         </label>
                                     </div>
-                                    <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
-                                        <label className="flex justify-between items-center cursor-pointer">
-                                            <div>
-                                                <h4 className="font-bold text-white flex items-center gap-2"><Layers size={16} className="text-purple-400" /> Host-Only Deck Loading</h4>
-                                                <p className="text-xs text-gray-400">Only the host can load new decks into the game.</p>
-                                            </div>
-                                            <div
-                                                onClick={() => {
-                                                    const newVal = !hostOnlyDeckLoading;
-                                                    setHostOnlyDeckLoading(newVal);
-                                                    emitAction('UPDATE_SETTINGS', { hostOnlyDeckLoading: newVal });
-                                                    addLog(`${newVal ? 'restricted' : 'opened'} deck loading`);
-                                                }}
-                                                className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${hostOnlyDeckLoading ? 'bg-purple-600 justify-end' : 'bg-gray-600 justify-start'}`}
-                                            >
-                                                <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
-                                            </div>
-                                        </label>
-                                    </div>
                                 </>
                             )}
 
@@ -5920,46 +5603,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 </button>
             )}
 
-            {artSelectionTarget && (
-                <div className="fixed inset-0 z-[12000] bg-black/90 backdrop-blur-md flex flex-col items-center p-8 animate-in fade-in overflow-hidden">
-                    <div className="w-full max-w-6xl flex flex-col h-full">
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 className="text-2xl font-bold text-white flex items-center gap-3">
-                                    <ImageIcon className="text-indigo-400" /> Change Card Art
-                                </h3>
-                                <p className="text-gray-400">Select a printing for <span className="text-white font-bold">{boardObjects.find(o => o.id === artSelectionTarget)?.cardData.name}</span></p>
-                            </div>
-                            <button onClick={() => setArtSelectionTarget(null)} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"><X size={32} /></button>
-                        </div>
-
-                        {isSearchingArt ? (
-                            <div className="flex-1 flex flex-col items-center justify-center gap-4">
-                                <Loader className="animate-spin text-indigo-500" size={48} />
-                                <p className="text-indigo-300 font-bold animate-pulse">Scanning Scryfall for variants...</p>
-                            </div>
-                        ) : (
-                            <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 pb-20 custom-scrollbar pr-2">
-                                {artSelectionPrints.map((print, idx) => (
-                                    <div
-                                        key={`${print.scryfallId}-${idx}`}
-                                        onClick={() => handleArtSelection(print)}
-                                        className="group relative aspect-[2.5/3.5] rounded-xl overflow-hidden cursor-pointer hover:ring-4 hover:ring-indigo-500 hover:ring-offset-4 hover:ring-offset-gray-900 transition-all transform hover:-translate-y-2"
-                                    >
-                                        <img src={print.imageUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" alt="Variant Art" />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                                            <span className="text-white text-xs font-bold truncate bg-indigo-600 px-2 py-1 rounded shadow-lg">{print.typeLine}</span>
-                                        </div>
-                                    </div>
-                                ))}
-                                {artSelectionPrints.length === 0 && !isSearchingArt && (
-                                    <div className="col-span-full py-20 text-center text-gray-500 italic">No alternative printings found for this card.</div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
