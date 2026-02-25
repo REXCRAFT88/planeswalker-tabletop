@@ -89,6 +89,7 @@ function App() {
     const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], sideboard: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
+    const [editingDeckId, setEditingDeckId] = useState<string | null>(null);
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -119,18 +120,36 @@ function App() {
         setActiveSideboard(sideboard);
 
         if (shouldSave) {
-            const newDeck: SavedDeck = {
-                id: crypto.randomUUID(),
-                name: deckName || `Deck ${new Date().toLocaleDateString()}`,
-                deck,
-                sideboard,
-                tokens,
-                sleeveColor: playerSleeve,
-                createdAt: Date.now()
-            };
-            handleSaveDeck(newDeck);
+            if (editingDeckId) {
+                // Update existing saved deck
+                const existingDeck = savedDecks.find(d => d.id === editingDeckId);
+                if (existingDeck) {
+                    const updatedDeck: SavedDeck = {
+                        ...existingDeck,
+                        name: deckName || existingDeck.name,
+                        deck,
+                        sideboard,
+                        tokens,
+                        sleeveColor: playerSleeve,
+                    };
+                    handleSaveDeck(updatedDeck);
+                }
+            } else {
+                // Create new saved deck
+                const newDeck: SavedDeck = {
+                    id: crypto.randomUUID(),
+                    name: deckName || `Deck ${new Date().toLocaleDateString()}`,
+                    deck,
+                    sideboard,
+                    tokens,
+                    sleeveColor: playerSleeve,
+                    createdAt: Date.now()
+                };
+                handleSaveDeck(newDeck);
+            }
         }
 
+        setEditingDeckId(null);
         setCurrentView(View.LOBBY);
     };
 
@@ -225,7 +244,7 @@ function App() {
                     setCustomSleeveUrl={setCustomSleeveUrl}
                     onJoin={handleJoinGame}
                     onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
-                    onImportDeck={() => setCurrentView(View.DECK_BUILDER)}
+                    onImportDeck={(deckId?: string) => { if (deckId) setEditingDeckId(deckId); setCurrentView(View.DECK_BUILDER); }}
                     savedDeckCount={activeDeck.length}
                     currentTokens={lobbyTokens}
                     onTokensChange={setLobbyTokens}
@@ -242,8 +261,9 @@ function App() {
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
                     initialSideboard={activeSideboard}
+                    initialName={editingDeckId ? savedDecks.find(d => d.id === editingDeckId)?.name : undefined}
                     onDeckReady={handleDeckReady}
-                    onBack={() => setCurrentView(View.LOBBY)}
+                    onBack={() => { setEditingDeckId(null); setCurrentView(View.LOBBY); }}
                 />
             )}
 

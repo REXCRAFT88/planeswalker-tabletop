@@ -1,17 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
 import { CardData } from '../types';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Layers } from 'lucide-react';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Layers, Minus, Save } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
     initialSideboard?: CardData[];
+    initialName?: string;
     onDeckReady: (deck: CardData[], tokens: CardData[], sideboard: CardData[], shouldSave?: boolean, name?: string) => void;
     onBack: () => void;
 }
 
-export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialSideboard, onDeckReady, onBack }) => {
+// Group cards by name for stacking
+interface CardGroup {
+    name: string;
+    cards: CardData[];
+    imageUrl: string;
+    isCommander: boolean;
+}
+
+export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialSideboard, initialName, onDeckReady, onBack }) => {
     const [deckText, setDeckText] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number, total: number } | null>(null);
@@ -33,16 +42,47 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const [addCardResults, setAddCardResults] = useState<CardData[]>([]);
     const [isSearchingAdd, setIsSearchingAdd] = useState(false);
     const [alternateArts, setAlternateArts] = useState<CardData[] | null>(null);
-    const [artTargetId, setArtTargetId] = useState<string | null>(null);
+    const [artTargetName, setArtTargetName] = useState<string | null>(null);
     const [isSearchingArt, setIsSearchingArt] = useState(false);
 
     const isNewDeck = !initialDeck || initialDeck.length === 0;
-    const [deckName, setDeckName] = useState(isNewDeck ? 'New Deck' : '');
+    const [deckName, setDeckName] = useState(initialName || (isNewDeck ? 'New Deck' : ''));
 
     // Staging area after fetching but before confirming commander
     const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
     const [stagedSideboard, setStagedSideboard] = useState<CardData[]>(initialSideboard || []);
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
+
+    // Group cards by name for display
+    const groupCards = (cards: CardData[]): CardGroup[] => {
+        const groups: Map<string, CardGroup> = new Map();
+        for (const card of cards) {
+            const existing = groups.get(card.name);
+            if (existing) {
+                existing.cards.push(card);
+                if (card.isCommander) existing.isCommander = true;
+            } else {
+                groups.set(card.name, {
+                    name: card.name,
+                    cards: [card],
+                    imageUrl: card.imageUrl,
+                    isCommander: !!card.isCommander,
+                });
+            }
+        }
+        return Array.from(groups.values());
+    };
+
+    const deckGroups = useMemo(() => {
+        if (!stagedDeck) return [];
+        const filtered = stagedDeck.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        return groupCards(filtered);
+    }, [stagedDeck, searchQuery]);
+
+    const sideboardGroups = useMemo(() => {
+        const filtered = stagedSideboard.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        return groupCards(filtered);
+    }, [stagedSideboard, searchQuery]);
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -134,18 +174,40 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         }
     };
 
-    const setCommander = (id: string) => {
+    const setCommander = (name: string) => {
         if (!stagedDeck) return;
+        // Toggle commander status for all cards with this name
+        const isCurrentlyCommander = stagedDeck.some(c => c.name === name && c.isCommander);
         const updated = stagedDeck.map(c => ({
             ...c,
-            isCommander: c.id === id ? !c.isCommander : c.isCommander
+            isCommander: c.name === name ? !isCurrentlyCommander : c.isCommander
         }));
         setStagedDeck(updated);
     };
 
-    const removeCardFromDeck = (id: string) => {
+    const removeCardFromDeck = (name: string) => {
         if (!stagedDeck) return;
-        setStagedDeck(stagedDeck.filter(c => c.id !== id));
+        // Remove all cards with this name
+        setStagedDeck(stagedDeck.filter(c => c.name !== name));
+    };
+
+    const removeOneFromDeck = (name: string) => {
+        if (!stagedDeck) return;
+        // Remove ONE card with this name (the last one)
+        const idx = stagedDeck.map((c, i) => ({ c, i })).filter(x => x.c.name === name).pop();
+        if (idx) {
+            setStagedDeck(stagedDeck.filter((_, i) => i !== idx.i));
+        }
+    };
+
+    const addOneMoreToDeck = (name: string) => {
+        if (!stagedDeck) return;
+        // Find existing card with this name and duplicate it
+        const template = stagedDeck.find(c => c.name === name);
+        if (template) {
+            const newCard = { ...template, id: crypto.randomUUID() };
+            setStagedDeck([...stagedDeck, newCard]);
+        }
     };
 
     const addCardToDeck = (card: CardData) => {
@@ -157,8 +219,23 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         }
     };
 
-    const removeCardFromSideboard = (id: string) => {
-        setStagedSideboard(prev => prev.filter(c => c.id !== id));
+    const removeCardFromSideboard = (name: string) => {
+        setStagedSideboard(prev => prev.filter(c => c.name !== name));
+    };
+
+    const removeOneFromSideboard = (name: string) => {
+        const idx = stagedSideboard.map((c, i) => ({ c, i })).filter(x => x.c.name === name).pop();
+        if (idx) {
+            setStagedSideboard(prev => prev.filter((_, i) => i !== idx.i));
+        }
+    };
+
+    const addOneMoreToSideboard = (name: string) => {
+        const template = stagedSideboard.find(c => c.name === name);
+        if (template) {
+            const newCard = { ...template, id: crypto.randomUUID() };
+            setStagedSideboard(prev => [...prev, newCard]);
+        }
     };
 
     const searchAddCards = async () => {
@@ -176,7 +253,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const finalizeDeck = () => {
         if (!stagedDeck) return;
-        onDeckReady(stagedDeck, stagedTokens, stagedSideboard, isNewDeck, deckName);
+        // Always save (true) so art changes and modifications persist
+        onDeckReady(stagedDeck, stagedTokens, stagedSideboard, true, deckName || undefined);
     };
 
     const clearDeck = () => {
@@ -217,7 +295,8 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const handleRightClick = async (e: React.MouseEvent, card: CardData) => {
         e.preventDefault();
-        setArtTargetId(card.id);
+        // Store the card name so art changes apply to all duplicates
+        setArtTargetName(card.name);
         setIsSearchingArt(true);
         const results = await searchCards(`!"${card.name}" unique:prints`);
         setAlternateArts(results);
@@ -225,45 +304,45 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     };
 
     const changeArt = (newImageUrl: string) => {
-        if (!artTargetId) return;
+        if (!artTargetName) return;
+        // Apply art change to ALL duplicates with the same name
         if (activeSection === 'main' && stagedDeck) {
-            setStagedDeck(prev => prev ? prev.map(c => c.id === artTargetId ? { ...c, imageUrl: newImageUrl } : c) : null);
+            setStagedDeck(prev => prev ? prev.map(c => c.name === artTargetName ? { ...c, imageUrl: newImageUrl } : c) : null);
         } else {
-            setStagedSideboard(prev => prev.map(c => c.id === artTargetId ? { ...c, imageUrl: newImageUrl } : c));
+            setStagedSideboard(prev => prev.map(c => c.name === artTargetName ? { ...c, imageUrl: newImageUrl } : c));
         }
         setAlternateArts(null);
-        setArtTargetId(null);
+        setArtTargetName(null);
     };
 
-    const filteredDeck = stagedDeck
-        ? stagedDeck.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
-        : [];
-
-    const filteredSideboard = stagedSideboard.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
     const totalDeckSize = (stagedDeck?.length || 0) + stagedSideboard.length;
+
+    // Shared header bar for deck name + save/close
+    const renderDeckNameAndSave = () => (
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full">
+            <input
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-green-500 outline-none"
+                placeholder="Deck Name"
+                value={deckName}
+                onChange={e => setDeckName(e.target.value)}
+            />
+            <button onClick={finalizeDeck} className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shrink-0">
+                <Save size={18} /> Save & Close
+            </button>
+        </div>
+    );
 
     // ===================== TOKENS STEP =====================
     if (step === 'TOKENS') {
         return (
             <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto overflow-y-auto">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 shrink-0">
-                    <h1 className="text-xl text-center md:text-left md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
-                        Add Tokens
-                    </h1>
-                    {isNewDeck && (
-                        <div className="w-full md:flex-1 md:mx-4">
-                            <input
-                                className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white focus:ring-2 focus:ring-green-500 outline-none"
-                                placeholder="Deck Name"
-                                value={deckName}
-                                onChange={e => setDeckName(e.target.value)}
-                            />
-                        </div>
-                    )}
-                    <button onClick={finalizeDeck} className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-lg shrink-0">
-                        <Check size={20} /> Finish & Save
-                    </button>
+                <div className="flex flex-col gap-4 mb-6 shrink-0">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <h1 className="text-xl text-center md:text-left md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
+                            Add Tokens
+                        </h1>
+                    </div>
+                    {renderDeckNameAndSave()}
                 </div>
 
                 <div className="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
@@ -379,7 +458,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     // ===================== DECK STEP =====================
     return (
         <div className="flex flex-col h-full p-4 md:p-8 max-w-6xl mx-auto overflow-hidden">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4">
                 <h1 className="text-xl md:text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
                     {stagedDeck ? 'Edit Deck' : 'Import Deck'}
                 </h1>
@@ -394,6 +473,13 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     </button>
                 </div>
             </div>
+
+            {/* Deck Name + Save/Close - always visible when deck is staged */}
+            {stagedDeck && (
+                <div className="mb-4 shrink-0">
+                    {renderDeckNameAndSave()}
+                </div>
+            )}
 
             {!stagedDeck ? (
                 <div className="bg-gray-800 rounded-xl p-3 md:p-6 shadow-lg border border-gray-700 flex-1 flex flex-col min-h-0">
@@ -450,7 +536,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4 shrink-0">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-2">
                             <div className="flex items-center gap-3">
-                                <span className="text-gray-300 text-xs md:text-base">Click a card to set Commander. Use ✕ to remove.</span>
+                                <span className="text-gray-300 text-xs md:text-base">Click a card to set Commander. Right-click to change art. Use ✕ to remove.</span>
                                 <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded font-mono">{stagedDeck.length} cards</span>
                             </div>
                             <div className="flex gap-2">
@@ -547,61 +633,110 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-4">
                             {activeSection === 'main' ? (
-                                filteredDeck.map(card => (
+                                deckGroups.map(group => (
                                     <div
-                                        key={card.id}
-                                        className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 group ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
+                                        key={group.name}
+                                        className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 group ${group.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
                                     >
                                         <img
-                                            src={card.imageUrl}
+                                            src={group.imageUrl}
                                             className="w-full h-full object-cover rounded-md"
-                                            onClick={() => setCommander(card.id)}
-                                            onContextMenu={(e) => handleRightClick(e, card)}
+                                            onClick={() => setCommander(group.name)}
+                                            onContextMenu={(e) => handleRightClick(e, group.cards[0])}
                                         />
-                                        {card.isCommander && (
+                                        {group.isCommander && (
                                             <div className="absolute top-2 right-2 bg-amber-500 text-black p-1 rounded-full shadow-lg">
                                                 <Crown size={20} fill="black" />
                                             </div>
                                         )}
-                                        {/* Remove button */}
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); removeCardFromDeck(card.id); }}
-                                            className="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                            title="Remove card"
-                                        >
-                                            <X size={14} />
-                                        </button>
+                                        {/* Count badge */}
+                                        {group.cards.length > 1 && (
+                                            <div className="absolute top-1 right-1 bg-blue-600 text-white text-xs font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full shadow-lg border-2 border-gray-900 z-10">
+                                                {group.cards.length}
+                                            </div>
+                                        )}
+                                        {/* Quantity controls */}
+                                        <div className="absolute top-1 left-1 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); addOneMoreToDeck(group.name); }}
+                                                className="w-5 h-5 bg-green-600/90 hover:bg-green-500 text-white rounded-full flex items-center justify-center"
+                                                title="Add one more"
+                                            >
+                                                <Plus size={12} />
+                                            </button>
+                                            {group.cards.length > 1 && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); removeOneFromDeck(group.name); }}
+                                                    className="w-5 h-5 bg-orange-600/90 hover:bg-orange-500 text-white rounded-full flex items-center justify-center"
+                                                    title="Remove one"
+                                                >
+                                                    <Minus size={12} />
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); removeCardFromDeck(group.name); }}
+                                                className="w-5 h-5 bg-red-600/90 hover:bg-red-500 text-white rounded-full flex items-center justify-center"
+                                                title="Remove all"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </div>
                                         <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 text-center text-xs truncate">
-                                            {card.name}
+                                            {group.cards.length > 1 ? `${group.cards.length}x ` : ''}{group.name}
                                         </div>
                                     </div>
                                 ))
                             ) : (
-                                filteredSideboard.map(card => (
+                                sideboardGroups.map(group => (
                                     <div
-                                        key={card.id}
+                                        key={group.name}
                                         className="relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 border-transparent hover:border-purple-500 group"
                                     >
                                         <img
-                                            src={card.imageUrl}
+                                            src={group.imageUrl}
                                             className="w-full h-full object-cover rounded-md"
-                                            onContextMenu={(e) => handleRightClick(e, card)}
+                                            onContextMenu={(e) => handleRightClick(e, group.cards[0])}
                                         />
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); removeCardFromSideboard(card.id); }}
-                                            className="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                            title="Remove card"
-                                        >
-                                            <X size={14} />
-                                        </button>
+                                        {/* Count badge */}
+                                        {group.cards.length > 1 && (
+                                            <div className="absolute top-1 right-1 bg-purple-600 text-white text-xs font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full shadow-lg border-2 border-gray-900 z-10">
+                                                {group.cards.length}
+                                            </div>
+                                        )}
+                                        {/* Quantity controls */}
+                                        <div className="absolute top-1 left-1 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); addOneMoreToSideboard(group.name); }}
+                                                className="w-5 h-5 bg-green-600/90 hover:bg-green-500 text-white rounded-full flex items-center justify-center"
+                                                title="Add one more"
+                                            >
+                                                <Plus size={12} />
+                                            </button>
+                                            {group.cards.length > 1 && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); removeOneFromSideboard(group.name); }}
+                                                    className="w-5 h-5 bg-orange-600/90 hover:bg-orange-500 text-white rounded-full flex items-center justify-center"
+                                                    title="Remove one"
+                                                >
+                                                    <Minus size={12} />
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); removeCardFromSideboard(group.name); }}
+                                                className="w-5 h-5 bg-red-600/90 hover:bg-red-500 text-white rounded-full flex items-center justify-center"
+                                                title="Remove all"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </div>
                                         <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 text-center text-xs truncate">
-                                            {card.name}
+                                            {group.cards.length > 1 ? `${group.cards.length}x ` : ''}{group.name}
                                         </div>
                                     </div>
                                 ))
                             )}
 
-                            {((activeSection === 'main' && filteredDeck.length === 0) || (activeSection === 'sideboard' && filteredSideboard.length === 0)) && (
+                            {((activeSection === 'main' && deckGroups.length === 0) || (activeSection === 'sideboard' && sideboardGroups.length === 0)) && (
                                 <div className="col-span-full text-center text-gray-500 py-12">
                                     {searchQuery ? `No cards found matching "${searchQuery}"` : 'This section is empty.'}
                                 </div>
@@ -611,12 +746,12 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 </div>
             )}
             {/* Art Selection Overlay */}
-            {artTargetId && (
+            {artTargetName && (
                 <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-gray-800 border border-gray-600 rounded-xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
                         <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-                            <h3 className="font-bold text-white flex items-center gap-2">Select New Art</h3>
-                            <button onClick={() => { setArtTargetId(null); setAlternateArts(null); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                            <h3 className="font-bold text-white flex items-center gap-2">Select New Art — applies to all copies of "{artTargetName}"</h3>
+                            <button onClick={() => { setArtTargetName(null); setAlternateArts(null); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                             {isSearchingArt ? (

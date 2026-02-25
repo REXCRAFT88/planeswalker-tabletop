@@ -463,109 +463,116 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, customSleeveUrl
                     )}
 
                     {/* Hover Actions */}
-                    <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
+                    <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-1 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
 
                         {/* Stack Controls */}
                         {isStack && isControlledByMe ? (
-                            <div className="flex flex-col gap-1 items-center interactive-ui mb-1">
+                            <div className="flex flex-col gap-0.5 items-center interactive-ui">
                                 <div className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-300 font-bold uppercase">Tap</span>
-                                    <div className="flex items-center gap-1 bg-gray-800/80 rounded-full px-2 py-0.5">
-                                        <button onClick={(e) => { e.stopPropagation(); adjustStackTap(1); }} className="text-gray-300 hover:text-white"><RotateCw size={14} /></button>
-                                        <span className="text-xs font-mono min-w-[2rem] text-center">{object.tappedQuantity}/{object.quantity}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); adjustStackTap(-1); }} className="text-gray-300 hover:text-white"><RefreshCcw size={14} /></button>
+                                    <span className="text-[9px] text-gray-300 font-bold uppercase">Tap</span>
+                                    <div className="flex items-center gap-0.5 bg-gray-800/80 rounded-full px-1.5 py-0.5">
+                                        <button onClick={(e) => { e.stopPropagation(); adjustStackTap(1); }} className="text-gray-300 hover:text-white"><RotateCw size={11} /></button>
+                                        <span className="text-[10px] font-mono min-w-[1.5rem] text-center">{object.tappedQuantity}/{object.quantity}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); adjustStackTap(-1); }} className="text-gray-300 hover:text-white"><RefreshCcw size={11} /></button>
                                     </div>
                                 </div>
-                                <div className="flex gap-1">
+                                <div className="flex gap-0.5">
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onRemoveOne(object.id); }}
-                                        className="flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-[10px] font-bold"
+                                        className="flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 text-white rounded-full text-[9px] font-bold"
                                         title="Split 1"
                                     >
-                                        <Minus size={10} /> 1
+                                        <Minus size={9} /> 1
                                     </button>
                                     <button
                                         onClick={(e) => { e.stopPropagation(); onUnstack(object.id); }}
-                                        className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-[10px] font-bold"
+                                        className="flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full text-[9px] font-bold"
                                         title="Unstack All"
                                     >
-                                        <Copy size={10} /> All
+                                        <Copy size={9} /> All
                                     </button>
                                 </div>
                             </div>
                         ) : isControlledByMe ? (
-                            <div className="flex gap-1 interactive-ui">
-                                <button onClick={toggleTap} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-600" title="Tap/Untap">
-                                    <RotateCw size={12} />
+                            <div className="flex gap-0.5 interactive-ui">
+                                <button onClick={toggleTap} className="p-1 bg-gray-800 text-white rounded-full hover:bg-blue-600" title="Tap/Untap">
+                                    <RotateCw size={11} />
                                 </button>
                             </div>
                         ) : null}
 
-                        <div className="flex gap-1 interactive-ui">
+                        {/* Action Buttons - compact grid */}
+                        <div className="flex flex-wrap justify-center gap-0.5 interactive-ui">
                             {isControlledByMe ? (
                                 <>
                                     {(object.cardData.isToken || object.isCopy) ? (
-                                        <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-red-600" title="Delete Token/Copy">
-                                            <Trash2 size={12} />
+                                        <button onClick={() => onReturnToHand(object.id)} className="p-1 bg-gray-800 text-white rounded-full hover:bg-red-600" title="Delete Token/Copy">
+                                            <Trash2 size={11} />
                                         </button>
                                     ) : (
-                                        <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
-                                            <Reply size={12} />
+                                        <button onClick={() => onReturnToHand(object.id)} className="p-1 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
+                                            <Reply size={11} />
                                         </button>
                                     )}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!isControlledByMe) onLog(`inspected ${object.cardData.name}`);
+                                            onInspect(object.cardData);
+                                        }}
+                                        className="p-1 bg-gray-800 text-white rounded-full hover:bg-green-600"
+                                        title="Inspect"
+                                    >
+                                        <Maximize2 size={11} />
+                                    </button>
                                     {onCopy && (
-                                        <button onClick={(e) => { e.stopPropagation(); onCopy(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-teal-500" title="Copy Card">
-                                            <Copy size={12} />
+                                        <button onClick={(e) => { e.stopPropagation(); onCopy(object.id); }} className="p-1 bg-gray-800 text-white rounded-full hover:bg-teal-500" title="Copy Card">
+                                            <Copy size={11} />
                                         </button>
                                     )}
                                     {onChangeArt && (
-                                        <button onClick={(e) => { e.stopPropagation(); onChangeArt(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-indigo-600" title="Change Card Art">
-                                            <Image size={12} />
+                                        <button onClick={(e) => { e.stopPropagation(); onChangeArt(object.id); }} className="p-1 bg-gray-800 text-white rounded-full hover:bg-indigo-600" title="Change Card Art">
+                                            <Image size={11} />
                                         </button>
                                     )}
-                                    {onReveal && (
-                                        <button onClick={(e) => { e.stopPropagation(); onReveal(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-yellow-500" title="Reveal / Highlight">
-                                            <Maximize2 size={12} />
-                                        </button>
-                                    )}
-                                    <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
-                                        <EyeOff size={12} />
+                                    <button onClick={toggleFaceDown} className="p-1 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
+                                        <EyeOff size={11} />
                                     </button>
                                 </>
                             ) : (
                                 <>
                                     {onSteal && (
-                                        <button onClick={(e) => { e.stopPropagation(); onSteal(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-orange-600 font-bold text-[10px]" title="Gain Control">
+                                        <button onClick={(e) => { e.stopPropagation(); onSteal(object.id); }} className="p-1 bg-gray-800 text-white rounded-full hover:bg-orange-600 font-bold text-[9px]" title="Gain Control">
                                             STEAL
                                         </button>
                                     )}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onLog(`inspected ${object.cardData.name}`);
+                                            onInspect(object.cardData);
+                                        }}
+                                        className="p-1 bg-gray-800 text-white rounded-full hover:bg-green-600"
+                                        title="Inspect"
+                                    >
+                                        <Maximize2 size={11} />
+                                    </button>
                                 </>
                             )}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!isControlledByMe) onLog(`inspected ${object.cardData.name}`);
-                                    onInspect(object.cardData);
-                                }}
-                                className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-green-600"
-                                title="Inspect"
-                            >
-                                <Maximize2 size={12} />
-                            </button>
                         </div>
 
                         {object.cardData.backImageUrl && isControlledByMe && (
-                            <button onClick={toggleTransform} className="p-1 px-3 bg-gray-800 text-white rounded-full hover:bg-amber-600 flex items-center gap-1 text-[10px] interactive-ui" title="Transform">
-                                <RefreshCcw size={10} /> Transform
+                            <button onClick={toggleTransform} className="px-2 py-0.5 bg-gray-800 text-white rounded-full hover:bg-amber-600 flex items-center gap-0.5 text-[9px] interactive-ui" title="Transform">
+                                <RefreshCcw size={9} /> Transform
                             </button>
                         )}
 
                         {/* Counter Controls */}
                         {isControlledByMe && (
-                            <div className="flex items-center gap-2 mt-1 interactive-ui pointer-events-auto" onDoubleClick={(e) => e.stopPropagation()}>
-                                <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, -1)} className="text-red-400 hover:text-red-200 p-1"><MinusCircle size={20} /></button>
-                                <span className="text-white text-xs font-bold select-none">+1/+1</span>
-                                <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, 1)} className="text-green-400 hover:text-green-200 p-1"><PlusCircle size={20} /></button>
+                            <div className="flex items-center gap-1 interactive-ui pointer-events-auto" onDoubleClick={(e) => e.stopPropagation()}>
+                                <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, -1)} className="text-red-400 hover:text-red-200 p-0.5"><MinusCircle size={16} /></button>
+                                <span className="text-white text-[10px] font-bold select-none">+1/+1</span>
+                                <button onPointerDown={(e) => e.stopPropagation()} onClick={(e) => updateCounter(e, 1)} className="text-green-400 hover:text-green-200 p-0.5"><PlusCircle size={16} /></button>
                             </div>
                         )}
                     </div>

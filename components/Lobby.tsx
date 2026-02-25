@@ -17,7 +17,7 @@ interface LobbyProps {
     setCustomSleeveUrl: (url: string) => void;
     onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
     onLocalGame: () => void;
-    onImportDeck: () => void;
+    onImportDeck: (deckId?: string) => void;
     savedDeckCount: number;
     currentTokens: CardData[];
     activeDeck: CardData[];
@@ -305,8 +305,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
         onLoadDeck(deck.deck, deck.tokens, deck.sideboard || []);
-        // Then go to builder
-        onImportDeck();
+        // Then go to builder with the deck ID so edits update in place
+        onImportDeck(deck.id);
     };
 
     const handleCreateNewDeck = () => {
