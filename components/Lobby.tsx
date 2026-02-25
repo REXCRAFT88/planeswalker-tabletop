@@ -15,6 +15,10 @@ interface LobbyProps {
     setCustomMatUrl: (url: string) => void;
     customSleeveUrl: string;
     setCustomSleeveUrl: (url: string) => void;
+    customMatTransform: { scale: number; x: number; y: number; rotation: number };
+    setCustomMatTransform: (t: { scale: number; x: number; y: number; rotation: number }) => void;
+    customSleeveTransform: { scale: number; x: number; y: number; rotation: number };
+    setCustomSleeveTransform: (t: { scale: number; x: number; y: number; rotation: number }) => void;
     onJoin: (code?: string, isStarted?: boolean, gameType?: string) => void;
     onLocalGame: () => void;
     onImportDeck: (deckId?: string) => void;
@@ -33,6 +37,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     playerSleeve, setPlayerSleeve,
     customMatUrl, setCustomMatUrl,
     customSleeveUrl, setCustomSleeveUrl,
+    customMatTransform, setCustomMatTransform,
+    customSleeveTransform, setCustomSleeveTransform,
     onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
     savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
@@ -51,8 +57,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
     const [matPreviewUrl, setMatPreviewUrl] = useState(customMatUrl);
     const [sleevePreviewUrl, setSleevePreviewUrl] = useState(customSleeveUrl);
-    const [matTransform, setMatTransform] = useState({ scale: 1, x: 0, y: 0, rotation: 0 });
-    const [sleeveTransform, setSleeveTransform] = useState({ scale: 1, x: 0, y: 0, rotation: 0 });
+    const [matTransform, setMatTransform] = useState(customMatTransform);
+    const [sleeveTransform, setSleeveTransform] = useState(customSleeveTransform);
     const matImageRef = useRef<HTMLImageElement>(null);
     const sleeveImageRef = useRef<HTMLImageElement>(null);
     const isDraggingMat = useRef(false);
@@ -590,7 +596,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                             {/* Mat Customization */}
                             <div className="flex-1 flex flex-col gap-4">
                                 <h4 className="text-lg font-bold text-white">Playmat</h4>
-                                <div className="relative aspect-[16/10] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '21/10' }}>
                                     {matPreviewUrl ? (
                                         <div
                                             className="w-full h-full overflow-hidden cursor-move"
@@ -672,6 +678,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     <button
                                         onClick={() => {
                                             setCustomMatUrl(matPreviewUrl);
+                                            setCustomMatTransform(matTransform);
                                             setMatPreviewUrl('');
                                         }}
                                         disabled={!matPreviewUrl}
@@ -695,7 +702,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                             {/* Sleeve Customization */}
                             <div className="flex-1 flex flex-col gap-4">
                                 <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
-                                <div className="relative aspect-[2.5/3.5] bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group">
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '2.5/3.5', maxHeight: '200px' }}>
                                     {sleevePreviewUrl ? (
                                         <div
                                             className="w-full h-full overflow-hidden cursor-move"
@@ -779,6 +786,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     <button
                                         onClick={() => {
                                             setCustomSleeveUrl(sleevePreviewUrl);
+                                            setCustomSleeveTransform(sleeveTransform);
                                             setSleevePreviewUrl('');
                                         }}
                                         disabled={!sleevePreviewUrl}

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CardData, BoardObject, LogEntry, PlayerStats, UndoableAction, MAX_UNDO_HISTORY } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats, UndoableAction, MAX_UNDO_HISTORY, CombatState, CombatAssignment } from '../types';
 import { Card } from './Card';
+import { CombatOverlay } from './CombatOverlay';
 import { GameStatsModal } from './GameStatsModal';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
@@ -10,7 +11,7 @@ import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
-    Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
+    Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield, Check,
     Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Image as ImageIcon, Globe
 } from 'lucide-react';
 
@@ -22,6 +23,8 @@ interface TabletopProps {
     sleeveColor?: string;
     customMatUrl?: string;
     customSleeveUrl?: string;
+    customMatTransform?: { scale: number; x: number; y: number; rotation: number };
+    customSleeveTransform?: { scale: number; x: number; y: number; rotation: number };
     roomId: string;
     initialGameStarted?: boolean;
     isLocal?: boolean;
@@ -317,6 +320,8 @@ interface PlaymatProps {
     sleeveColor: string;
     customMatUrl?: string;
     customSleeveUrl?: string;
+    customMatTransform?: { scale: number; x: number; y: number; rotation: number };
+    customSleeveTransform?: { scale: number; x: number; y: number; rotation: number };
     topGraveyardCard?: CardData;
     isShuffling: boolean;
     isControlled: boolean;
@@ -337,7 +342,7 @@ interface PlaymatProps {
 
 const Playmat: React.FC<PlaymatProps> = ({
     x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
-    customMatUrl, customSleeveUrl,
+    customMatUrl, customSleeveUrl, customMatTransform, customSleeveTransform,
     topGraveyardCard, isShuffling, isControlled, commanders,
     onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander, onViewHand,
     isMobile, onMobileZoneAction, onDoubleClickZone, disconnected
@@ -459,12 +464,24 @@ const Playmat: React.FC<PlaymatProps> = ({
                 borderColor: sleeveColor,
                 boxShadow: `0 0 15px ${sleeveColor}20`,
                 transform: `rotate(${rotation}deg)`,
-                backgroundImage: customMatUrl ? `url(${customMatUrl})` : undefined,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-                backgroundRepeat: 'no-repeat'
+                overflow: 'hidden',
             }}
         >
+            {customMatUrl && (
+                <div className="absolute inset-0 pointer-events-none" style={{ overflow: 'hidden' }}>
+                    <img
+                        src={customMatUrl}
+                        alt=""
+                        className="absolute w-full h-full object-cover"
+                        style={{
+                            transform: customMatTransform
+                                ? `translate(${customMatTransform.x}px, ${customMatTransform.y}px) scale(${customMatTransform.scale}) rotate(${customMatTransform.rotation}deg)`
+                                : undefined,
+                            transformOrigin: 'center center',
+                        }}
+                    />
+                </div>
+            )}
             <div className={`absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none ${nameColor}`}>
                 {playerName}
             </div>
@@ -487,12 +504,21 @@ const Playmat: React.FC<PlaymatProps> = ({
                     onTouchEnd={isMobile ? () => handleZoneTouchEnd('LIBRARY') : undefined}
                     style={{
                         backgroundColor: sleeveColor,
-                        backgroundImage: customSleeveUrl ? `url(${customSleeveUrl})` : undefined,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        backgroundRepeat: 'no-repeat'
                     }}
                 >
+                    {customSleeveUrl && (
+                        <img
+                            src={customSleeveUrl}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                            style={{
+                                transform: customSleeveTransform
+                                    ? `translate(${customSleeveTransform.x}px, ${customSleeveTransform.y}px) scale(${customSleeveTransform.scale}) rotate(${customSleeveTransform.rotation}deg)`
+                                    : undefined,
+                                transformOrigin: 'center center',
+                            }}
+                        />
+                    )}
                     <div className="text-white font-bold text-2xl z-10 pointer-events-none">{counts.library}</div>
                     {isShuffling && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white z-20">Shuffling...</div>}
 
@@ -610,55 +636,57 @@ const Playmat: React.FC<PlaymatProps> = ({
             </div>
 
             {/* Hand Visualization */}
-            {counts.hand > 0 && !isControlled && (
-                <div
-                    className="absolute flex items-center justify-center cursor-help group"
-                    style={{
-                        left: '50%',
-                        bottom: -40,
-                        transform: 'translateX(-50%)',
-                        width: Math.min(counts.hand * 15 + CARD_WIDTH * 0.6, 200),
-                        height: CARD_HEIGHT * 0.6,
-                        zIndex: 50
-                    }}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (onViewHand) onViewHand();
-                    }}
-                    title="Click to Request View Hand"
-                >
-                    {Array.from({ length: Math.min(counts.hand, 7) }).map((_, i) => {
-                        const fanAngle = 20;
-                        const angleStep = Math.min(counts.hand, 7) > 1 ? fanAngle / (Math.min(counts.hand, 7) - 1) : 0;
-                        const rot = -fanAngle / 2 + i * angleStep;
+            {
+                counts.hand > 0 && !isControlled && (
+                    <div
+                        className="absolute flex items-center justify-center cursor-help group"
+                        style={{
+                            left: '50%',
+                            bottom: -40,
+                            transform: 'translateX(-50%)',
+                            width: Math.min(counts.hand * 15 + CARD_WIDTH * 0.6, 200),
+                            height: CARD_HEIGHT * 0.6,
+                            zIndex: 50
+                        }}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (onViewHand) onViewHand();
+                        }}
+                        title="Click to Request View Hand"
+                    >
+                        {Array.from({ length: Math.min(counts.hand, 7) }).map((_, i) => {
+                            const fanAngle = 20;
+                            const angleStep = Math.min(counts.hand, 7) > 1 ? fanAngle / (Math.min(counts.hand, 7) - 1) : 0;
+                            const rot = -fanAngle / 2 + i * angleStep;
 
-                        return (
-                            <div
-                                key={`hand-card-${i}`}
-                                className="absolute bg-blue-900 border border-white/50 rounded shadow-lg transition-transform group-hover:-translate-y-2 pointer-events-none"
-                                style={{
-                                    width: CARD_WIDTH * 0.6,
-                                    height: CARD_HEIGHT * 0.6,
-                                    left: i * 15,
-                                    transform: `rotate(${rot}deg)`,
-                                    transformOrigin: 'bottom center'
-                                }}
-                            >
-                                <div className="w-full h-full rounded border border-white/10 bg-gradient-to-br from-blue-800 to-blue-950" />
+                            return (
+                                <div
+                                    key={`hand-card-${i}`}
+                                    className="absolute bg-blue-900 border border-white/50 rounded shadow-lg transition-transform group-hover:-translate-y-2 pointer-events-none"
+                                    style={{
+                                        width: CARD_WIDTH * 0.6,
+                                        height: CARD_HEIGHT * 0.6,
+                                        left: i * 15,
+                                        transform: `rotate(${rot}deg)`,
+                                        transformOrigin: 'bottom center'
+                                    }}
+                                >
+                                    <div className="w-full h-full rounded border border-white/10 bg-gradient-to-br from-blue-800 to-blue-950" />
+                                </div>
+                            );
+                        })}
+                        {counts.hand > 7 && (
+                            <div className="absolute -right-2 -top-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full z-10 shadow">
+                                +{counts.hand - 7}
                             </div>
-                        );
-                    })}
-                    {counts.hand > 7 && (
-                        <div className="absolute -right-2 -top-2 bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 rounded-full z-10 shadow">
-                            +{counts.hand - 7}
+                        )}
+                        <div className="absolute -bottom-6 w-full text-center text-[10px] text-gray-300 font-bold bg-black/70 rounded px-2 py-0.5 pointer-events-none">
+                            {counts.hand} Cards In Hand
                         </div>
-                    )}
-                    <div className="absolute -bottom-6 w-full text-center text-[10px] text-gray-300 font-bold bg-black/70 rounded px-2 py-0.5 pointer-events-none">
-                        {counts.hand} Cards In Hand
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };
 
@@ -850,7 +878,7 @@ const emptyStats: PlayerStats = {
     manaUsed: {}, manaProduced: {}
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboard = [], initialTokens, playerName, sleeveColor = '#ef4444', customMatUrl = '', customSleeveUrl = '', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboard = [], initialTokens, playerName, sleeveColor = '#ef4444', customMatUrl = '', customSleeveUrl = '', customMatTransform, customSleeveTransform, roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -878,6 +906,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [roomLocked, setRoomLocked] = useState(false);
     const [kickVotes, setKickVotes] = useState<Record<string, string[]>>({}); // targetId -> array of voterIds
     const [activeKickVote, setActiveKickVote] = useState<string | null>(null);
+
+    // Combat system state
+    const [combatEnabled, setCombatEnabled] = useState(true);
+    const [combatState, setCombatState] = useState<CombatState | null>(null);
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -2053,6 +2085,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 if (data.mulligansAllowed !== undefined) setMulligansAllowed(data.mulligansAllowed);
                 if (data.freeMulligan !== undefined) setFreeMulligan(data.freeMulligan);
                 if (data.trackDamage !== undefined) setTrackDamage(data.trackDamage);
+                if (data.combatEnabled !== undefined) setCombatEnabled(data.combatEnabled);
             }
             else if (action === 'PASS_TURN') {
                 setCurrentTurnPlayerId(data.nextPlayerSocketId);
@@ -2087,17 +2120,57 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     const newVoters = [...currentVoters, voterId];
 
                     if (newVoters.length > playersList.length / 2) {
-                        setPlayersList(p => p.filter(player => player.id !== targetId));
-                        addLog(`kicked ${playersList.find(p => p.id === targetId)?.name} by majority vote`);
+                        const kickedName = playersList.find(p => p.id === targetId)?.name;
+                        addLog(`kicked ${kickedName} by majority vote`);
+
+                        // Capture old layout BEFORE removing player for mat rearrangement
+                        const oldPlayersList = [...playersList];
+                        const oldLayout = getLayout(oldPlayersList.length, currentRadius);
 
                         // Remove kicked player's cards from board
                         const objectsToRemove = boardObjectsRef.current.filter(o => o.controllerId === targetId);
                         if (objectsToRemove.length > 0) {
-                            setBoardObjects(prev => prev.filter(o => o.controllerId !== targetId));
                             objectsToRemove.forEach(o => {
                                 socket.emit('game_action', { room: roomId, action: 'REMOVE_OBJECT', data: { id: o.id } });
                             });
                         }
+
+                        // Cancel combat if active
+                        setCombatState(null);
+
+                        // Remove the player
+                        const newPlayersList = oldPlayersList.filter(p => p.id !== targetId);
+                        const newRadius = (newPlayersList.length === 2) ? 210 : 625;
+                        const newLayout = getLayout(newPlayersList.length, newRadius);
+
+                        // Shift board objects to follow their owner's mat rearrangement
+                        setBoardObjects(prev => {
+                            const remaining = prev.filter(o => o.controllerId !== targetId);
+                            return remaining.map(obj => {
+                                // Find old and new index of this object's controller
+                                const oldIdx = oldPlayersList.findIndex(p => p.id === obj.controllerId);
+                                const newIdx = newPlayersList.findIndex(p => p.id === obj.controllerId);
+                                if (oldIdx === -1 || newIdx === -1) return obj;
+                                if (!oldLayout[oldIdx] || !newLayout[newIdx]) return obj;
+
+                                const oldPos = oldLayout[oldIdx];
+                                const newPos = newLayout[newIdx];
+                                const dx = newPos.x - oldPos.x;
+                                const dy = newPos.y - oldPos.y;
+
+                                // If rotation changed, we'd need to rotate positions around the mat center
+                                // For simplicity, we just translate
+                                if (dx === 0 && dy === 0) return obj;
+
+                                return {
+                                    ...obj,
+                                    x: obj.x + dx,
+                                    y: obj.y + dy,
+                                };
+                            });
+                        });
+
+                        setPlayersList(newPlayersList);
 
                         const newKickVotes = { ...prev };
                         delete newKickVotes[targetId];
@@ -2114,6 +2187,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             }
             else if (action === 'MANA_POOL_SYNC') {
                 // Future expansion
+            }
+            else if (action === 'COMBAT_UPDATE') {
+                setCombatState(data.combatState || null);
             }
             else if (action === 'UPDATE_COUNTS') {
                 if (sender && sender.id !== socket.id) {
@@ -2918,7 +2994,28 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         emitAction('UPDATE_SETTINGS', { trackDamage: val });
     };
 
+    const updateCombatEnabledSetting = (val: boolean) => {
+        if (!isHost) return;
+        setCombatEnabled(val);
+        emitAction('UPDATE_SETTINGS', { combatEnabled: val });
+    };
+
     const advancePhase = () => {
+        // If combat is active and we're resolving, pressing enter/advance moves to MAIN2
+        if (combatState?.isActive) {
+            if (combatState.phase === 'ATTACKERS_DECLARED' || combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') {
+                // Move to resolving
+                const resolved: CombatState = { ...combatState, phase: 'RESOLVING' };
+                setCombatState(resolved);
+                emitAction('COMBAT_UPDATE', { combatState: resolved });
+                return;
+            }
+            if (combatState.phase === 'RESOLVING') {
+                resolveCombat();
+                return;
+            }
+        }
+
         const idx = TURN_PHASES.indexOf(turnSubPhase);
         if (idx < TURN_PHASES.length - 1) {
             const next = TURN_PHASES[idx + 1];
@@ -2929,10 +3026,152 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             if (next === 'UNTAP') {
                 untapAll();
             }
+            // Auto-enter combat mode
+            if (next === 'COMBAT' && combatEnabled) {
+                enterCombatMode();
+            }
             return; // stay on this player's turn
         }
         // END phase reached — pass the turn
         passTurnToNextPlayer();
+    };
+
+    // --- Combat System Functions ---
+    const getMyControllerId = () => isLocal ? playersList[mySeatIndex].id : socket.id;
+
+    const enterCombatMode = () => {
+        const myId = getMyControllerId();
+        const newState: CombatState = {
+            isActive: true,
+            phase: 'SELECTING_ATTACKERS',
+            attackerPlayerId: myId,
+            assignments: [],
+            selectedCardIds: [],
+        };
+        setCombatState(newState);
+        emitAction('COMBAT_UPDATE', { combatState: newState });
+        addLog('entered combat phase', 'ACTION');
+    };
+
+    const toggleAttackerSelection = (boardObjectId: string) => {
+        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
+        const myId = getMyControllerId();
+        if (combatState.attackerPlayerId !== myId) return;
+
+        // Verify this card belongs to the attacker
+        const obj = boardObjects.find(o => o.id === boardObjectId);
+        if (!obj || obj.controllerId !== myId) return;
+
+        setCombatState(prev => {
+            if (!prev) return prev;
+            const isSelected = prev.selectedCardIds.includes(boardObjectId);
+            const newSelected = isSelected
+                ? prev.selectedCardIds.filter(id => id !== boardObjectId)
+                : [...prev.selectedCardIds, boardObjectId];
+            return { ...prev, selectedCardIds: newSelected };
+        });
+    };
+
+    const assignAttackersToDefender = (defenderId: string) => {
+        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
+        if (combatState.selectedCardIds.length === 0) return;
+        const myId = getMyControllerId();
+        if (combatState.attackerPlayerId !== myId) return;
+
+        const newAssignments: CombatAssignment[] = combatState.selectedCardIds.map(cardId => ({
+            attackerId: cardId,
+            attackerOwnerId: myId,
+            defenderId,
+            blockerIds: [],
+        }));
+
+        const updated: CombatState = {
+            ...combatState,
+            assignments: [...combatState.assignments, ...newAssignments],
+            selectedCardIds: [],
+        };
+        setCombatState(updated);
+        emitAction('COMBAT_UPDATE', { combatState: updated });
+
+        const defenderPlayer = playersList.find(p => p.id === defenderId);
+        addLog(`assigned ${newAssignments.length} attacker(s) against ${defenderPlayer?.name || 'opponent'}`, 'ACTION');
+    };
+
+    const declareAttackers = () => {
+        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
+        if (combatState.assignments.length === 0) return;
+
+        const updated: CombatState = {
+            ...combatState,
+            phase: 'SELECTING_BLOCKERS',
+            selectedCardIds: [],
+        };
+        setCombatState(updated);
+        emitAction('COMBAT_UPDATE', { combatState: updated });
+        addLog('declared attackers — defenders may assign blockers', 'ACTION');
+    };
+
+    const assignBlocker = (blockerId: string, attackerId: string) => {
+        if (!combatState || (combatState.phase !== 'SELECTING_BLOCKERS' && combatState.phase !== 'ATTACKERS_DECLARED')) return;
+
+        // Verify the blocker belongs to the defender
+        const blockerObj = boardObjects.find(o => o.id === blockerId);
+        if (!blockerObj) return;
+
+        // Find the assignment for this attacker
+        const assignmentIdx = combatState.assignments.findIndex(a => a.attackerId === attackerId);
+        if (assignmentIdx === -1) return;
+
+        // Verify the blocker belongs to the defender of this assignment
+        const assignment = combatState.assignments[assignmentIdx];
+        if (blockerObj.controllerId !== assignment.defenderId) return;
+
+        const updated: CombatState = {
+            ...combatState,
+            assignments: combatState.assignments.map((a, i) => {
+                if (i === assignmentIdx) {
+                    const hasBlocker = a.blockerIds.includes(blockerId);
+                    return {
+                        ...a,
+                        blockerIds: hasBlocker
+                            ? a.blockerIds.filter(id => id !== blockerId)
+                            : [...a.blockerIds, blockerId],
+                    };
+                }
+                return a;
+            }),
+        };
+        setCombatState(updated);
+        emitAction('COMBAT_UPDATE', { combatState: updated });
+    };
+
+    const resolveCombat = () => {
+        setCombatState(null);
+        setTurnSubPhase('MAIN2');
+        emitAction('COMBAT_UPDATE', { combatState: null });
+        addLog('combat resolved — entering Main Phase 2', 'ACTION');
+    };
+
+    const cancelCombat = () => {
+        setCombatState(null);
+        emitAction('COMBAT_UPDATE', { combatState: null });
+        addLog('combat cancelled', 'ACTION');
+    };
+
+    // Remove a card from combat state when it leaves the board
+    const cleanCombatStateForRemovedCard = (cardId: string) => {
+        if (!combatState || !combatState.isActive) return;
+        setCombatState(prev => {
+            if (!prev) return prev;
+            const newAssignments = prev.assignments
+                .filter(a => a.attackerId !== cardId)
+                .map(a => ({
+                    ...a,
+                    blockerIds: a.blockerIds.filter(id => id !== cardId),
+                }));
+            const newSelected = prev.selectedCardIds.filter(id => id !== cardId);
+            return { ...prev, assignments: newAssignments, selectedCardIds: newSelected };
+        });
     };
 
     const passTurnToNextPlayer = () => {
@@ -3423,9 +3662,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const returnToHand = (id: string) => {
         const obj = boardObjects.find(o => o.id === id);
         if (!obj) return;
+        cleanCombatStateForRemovedCard(id);
         if (obj.type === 'COUNTER') {
             setBoardObjects(prev => prev.filter(o => o.id !== id));
             emitAction('REMOVE_OBJECT', { id });
+            return;
+        }
+        // Tokens and copies are destroyed, not returned to hand
+        if (obj.cardData.isToken || obj.isCopy) {
+            setBoardObjects(prev => prev.filter(o => o.id !== id));
+            emitAction('REMOVE_OBJECT', { id });
+            addLog(`destroyed ${obj.cardData.isToken ? 'token' : 'copy'} ${obj.cardData.name}`);
             return;
         }
         if (obj.quantity > 1) {
@@ -3437,12 +3684,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         } else {
             setBoardObjects(prev => prev.filter(o => o.id !== id));
             emitAction('REMOVE_OBJECT', { id });
-            if (obj.cardData.isToken) {
-                addLog(`returned token ${obj.cardData.name} to hand (it vanished)`);
-            } else {
-                setHand(prev => [...prev, obj.cardData]);
-                addLog(`returned ${obj.cardData.name} to hand`);
-            }
+            setHand(prev => [...prev, obj.cardData]);
+            addLog(`returned ${obj.cardData.name} to hand`);
         }
     };
 
@@ -4115,8 +4358,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                 zones={{ library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET }}
                                 counts={counts}
                                 sleeveColor={p.color}
-                                customMatUrl={isMe ? customMatUrl : undefined}
-                                customSleeveUrl={isMe ? customSleeveUrl : undefined}
+                                customMatUrl={(isLocal ? idx === 0 : isMe) ? customMatUrl : undefined}
+                                customSleeveUrl={(isLocal ? idx === 0 : isMe) ? customSleeveUrl : undefined}
+                                customMatTransform={(isLocal ? idx === 0 : isMe) ? customMatTransform : undefined}
+                                customSleeveTransform={(isLocal ? idx === 0 : isMe) ? customSleeveTransform : undefined}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 isControlled={isMe}
@@ -4192,7 +4437,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     const isSelected = mobileActionCardId === obj.id;
 
                     return (
-                        <div key={obj.id} className="pointer-events-auto">
+                        <div key={obj.id} className="pointer-events-auto"
+                            onClick={(e) => {
+                                // Combat mode card click intercept
+                                if (combatState?.isActive && combatState.phase === 'SELECTING_ATTACKERS' && obj.type === 'CARD') {
+                                    const myControllerId = isLocal ? playersList[mySeatIndex].id : socket.id;
+                                    if (combatState.attackerPlayerId === myControllerId && obj.controllerId === myControllerId) {
+                                        e.stopPropagation();
+                                        toggleAttackerSelection(obj.id);
+                                    }
+                                }
+                            }}
+                        >
                             <Card
                                 object={obj}
                                 sleeveColor={objSleeveColor}
@@ -4228,6 +4484,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         </div>
                     );
                 })}
+
+                {/* Combat Overlay */}
+                {combatState && combatState.isActive && (
+                    <CombatOverlay
+                        combatState={combatState}
+                        boardObjects={boardObjects}
+                        playersList={playersList}
+                        layout={layout}
+                        myId={isLocal ? playersList[mySeatIndex].id : socket.id}
+                        matW={MAT_W}
+                        matH={MAT_H}
+                        onToggleAttackerSelection={toggleAttackerSelection}
+                        onAssignAttackersToDefender={assignAttackersToDefender}
+                        onDeclareAttackers={declareAttackers}
+                        onAssignBlocker={assignBlocker}
+                        onResolveCombat={resolveCombat}
+                        onCancelCombat={cancelCombat}
+                    />
+                )}
             </div>
         </div>
     );
@@ -4336,6 +4611,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                     <input type="checkbox" className="hidden" checked={trackDamage} onChange={() => updateTrackDamageSetting(!trackDamage)} disabled={!isHost} />
                                     <div>
                                         <div className="font-bold text-white text-sm">Track Damage</div>
+                                    </div>
+                                </label>
+
+                                <label className="flex-1 flex items-center gap-3 bg-gray-700/50 p-3 rounded-lg cursor-pointer border border-gray-600 hover:bg-gray-700 transition">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center ${combatEnabled ? 'bg-orange-600 border-orange-500' : 'border-gray-500'}`}>
+                                        {combatEnabled && <CheckCircle size={14} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={combatEnabled} onChange={() => updateCombatEnabledSetting(!combatEnabled)} disabled={!isHost} />
+                                    <div>
+                                        <div className="font-bold text-white text-sm">Combat Assists</div>
                                     </div>
                                 </label>
                             </div>
@@ -4565,6 +4850,54 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             <ChevronRight size={16} />
                         </button>
                     </div>
+
+                    {/* Combat HUD */}
+                    {combatState && combatState.isActive && gamePhase === 'PLAYING' && (
+                        <div className="flex items-center gap-2 bg-red-900/80 rounded-lg p-1.5 border border-red-600 mx-1 md:mx-2 animate-pulse-subtle">
+                            <Swords size={16} className="text-red-300" />
+                            <span className="text-xs font-bold text-red-200">
+                                {combatState.phase === 'SELECTING_ATTACKERS' && 'Select Attackers'}
+                                {combatState.phase === 'ATTACKERS_DECLARED' && 'Attackers Declared'}
+                                {combatState.phase === 'SELECTING_BLOCKERS' && 'Assign Blockers'}
+                                {combatState.phase === 'BLOCKERS_DECLARED' && 'Blockers Declared'}
+                                {combatState.phase === 'RESOLVING' && 'Resolve Combat'}
+                            </span>
+                            {combatState.phase === 'SELECTING_ATTACKERS' && combatState.attackerPlayerId === (isLocal ? playersList[mySeatIndex].id : socket.id) && (
+                                <>
+                                    {combatState.assignments.length > 0 && (
+                                        <button
+                                            onClick={declareAttackers}
+                                            className="px-2 py-0.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-xs font-bold"
+                                        >
+                                            Declare ({combatState.assignments.length})
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={cancelCombat}
+                                        className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs"
+                                    >
+                                        Skip
+                                    </button>
+                                </>
+                            )}
+                            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') && (
+                                <button
+                                    onClick={advancePhase}
+                                    className="px-2 py-0.5 bg-green-600 hover:bg-green-500 text-white rounded text-xs font-bold"
+                                >
+                                    Resolve
+                                </button>
+                            )}
+                            {combatState.phase === 'RESOLVING' && (
+                                <button
+                                    onClick={resolveCombat}
+                                    className="px-2 py-0.5 bg-green-600 hover:bg-green-500 text-white rounded text-xs font-bold flex items-center gap-1"
+                                >
+                                    <Check size={12} /> Done → Main 2
+                                </button>
+                            )}
+                        </div>
+                    )}
 
                     {isLocal && isMobile && (
                         <>

@@ -54,6 +54,8 @@ function App() {
     const [playerSleeve, setPlayerSleeve] = useState<string>(() => loadState('playerSleeve', PLAYER_COLORS[0]));
     const [customMatUrl, setCustomMatUrl] = useState<string>(() => loadState('customMatUrl', ''));
     const [customSleeveUrl, setCustomSleeveUrl] = useState<string>(() => loadState('customSleeveUrl', ''));
+    const [customMatTransform, setCustomMatTransform] = useState<{ scale: number; x: number; y: number; rotation: number }>(() => loadState('customMatTransform', { scale: 1, x: 0, y: 0, rotation: 0 }));
+    const [customSleeveTransform, setCustomSleeveTransform] = useState<{ scale: number; x: number; y: number; rotation: number }>(() => loadState('customSleeveTransform', { scale: 1, x: 0, y: 0, rotation: 0 }));
     const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
     const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
@@ -98,13 +100,15 @@ function App() {
             playerSleeve,
             customMatUrl,
             customSleeveUrl,
+            customMatTransform,
+            customSleeveTransform,
             activeDeck,
             activeSideboard,
             lobbyTokens,
             savedDecks
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, customMatUrl, customSleeveUrl, activeDeck, activeSideboard, lobbyTokens, savedDecks]);
+    }, [playerName, playerSleeve, customMatUrl, customSleeveUrl, customMatTransform, customSleeveTransform, activeDeck, activeSideboard, lobbyTokens, savedDecks]);
 
     // Prevent Render.com from sleeping by pinging the server
     useEffect(() => {
@@ -242,6 +246,10 @@ function App() {
                     setCustomMatUrl={setCustomMatUrl}
                     customSleeveUrl={customSleeveUrl}
                     setCustomSleeveUrl={setCustomSleeveUrl}
+                    customMatTransform={customMatTransform}
+                    setCustomMatTransform={setCustomMatTransform}
+                    customSleeveTransform={customSleeveTransform}
+                    setCustomSleeveTransform={setCustomSleeveTransform}
                     onJoin={handleJoinGame}
                     onLocalGame={() => setCurrentView(View.LOCAL_SETUP)}
                     onImportDeck={(deckId?: string) => { if (deckId) setEditingDeckId(deckId); setCurrentView(View.DECK_BUILDER); }}
@@ -289,6 +297,8 @@ function App() {
                     sleeveColor={playerSleeve}
                     customMatUrl={customMatUrl}
                     customSleeveUrl={customSleeveUrl}
+                    customMatTransform={customMatTransform}
+                    customSleeveTransform={customSleeveTransform}
                     roomId={roomId}
                     initialGameStarted={isGameStarted}
                     onExit={() => setCurrentView(View.LOBBY)}
@@ -304,6 +314,8 @@ function App() {
                     sleeveColor={playerSleeve}
                     customMatUrl={customMatUrl}
                     customSleeveUrl={customSleeveUrl}
+                    customMatTransform={customMatTransform}
+                    customSleeveTransform={customSleeveTransform}
                     roomId={isLocalTableHost ? roomId : "LOCAL"}
                     isLocal={true}
                     isLocalTableHost={isLocalTableHost}

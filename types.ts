@@ -125,3 +125,19 @@ export type UndoableAction = {
 };
 
 export const MAX_UNDO_HISTORY = 20;
+
+// --- Combat System Types ---
+export interface CombatAssignment {
+  attackerId: string;       // BoardObject.id of the attacking card
+  attackerOwnerId: string;  // Player ID who owns the attacker
+  defenderId: string;       // Player ID being attacked
+  blockerIds: string[];     // BoardObject.ids of blocking cards
+}
+
+export interface CombatState {
+  isActive: boolean;
+  phase: 'SELECTING_ATTACKERS' | 'ATTACKERS_DECLARED' | 'SELECTING_BLOCKERS' | 'BLOCKERS_DECLARED' | 'RESOLVING';
+  attackerPlayerId: string; // The player who initiated combat (current turn player)
+  assignments: CombatAssignment[];
+  selectedCardIds: string[];// Cards currently selected (pre-assignment)
+}
