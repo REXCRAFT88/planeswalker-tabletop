@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
-import { CombatState, CombatAssignment, BoardObject } from '../types';
+import { CombatState, CombatAssignment, BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { Swords, Shield, X, Check, ArrowRight } from 'lucide-react';
+import { Swords, Shield, Eye, ArrowRight } from 'lucide-react';
 
 interface Player {
     id: string;
@@ -24,6 +24,7 @@ interface CombatOverlayProps {
     onResolveCombat: () => void;
     onCancelCombat: () => void;
     onRemoveAttacker?: (attackerId: string) => void;
+    onInspectCard?: (card: CardData) => void;
 }
 
 const TRAY_CARD_W = 70;
@@ -44,6 +45,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
     onResolveCombat,
     onCancelCombat,
     onRemoveAttacker,
+    onInspectCard,
 }) => {
     const isAttacker = combatState.attackerPlayerId === myId;
     const attackerPlayer = playersList.find(p => p.id === combatState.attackerPlayerId);
@@ -83,9 +85,136 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
         }
     };
 
+    const renderTray = (defenderId: string, assignments: CombatAssignment[], isAttackerPerspective: boolean) => {
+        const defenderIdx = playersList.findIndex(p => p.id === defenderId);
+        const attackerIdx = playersList.findIndex(p => p.id === combatState.attackerPlayerId);
+
+        if (defenderIdx === -1 || attackerIdx === -1) return null;
+
+        const targetPlayerIdx = isAttackerPerspective ? attackerIdx : defenderIdx;
+        const pos = layout[targetPlayerIdx];
+        if (!pos) return null;
+
+        // "only appearing for the player it is in front of"
+        const isTargetMe = playersList[targetPlayerIdx].id === myId;
+        if (!isTargetMe) return null;
+
+        const rot = pos.rot;
+        const trayHeight = TRAY_CARD_H + 80;
+        const trayWidth = Math.max(assignments.length * (TRAY_CARD_W + 12) + 40, 240);
+
+        // Position relative to mat
+        let trayX = pos.x + matW / 2;
+        let trayY = pos.y - trayHeight / 2 - 20;
+
+        if (rot === 180) {
+            trayY = pos.y + matH + trayHeight / 2 + 20;
+        } else if (rot === 90) {
+            trayX = pos.x + matW + trayWidth / 2 + 20;
+            trayY = pos.y + matH / 2;
+        } else if (rot === -90) {
+            trayX = pos.x - trayWidth / 2 - 20;
+            trayY = pos.y + matH / 2;
+        }
+
+        return (
+            <div
+                key={`atk-tray-${defenderId}-${isAttackerPerspective ? 'atk' : 'def'}`}
+                className="absolute"
+                style={{
+                    left: trayX - trayWidth / 2,
+                    top: trayY - trayHeight / 2,
+                    zIndex: 9990,
+                    transform: `rotate(${rot}deg)`,
+                }}
+            >
+                <div className="bg-gray-900/95 backdrop-blur-md border-2 border-red-500/30 rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.5)] min-w-[200px]">
+                    <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+                        <div className="flex items-center gap-2 text-sm font-black italic uppercase tracking-tighter">
+                            <Swords size={16} className="text-red-500" />
+                            <span className="text-red-400">{attackerPlayer?.name}</span>
+                            <ArrowRight size={14} className="text-gray-600" />
+                            <span className="text-white">{playersList.find(p => p.id === defenderId)?.name}</span>
+                        </div>
+                    </div>
+
+                    <div className="flex gap-3 items-end">
+                        {assignments.map(a => {
+                            const obj = getObj(a.attackerId);
+                            if (!obj) return null;
+                            const hasBlockers = a.blockerIds.length > 0;
+
+                            return (
+                                <div key={a.attackerId} className="flex flex-col items-center gap-2">
+                                    <div
+                                        className={`relative group transition-all duration-300 hover:-translate-y-1 ${((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) ? 'ring-4 ring-blue-500 ring-offset-2 ring-offset-gray-900 rounded-lg scale-110' : ''}`}
+                                        style={{ width: TRAY_CARD_W, height: TRAY_CARD_H }}
+                                        onClick={() => {
+                                            if ((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) {
+                                                handleAttackerClickForBlock(a.attackerId);
+                                            }
+                                        }}
+                                    >
+                                        <img
+                                            src={obj.cardData.imageUrl}
+                                            className="w-full h-full object-cover rounded-lg shadow-lg border-2 border-red-500/50"
+                                            alt="Attacker"
+                                        />
+
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 rounded-lg">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); if (onInspectCard) onInspectCard(obj.cardData); }}
+                                                className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-sm"
+                                                title="Inspect"
+                                            >
+                                                <Eye size={14} />
+                                            </button>
+                                        </div>
+
+                                        {hasBlockers && (
+                                            <div className="absolute -bottom-2 -right-2 bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full z-10 shadow-lg border border-white/20">
+                                                <Shield size={10} className="inline mr-0.5" /> {a.blockerIds.length}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Blocker cards display */}
+                                    {hasBlockers && (
+                                        <div className="flex flex-wrap justify-center gap-1 max-w-[120px]">
+                                            {a.blockerIds.map(bId => {
+                                                const bObj = getObj(bId);
+                                                if (!bObj) return null;
+                                                return (
+                                                    <div
+                                                        key={bId}
+                                                        className="relative group/blocker cursor-pointer"
+                                                        style={{ width: TRAY_CARD_W * 0.45, height: TRAY_CARD_H * 0.45 }}
+                                                        onClick={(e) => { e.stopPropagation(); if (onInspectCard) onInspectCard(bObj.cardData); }}
+                                                    >
+                                                        <img
+                                                            src={bObj.cardData.imageUrl}
+                                                            className="w-full h-full object-cover rounded border border-blue-400 shadow-md"
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/blocker:opacity-100 transition-opacity flex items-center justify-center rounded">
+                                                            <Eye size={10} className="text-white" />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <>
-            {/* Attacker selection glow on board cards - uses actual card size */}
+            {/* Attacker selection glow on board cards */}
             {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
@@ -112,137 +241,23 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     if (isAssigned && onRemoveAttacker) {
-                                        // Click on an assigned attacker to remove it
                                         onRemoveAttacker(obj.id);
                                     } else {
                                         onToggleAttackerSelection(obj.id);
                                     }
                                 }}
-                                title={isAssigned ? 'Click to remove attacker' : isSelected ? 'Click to deselect' : ''}
                             />
                         );
                     })
             )}
 
-            {/* Cards assigned as attackers get color outline */}
-            {combatState.assignments.map(assignment => {
-                const obj = getObj(assignment.attackerId);
-                if (!obj) return null;
-                const defenderPlayer = playersList.find(p => p.id === assignment.defenderId);
-                const color = defenderPlayer?.color || '#ef4444';
-                return (
-                    <div
-                        key={`atk-outline-${assignment.attackerId}`}
-                        className="absolute pointer-events-none"
-                        style={{
-                            left: obj.x - 3,
-                            top: obj.y - 3,
-                            width: CARD_WIDTH + 6,
-                            height: CARD_HEIGHT + 6,
-                            border: `4px solid ${color}`,
-                            borderRadius: 6,
-                            boxShadow: `0 0 15px ${color}88, inset 0 0 8px ${color}44`,
-                            zIndex: 9998,
-                        }}
-                    />
-                );
-            })}
-
-            {/* Attacker Trays — positioned ABOVE each defender's mat (not covering it) */}
-            {Array.from(assignmentsByDefender.entries()).map(([defenderId, assignments]) => {
-                const defenderIdx = playersList.findIndex(p => p.id === defenderId);
-                if (defenderIdx === -1 || !layout[defenderIdx]) return null;
-                const defPos = layout[defenderIdx];
-                const defRot = defPos.rot;
-
-                // Position tray ABOVE the defender's mat with enough gap
-                const trayHeight = TRAY_CARD_H + 60; // card height + padding + header
-                let trayX = defPos.x + matW / 2;
-                let trayY = defPos.y - trayHeight - 10;
-
-                // Adjust based on mat rotation for proper positioning
-                if (defRot === 180) {
-                    trayY = defPos.y + matH + 10;
-                } else if (defRot === 90) {
-                    trayX = defPos.x + matW + 30;
-                    trayY = defPos.y + matH / 2 - trayHeight / 2;
-                } else if (defRot === -90) {
-                    trayX = defPos.x - 30;
-                    trayY = defPos.y + matH / 2 - trayHeight / 2;
-                }
-
-                const trayWidth = Math.max(assignments.length * (TRAY_CARD_W + 8) + 24, 200);
-
-                return (
-                    <div
-                        key={`atk-tray-${defenderId}`}
-                        className="absolute"
-                        style={{
-                            left: trayX - trayWidth / 2,
-                            top: trayY,
-                            zIndex: 9990,
-                        }}
-                    >
-                        <div className="bg-gray-900/90 backdrop-blur-sm border border-red-500/50 rounded-xl p-3 shadow-2xl">
-                            <div className="flex items-center gap-2 mb-2 text-xs font-bold">
-                                <Swords size={14} className="text-red-400" />
-                                <span className="text-red-300">{attackerPlayer?.name || 'Attacker'}</span>
-                                <ArrowRight size={12} className="text-gray-500" />
-                                <span className="text-white">{playersList.find(p => p.id === defenderId)?.name}</span>
-                            </div>
-                            <div className="flex gap-2">
-                                {assignments.map(a => {
-                                    const obj = getObj(a.attackerId);
-                                    if (!obj) return null;
-                                    const hasBlockers = a.blockerIds.length > 0;
-                                    return (
-                                        <div
-                                            key={a.attackerId}
-                                            className={`relative cursor-pointer transition-transform hover:scale-105 ${(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') && selectedBlockerId ? 'ring-2 ring-blue-400 rounded' : ''}`}
-                                            style={{ width: TRAY_CARD_W, height: TRAY_CARD_H }}
-                                            onClick={() => {
-                                                if ((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) {
-                                                    handleAttackerClickForBlock(a.attackerId);
-                                                }
-                                            }}
-                                        >
-                                            <img
-                                                src={obj.cardData.imageUrl}
-                                                className="w-full h-full object-cover rounded"
-                                                style={{
-                                                    border: `2px solid ${attackerPlayer?.color || '#ef4444'}`,
-                                                }}
-                                            />
-                                            {hasBlockers && (
-                                                <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white text-[9px] font-bold px-1 rounded-full z-10">
-                                                    <Shield size={8} className="inline" /> {a.blockerIds.length}
-                                                </div>
-                                            )}
-                                            {/* Blocker cards below */}
-                                            {hasBlockers && (
-                                                <div className="absolute -bottom-12 left-0 right-0 flex justify-center gap-1">
-                                                    {a.blockerIds.map(bId => {
-                                                        const bObj = getObj(bId);
-                                                        if (!bObj) return null;
-                                                        return (
-                                                            <div key={bId} className="relative" style={{ width: TRAY_CARD_W * 0.5, height: TRAY_CARD_H * 0.5 }}>
-                                                                <img
-                                                                    src={bObj.cardData.imageUrl}
-                                                                    className="w-full h-full object-cover rounded border border-blue-400"
-                                                                />
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })}
+            {/* Tray rendering logic for each defender mat and attacker mat */}
+            {Array.from(assignmentsByDefender.entries()).map(([defenderId, assignments]) => (
+                <React.Fragment key={`trays-${defenderId}`}>
+                    {renderTray(defenderId, assignments, false)} {/* Near Defender */}
+                    {renderTray(defenderId, assignments, true)}  {/* Near Attacker */}
+                </React.Fragment>
+            ))}
 
             {/* SVG Tethers from blockers to attackers */}
             <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 9995, overflow: 'visible' }}>
@@ -302,33 +317,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                 })
             )}
 
-            {/* Name labels as click targets for assigning attackers */}
-            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.selectedCardIds.length > 0 && (
-                playersList.map((p, idx) => {
-                    if (p.id === myId) return null;
-                    const pos = layout[idx];
-                    if (!pos) return null;
-
-                    return (
-                        <div
-                            key={`name-target-${p.id}`}
-                            className="absolute cursor-pointer z-[9985]"
-                            style={{
-                                left: pos.x + matW / 2,
-                                top: pos.y - 60,
-                                transform: 'translateX(-50%)',
-                            }}
-                            onClick={() => onAssignAttackersToDefender(p.id)}
-                        >
-                            <div className="bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm transition-colors">
-                                <Swords size={14} /> Attack {p.name}
-                            </div>
-                        </div>
-                    );
-                })
-            )}
-
-            {/* Blocker selection mode — click own cards to select as blocker, then click an attacker in the tray */}
+            {/* Blocker selection mode */}
             {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
@@ -357,7 +346,6 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     e.stopPropagation();
                                     handleBlockerClick(obj.id);
                                 }}
-                                title={isSelected ? 'Now click an attacker in the tray to block it' : 'Click to select as blocker'}
                             />
                         );
                     })

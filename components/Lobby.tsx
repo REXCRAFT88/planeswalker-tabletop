@@ -233,7 +233,16 @@ export const Lobby: React.FC<LobbyProps> = ({
 
         const randomColor = PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)];
         const userId = getUserIdForRoom(code);
-        socket.emit('join_room', { room: code, name: playerName, color: randomColor, userId });
+        socket.emit('join_room', {
+            room: code,
+            name: playerName,
+            color: randomColor,
+            userId,
+            customMatUrl,
+            customSleeveUrl,
+            customMatTransform,
+            customSleeveTransform
+        });
 
         socket.on('join_error', ({ message }) => {
             alert(message);
@@ -381,43 +390,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                             </div>
                         </div>
 
-                        {/* Color Selector */}
-                        <div>
-                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Color</label>
-                            <div className="flex flex-wrap gap-2">
-                                {PLAYER_COLORS.map(color => {
-                                    const isSelected = playerSleeve === color;
-                                    return (
-                                        <button
-                                            key={color}
-                                            onClick={() => setPlayerSleeve(color)}
-                                            onContextMenu={(e) => {
-                                                e.preventDefault();
-                                                const picker = document.getElementById('lobby-custom-color-picker');
-                                                if (picker) picker.click();
-                                            }}
-                                            className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-white scale-110 shadow-lg ring-2 ring-orange-500/20' : 'border-transparent hover:scale-105'}`}
-                                            style={{ backgroundColor: color }}
-                                            title="Click to select • Right-click for custom color"
-                                        />
-                                    );
-                                })}
-                                <input
-                                    id="lobby-custom-color-picker"
-                                    type="color"
-                                    className="sr-only"
-                                    value={playerSleeve.startsWith('#') ? playerSleeve : '#ef4444'}
-                                    onChange={(e) => setPlayerSleeve(e.target.value)}
-                                />
-                                <div
-                                    className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-gray-400 transition-colors"
-                                    onClick={() => document.getElementById('lobby-custom-color-picker')?.click()}
-                                    title="Custom Color"
-                                >
-                                    <Palette size={14} className="text-gray-500" />
-                                </div>
-                            </div>
-                        </div>
+                        {/* Color Selector moved to Waiting Room */}
 
                         <div className="pt-4 border-t border-gray-700">
 
@@ -777,7 +750,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     style={{ aspectRatio: '1/1', minHeight: '400px' }}
                                     onContextMenu={(e) => e.preventDefault()}
                                 >
-                                    <div className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10" style={{ width: '250px', height: '350px' }}>
+                                    <div className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10 flex-shrink-0" style={{ width: '250px', height: '350px', maxWidth: '100%' }}>
                                         {sleevePreviewUrl ? (
                                             <div
                                                 className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"

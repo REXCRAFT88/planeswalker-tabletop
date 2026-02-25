@@ -928,7 +928,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [combatState, setCombatState] = useState<CombatState | null>(null);
 
     const [playersList, setPlayersList] = useState<Player[]>([
-        { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
+        {
+            id: isLocal ? 'player-0' : 'local-player',
+            name: playerName,
+            color: sleeveColor,
+            customMatUrl,
+            customSleeveUrl,
+            customMatTransform,
+            customSleeveTransform
+        }
     ]);
     const [turnOrder, setTurnOrder] = useState<string[]>([]);
     const [mySeatIndex, setMySeatIndex] = useState(0);
@@ -1238,7 +1246,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const touchStartRef = useRef<number | null>(null);
 
     const currentRadius = (playersList.length === 2 || (isLocal && localOpponents.length === 1)) ? 420 : 625;
-    const layout = getLayout(playersList.length, currentRadius);
+    const layout = useMemo(() => getLayout(playersList.length, currentRadius), [playersList, currentRadius]);
 
     useEffect(() => { libraryRef.current = library; }, [library]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
@@ -1251,7 +1259,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     useEffect(() => { currentTurnPlayerIdRef.current = currentTurnPlayerId; }, [currentTurnPlayerId]);
     useEffect(() => { commanderDamageRef.current = commanderDamage; }, [commanderDamage]);
 
-    // Auto-center view on turn change for better UX
+    // Auto-center view on turn change removed - per user request to stay on own mat
+    /*
     useEffect(() => {
         if (isLocal || !currentTurnPlayerId) return; // Only for online multiplayer
 
@@ -1260,6 +1269,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
         setMySeatIndex(currentPlayerIndex);
     }, [currentTurnPlayerId, playersList, mySeatIndex, isLocal]);
+    */
     useEffect(() => { turnOrderRef.current = turnOrder; }, [turnOrder]);
     useEffect(() => { lifeRef.current = life; }, [life]);
     useEffect(() => { logsRef.current = logs; }, [logs]);
@@ -3118,6 +3128,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const advancePhase = () => {
         // If combat is active and we're resolving, pressing enter/advance moves to MAIN2
         if (combatState?.isActive) {
+            if (combatState.phase === 'SELECTING_ATTACKERS') {
+                cancelCombat();
+                return;
+            }
             if (combatState.phase === 'ATTACKERS_DECLARED' || combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') {
                 // Move to resolving
                 const resolved: CombatState = { ...combatState, phase: 'RESOLVING' };
@@ -4448,7 +4462,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             }}
         >
             <div
-                className="absolute inset-0 opacity-50 pointer-events-none"
+                className="absolute inset-0 opacity-30 pointer-events-none"
                 style={{
                     backgroundImage: `url("/table_texture.png")`,
                     backgroundRepeat: 'repeat',
@@ -4651,6 +4665,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         onResolveCombat={resolveCombat}
                         onCancelCombat={cancelCombat}
                         onRemoveAttacker={removeAttacker}
+                        onInspectCard={setInspectCard}
                     />
                 )}
             </div>
@@ -4700,51 +4715,77 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                     </button>
                                 )}
                             </h3>
-                            <div className="space-y-2">
-                                {playersList.map((player) => (
-                                    <div key={player.id} className="flex items-center gap-4 bg-gray-700/50 p-3 rounded-lg border border-gray-600">
-                                        <div
-                                            className={`w-10 h-10 rounded-full border-2 border-white/20 shadow-lg flex items-center justify-center font-bold text-white text-lg ${player.id === socket.id ? 'cursor-pointer hover:scale-110 transition-transform' : ''}`}
-                                            style={{ backgroundColor: player.color }}
-                                            onClick={() => {
-                                                if (player.id === socket.id) {
-                                                    const takenColors = playersList.map(p => p.color);
-                                                    const currentIdx = PLAYER_COLORS.indexOf(player.color);
-                                                    let nextIdx = (currentIdx + 1) % PLAYER_COLORS.length;
-
-                                                    // Cycle past taken colors
-                                                    let attempts = 0;
-                                                    while (takenColors.includes(PLAYER_COLORS[nextIdx]) && attempts < PLAYER_COLORS.length) {
-                                                        nextIdx = (nextIdx + 1) % PLAYER_COLORS.length;
-                                                        attempts++;
-                                                    }
-
-                                                    const nextColor = PLAYER_COLORS[nextIdx];
-                                                    socket.emit('update_player_color', { room: roomId, color: nextColor });
-                                                }
-                                            }}
-                                            onContextMenu={(e) => {
-                                                if (player.id === socket.id) {
-                                                    e.preventDefault();
-                                                    const picker = document.getElementById('lobby-custom-color-picker');
-                                                    if (picker) picker.click();
-                                                }
-                                            }}
-                                            title={player.id === socket.id ? "Click to change color" : ""}
-                                        >
-                                            {player.name.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="font-bold text-white text-lg">{player.name}</div>
-                                            <div className="text-xs text-gray-400">{player.id === socket.id ? '(You)' : 'Opponent'}</div>
-                                        </div>
-                                        {(isLocal || player.id === socket.id) && (
-                                            <div className="text-green-400 text-xs font-bold uppercase flex items-center gap-1">
-                                                <CheckCircle size={14} /> Ready
+                            <div className="space-y-3">
+                                {playersList.map((player) => {
+                                    const isMe = player.id === socket.id;
+                                    return (
+                                        <div key={player.id} className={`flex flex-col gap-4 bg-gray-700/30 p-4 rounded-xl border ${isMe ? 'border-blue-500/50 bg-blue-500/5' : 'border-gray-600'}`}>
+                                            <div className="flex items-center gap-4">
+                                                <div
+                                                    className={`w-12 h-12 rounded-full border-2 border-white/20 shadow-lg flex items-center justify-center font-bold text-white text-xl transition-transform ${isMe ? 'ring-4 ring-blue-500/20' : ''}`}
+                                                    style={{ backgroundColor: player.color }}
+                                                    title={isMe ? "Your Color" : ""}
+                                                >
+                                                    {player.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="font-bold text-white text-lg flex items-center gap-2">
+                                                        {player.name}
+                                                        {isMe && <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded text-white uppercase tracking-tighter">You</span>}
+                                                    </div>
+                                                    <div className="text-xs text-gray-400">{isMe ? 'Customizing your appearance' : 'Ready to play'}</div>
+                                                </div>
+                                                {isMe && (
+                                                    <div className="text-green-400 text-xs font-bold uppercase flex items-center gap-1">
+                                                        <CheckCircle size={14} /> Ready
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
-                                ))}
+
+                                            {isMe && (
+                                                <div className="pt-3 border-t border-gray-600/50">
+                                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Choose Your Color</label>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {PLAYER_COLORS.map(color => {
+                                                            const isSelected = player.color === color;
+                                                            const isTaken = playersList.some(p => p.id !== socket.id && p.color === color);
+                                                            return (
+                                                                <button
+                                                                    key={color}
+                                                                    onClick={() => {
+                                                                        if (!isTaken) {
+                                                                            socket.emit('update_player_color', { room: roomId, color });
+                                                                        }
+                                                                    }}
+                                                                    disabled={isTaken}
+                                                                    className={`w-8 h-8 rounded-full border-2 transition-all relative ${isSelected ? 'border-white scale-110 shadow-lg' : 'border-transparent hover:scale-110'} ${isTaken ? 'opacity-20 cursor-not-allowed grayscale' : 'cursor-pointer'}`}
+                                                                    style={{ backgroundColor: color }}
+                                                                >
+                                                                    {isSelected && <Check size={14} className="text-white absolute inset-0 m-auto" />}
+                                                                    {isTaken && <Ban size={14} className="text-white absolute inset-0 m-auto" />}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                        <div
+                                                            className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-gray-400 transition-colors"
+                                                            onClick={() => document.getElementById('lobby-custom-color-picker')?.click()}
+                                                            title="Custom Color"
+                                                        >
+                                                            <Palette size={14} className="text-gray-500" />
+                                                        </div>
+                                                        <input
+                                                            id="lobby-custom-color-picker"
+                                                            type="color"
+                                                            className="sr-only"
+                                                            value={player.color.startsWith('#') ? player.color : '#ef4444'}
+                                                            onChange={(e) => socket.emit('update_player_color', { room: roomId, color: e.target.value })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -5047,12 +5088,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                             Declare ({combatState.assignments.length})
                                         </button>
                                     )}
-                                    <button
-                                        onClick={cancelCombat}
-                                        className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs"
-                                    >
-                                        Skip
-                                    </button>
+                                    {/* Skip button removed per user request */}
                                 </>
                             )}
                             {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') && (
