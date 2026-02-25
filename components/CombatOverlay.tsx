@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { CombatState, CombatAssignment, BoardObject } from '../types';
+import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { Swords, Shield, X, Check, ArrowRight } from 'lucide-react';
 
 interface Player {
@@ -22,6 +23,7 @@ interface CombatOverlayProps {
     onAssignBlocker: (blockerId: string, attackerId: string) => void;
     onResolveCombat: () => void;
     onCancelCombat: () => void;
+    onRemoveAttacker?: (attackerId: string) => void;
 }
 
 const TRAY_CARD_W = 70;
@@ -41,6 +43,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
     onAssignBlocker,
     onResolveCombat,
     onCancelCombat,
+    onRemoveAttacker,
 }) => {
     const isAttacker = combatState.attackerPlayerId === myId;
     const attackerPlayer = playersList.find(p => p.id === combatState.attackerPlayerId);
@@ -82,7 +85,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
 
     return (
         <>
-            {/* Attacker selection glow on board cards */}
+            {/* Attacker selection glow on board cards - uses actual card size */}
             {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
@@ -93,19 +96,29 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                         return (
                             <div
                                 key={`select-glow-${obj.id}`}
-                                className="absolute pointer-events-none"
+                                className="absolute pointer-events-auto cursor-pointer"
                                 style={{
                                     left: obj.x - 4,
                                     top: obj.y - 4,
-                                    width: TRAY_CARD_W + 8,
-                                    height: TRAY_CARD_H + 8,
-                                    border: isSelected ? '3px solid #f59e0b' : '3px solid #ef4444',
-                                    borderRadius: 8,
+                                    width: CARD_WIDTH + 8,
+                                    height: CARD_HEIGHT + 8,
+                                    border: isSelected ? '4px solid #f59e0b' : '3px solid #ef4444',
+                                    borderRadius: 6,
                                     boxShadow: isSelected
-                                        ? '0 0 15px rgba(245,158,11,0.6)'
+                                        ? '0 0 20px rgba(245,158,11,0.8), inset 0 0 10px rgba(245,158,11,0.4)'
                                         : '0 0 15px rgba(239,68,68,0.6)',
                                     zIndex: 9999,
                                 }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isAssigned && onRemoveAttacker) {
+                                        // Click on an assigned attacker to remove it
+                                        onRemoveAttacker(obj.id);
+                                    } else {
+                                        onToggleAttackerSelection(obj.id);
+                                    }
+                                }}
+                                title={isAssigned ? 'Click to remove attacker' : isSelected ? 'Click to deselect' : ''}
                             />
                         );
                     })
@@ -124,37 +137,38 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                         style={{
                             left: obj.x - 3,
                             top: obj.y - 3,
-                            width: TRAY_CARD_W + 6,
-                            height: TRAY_CARD_H + 6,
-                            border: `3px solid ${color}`,
+                            width: CARD_WIDTH + 6,
+                            height: CARD_HEIGHT + 6,
+                            border: `4px solid ${color}`,
                             borderRadius: 6,
-                            boxShadow: `0 0 12px ${color}66`,
+                            boxShadow: `0 0 15px ${color}88, inset 0 0 8px ${color}44`,
                             zIndex: 9998,
                         }}
                     />
                 );
             })}
 
-            {/* Attacker Trays — positioned above each defender's mat */}
+            {/* Attacker Trays — positioned ABOVE each defender's mat (not covering it) */}
             {Array.from(assignmentsByDefender.entries()).map(([defenderId, assignments]) => {
                 const defenderIdx = playersList.findIndex(p => p.id === defenderId);
                 if (defenderIdx === -1 || !layout[defenderIdx]) return null;
                 const defPos = layout[defenderIdx];
                 const defRot = defPos.rot;
 
-                // Position tray above the defender's mat (adjusted for rotation)
+                // Position tray ABOVE the defender's mat with enough gap
+                const trayHeight = TRAY_CARD_H + 60; // card height + padding + header
                 let trayX = defPos.x + matW / 2;
-                let trayY = defPos.y - 30;
+                let trayY = defPos.y - trayHeight - 10;
 
                 // Adjust based on mat rotation for proper positioning
                 if (defRot === 180) {
-                    trayY = defPos.y + matH + 30;
+                    trayY = defPos.y + matH + 10;
                 } else if (defRot === 90) {
                     trayX = defPos.x + matW + 30;
-                    trayY = defPos.y + matH / 2;
+                    trayY = defPos.y + matH / 2 - trayHeight / 2;
                 } else if (defRot === -90) {
                     trayX = defPos.x - 30;
-                    trayY = defPos.y + matH / 2;
+                    trayY = defPos.y + matH / 2 - trayHeight / 2;
                 }
 
                 const trayWidth = Math.max(assignments.length * (TRAY_CARD_W + 8) + 24, 200);
@@ -165,7 +179,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                         className="absolute"
                         style={{
                             left: trayX - trayWidth / 2,
-                            top: defRot === 180 ? trayY : trayY - TRAY_CARD_H - 40,
+                            top: trayY,
                             zIndex: 9990,
                         }}
                     >
@@ -242,10 +256,10 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                         return (
                             <line
                                 key={`tether-${a.attackerId}-${bId}`}
-                                x1={blkObj.x + TRAY_CARD_W / 2}
-                                y1={blkObj.y + TRAY_CARD_H / 2}
-                                x2={atkObj.x + TRAY_CARD_W / 2}
-                                y2={atkObj.y + TRAY_CARD_H / 2}
+                                x1={blkObj.x + CARD_WIDTH / 2}
+                                y1={blkObj.y + CARD_HEIGHT / 2}
+                                x2={atkObj.x + CARD_WIDTH / 2}
+                                y2={atkObj.y + CARD_HEIGHT / 2}
                                 stroke={defPlayer?.color || '#3b82f6'}
                                 strokeWidth={3}
                                 strokeDasharray="8 4"
@@ -314,33 +328,47 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                 })
             )}
 
-            {/* Blocker selection mode - click own cards to select as blocker */}
+            {/* Blocker selection mode — click own cards to select as blocker, then click an attacker in the tray */}
             {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
                     .map(obj => {
                         const isBlocker = combatState.assignments.some(a => a.blockerIds.includes(obj.id));
                         const isSelected = selectedBlockerId === obj.id;
-                        if (!isSelected && !isBlocker) return null;
                         return (
                             <div
                                 key={`block-glow-${obj.id}`}
-                                className="absolute pointer-events-none"
+                                className="absolute pointer-events-auto cursor-pointer"
                                 style={{
                                     left: obj.x - 4,
                                     top: obj.y - 4,
-                                    width: TRAY_CARD_W + 8,
-                                    height: TRAY_CARD_H + 8,
-                                    border: isSelected ? '3px solid #3b82f6' : '3px solid #22c55e',
+                                    width: CARD_WIDTH + 8,
+                                    height: CARD_HEIGHT + 8,
+                                    border: isSelected ? '3px solid #3b82f6' : isBlocker ? '3px solid #22c55e' : '2px dashed #3b82f680',
                                     borderRadius: 8,
                                     boxShadow: isSelected
                                         ? '0 0 15px rgba(59,130,246,0.6)'
-                                        : '0 0 15px rgba(34,197,94,0.6)',
+                                        : isBlocker
+                                            ? '0 0 15px rgba(34,197,94,0.6)'
+                                            : 'none',
                                     zIndex: 9999,
                                 }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleBlockerClick(obj.id);
+                                }}
+                                title={isSelected ? 'Now click an attacker in the tray to block it' : 'Click to select as blocker'}
                             />
                         );
                     })
+            )}
+
+            {/* Blocker selection hint */}
+            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && selectedBlockerId && (
+                <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[10000] bg-blue-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 animate-pulse">
+                    <Shield size={16} />
+                    Click an attacker in the tray to assign this blocker
+                </div>
             )}
         </>
     );

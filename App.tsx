@@ -178,6 +178,8 @@ function App() {
             setActiveDeck([...savedDecks[0].deck]);
             setLobbyTokens([...savedDecks[0].tokens]);
             setActiveSideboard([...(savedDecks[0].sideboard || [])]);
+            if (savedDecks[0].matUrl) setCustomMatUrl(savedDecks[0].matUrl);
+            if (savedDecks[0].sleeveUrl) setCustomSleeveUrl(savedDecks[0].sleeveUrl);
         }
 
         if (gameType === 'local_table') {
@@ -191,6 +193,8 @@ function App() {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
         setActiveSideboard([...(deck.sideboard || [])]);
+        if (deck.matUrl) setCustomMatUrl(deck.matUrl);
+        if (deck.sleeveUrl) setCustomSleeveUrl(deck.sleeveUrl);
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);
@@ -234,6 +238,43 @@ function App() {
         setSavedDecks(prev => prev.filter(d => d.id !== id));
     };
 
+    const handleExportDeck = (deck: SavedDeck) => {
+        const data = JSON.stringify(deck, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${deck.name || 'deck'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleImportDeckFile = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const deck = JSON.parse(e.target?.result as string);
+                if (deck && (Array.isArray(deck.cards) || Array.isArray(deck.deck))) {
+                    const newId = crypto.randomUUID();
+                    const newCards = Array.isArray(deck.cards) ? deck.cards : deck.deck;
+                    const newDeck = {
+                        ...deck,
+                        id: newId,
+                        cards: newCards,
+                        tokens: Array.isArray(deck.tokens) ? deck.tokens : [],
+                        sideboard: Array.isArray(deck.sideboard) ? deck.sideboard : []
+                    };
+                    setSavedDecks(prev => [...prev, newDeck]);
+                } else {
+                    alert('Invalid deck file format');
+                }
+            } catch (err) {
+                alert('Failed to parse deck file');
+            }
+        };
+        reader.readAsText(file);
+    };
+
     return (
         <div className="w-full h-full bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white font-sans antialiased selection:bg-blue-500 selection:text-white">
             {currentView === View.LOBBY && (
@@ -261,6 +302,8 @@ function App() {
                     onSaveDeck={handleSaveDeck}
                     onDeleteDeck={handleDeleteDeck}
                     onLoadDeck={handleDeckReady}
+                    onExportDeck={handleExportDeck}
+                    onImportDeckFile={handleImportDeckFile}
                 />
             )}
 
@@ -285,6 +328,8 @@ function App() {
                     activeDeck={activeDeck}
                     activeSideboard={activeSideboard}
                     activeTokens={lobbyTokens}
+                    customMatUrl={customMatUrl}
+                    customSleeveUrl={customSleeveUrl}
                 />
             )}
 

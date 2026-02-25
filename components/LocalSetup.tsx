@@ -12,6 +12,8 @@ interface Participant {
     tokens: CardData[];
     color: string;
     type: 'human_local';
+    customMatUrl?: string;
+    customSleeveUrl?: string;
 }
 
 interface LocalSetupProps {
@@ -23,14 +25,27 @@ interface LocalSetupProps {
     activeDeck: CardData[];
     activeSideboard: CardData[];
     activeTokens: CardData[];
+    customMatUrl: string;
+    customSleeveUrl: string;
 }
 
 export const LocalSetup: React.FC<LocalSetupProps> = ({
     onStartGame, onBack, savedDecks,
-    playerName, playerSleeve, activeDeck, activeSideboard, activeTokens
+    playerName, playerSleeve, activeDeck, activeSideboard, activeTokens,
+    customMatUrl, customSleeveUrl
 }) => {
     const [participants, setParticipants] = useState<Participant[]>([
-        { id: 'player-0', name: playerName, deck: activeDeck, sideboard: activeSideboard, tokens: activeTokens, color: playerSleeve, type: 'human_local' }
+        {
+            id: 'player-0',
+            name: playerName,
+            deck: activeDeck,
+            sideboard: activeSideboard,
+            tokens: activeTokens,
+            color: playerSleeve,
+            type: 'human_local',
+            customMatUrl,
+            customSleeveUrl
+        }
     ]);
     const [showColorPicker, setShowColorPicker] = useState<number | null>(null);
 
@@ -161,7 +176,9 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({
                                                     updateParticipant(idx, {
                                                         deck: [...deck.deck],
                                                         sideboard: [...(deck.sideboard || [])],
-                                                        tokens: [...deck.tokens]
+                                                        tokens: [...deck.tokens],
+                                                        customMatUrl: deck.matUrl,
+                                                        customSleeveUrl: deck.sleeveUrl
                                                     });
                                                 }
                                             }}

@@ -46,6 +46,7 @@ export interface BoardObject {
 
 export interface Player {
   id: string;
+  userId?: string;
   name: string;
   sleeveColor: string; // Hex code for sleeve
   color: string;
@@ -57,6 +58,11 @@ export interface Player {
   graveyard: CardData[];
   exile: CardData[];
   commandZone: CardData[];
+  customMatUrl?: string;
+  customSleeveUrl?: string;
+  customMatTransform?: { scale: number; x: number; y: number; rotation: number };
+  customSleeveTransform?: { scale: number; x: number; y: number; rotation: number };
+  disconnected?: boolean;
 }
 
 export interface PlayerStats {

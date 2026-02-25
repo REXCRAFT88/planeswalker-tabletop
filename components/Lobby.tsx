@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Settings, Image, ZoomIn, ZoomOut, RotateCcw, RefreshCcw } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Settings, Image, ZoomIn, ZoomOut, RotateCcw, RefreshCcw, Download, Upload, Archive, Palette } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -30,6 +30,8 @@ interface LobbyProps {
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
     onLoadDeck: (deck: CardData[], tokens: CardData[], sideboard: CardData[], shouldSave?: boolean, name?: string) => void;
+    onExportDeck: (deck: SavedDeck) => void;
+    onImportDeckFile: (file: File) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -41,7 +43,8 @@ export const Lobby: React.FC<LobbyProps> = ({
     customSleeveTransform, setCustomSleeveTransform,
     onJoin, onLocalGame, onImportDeck, savedDeckCount,
     currentTokens, onTokensChange, activeDeck,
-    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck
+    savedDecks, onSaveDeck, onDeleteDeck, onLoadDeck,
+    onExportDeck, onImportDeckFile
 }) => {
     const [isSearching, setIsSearching] = useState(false);
     const [importText, setImportText] = useState('');
@@ -378,6 +381,44 @@ export const Lobby: React.FC<LobbyProps> = ({
                             </div>
                         </div>
 
+                        {/* Color Selector */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Player Color</label>
+                            <div className="flex flex-wrap gap-2">
+                                {PLAYER_COLORS.map(color => {
+                                    const isSelected = playerSleeve === color;
+                                    return (
+                                        <button
+                                            key={color}
+                                            onClick={() => setPlayerSleeve(color)}
+                                            onContextMenu={(e) => {
+                                                e.preventDefault();
+                                                const picker = document.getElementById('lobby-custom-color-picker');
+                                                if (picker) picker.click();
+                                            }}
+                                            className={`w-8 h-8 rounded-full border-2 transition-all ${isSelected ? 'border-white scale-110 shadow-lg ring-2 ring-orange-500/20' : 'border-transparent hover:scale-105'}`}
+                                            style={{ backgroundColor: color }}
+                                            title="Click to select • Right-click for custom color"
+                                        />
+                                    );
+                                })}
+                                <input
+                                    id="lobby-custom-color-picker"
+                                    type="color"
+                                    className="sr-only"
+                                    value={playerSleeve.startsWith('#') ? playerSleeve : '#ef4444'}
+                                    onChange={(e) => setPlayerSleeve(e.target.value)}
+                                />
+                                <div
+                                    className="w-8 h-8 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-gray-400 transition-colors"
+                                    onClick={() => document.getElementById('lobby-custom-color-picker')?.click()}
+                                    title="Custom Color"
+                                >
+                                    <Palette size={14} className="text-gray-500" />
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="pt-4 border-t border-gray-700">
 
                             <div className="flex flex-col md:flex-row gap-4 mb-4">
@@ -502,6 +543,21 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         <button onClick={() => setIsEditingTokens(true)} className="flex-1 flex items-center justify-center gap-2 p-4 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95">
                                             <Layers size={20} /> Manage Global Tokens
                                         </button>
+                                        <button
+                                            onClick={() => {
+                                                const input = document.createElement('input');
+                                                input.type = 'file';
+                                                input.accept = 'application/json';
+                                                input.onchange = (e) => {
+                                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                                    if (file) onImportDeckFile(file);
+                                                };
+                                                input.click();
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-2 p-4 bg-teal-800 hover:bg-teal-700 text-white rounded-xl font-bold shadow-lg transition-transform active:scale-95"
+                                        >
+                                            <Upload size={20} /> Import JSON
+                                        </button>
                                     </div>
 
                                     {savedDecks.map(deck => {
@@ -524,6 +580,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                         </button>
                                                         <button onClick={() => onDeleteDeck(deck.id)} className="px-3 py-2 sm:py-1.5 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs font-bold rounded flex items-center gap-1">
                                                             <Trash2 size={12} /> Delete
+                                                        </button>
+                                                        <button onClick={() => onExportDeck(deck)} className="px-3 py-2 sm:py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold rounded flex items-center gap-1">
+                                                            <Download size={12} /> Export
                                                         </button>
                                                     </div>
                                                 </div>
@@ -653,7 +712,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                             {Math.round(matTransform.scale * 100)}%
                                         </div>
                                     </div>
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
                                         <button
                                             onClick={() => {
                                                 const input = document.createElement('input');
@@ -669,7 +728,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                 };
                                                 input.click();
                                             }}
-                                            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2 pointer-events-auto shadow-xl"
                                         >
                                             <Image size={16} /> Upload Image
                                         </button>
@@ -710,111 +769,117 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                             {/* Sleeve Customization */}
                             <div className="flex-1 flex flex-col gap-4">
-                                <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
-                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '2.5/3.5', height: 'auto', maxWidth: '45%', alignSelf: 'flex-start' }}
+                                <div className="flex justify-between items-center">
+                                    <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
+                                    <div className="text-[10px] text-gray-500">2.5 x 3.5 Ratio</div>
+                                </div>
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group flex items-center justify-center p-8 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+                                    style={{ aspectRatio: '1/1', minHeight: '400px' }}
                                     onContextMenu={(e) => e.preventDefault()}
                                 >
-                                    {sleevePreviewUrl ? (
-                                        <div
-                                            className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
-                                            onWheel={handleSleeveWheel}
-                                            onMouseDown={handleSleeveMouseDown}
-                                            onMouseMove={handleSleeveMouseMove}
-                                            onMouseUp={handleSleeveMouseUp}
-                                            onMouseLeave={handleSleeveMouseUp}
-                                        >
-                                            <img
-                                                ref={sleeveImageRef}
-                                                src={sleevePreviewUrl}
-                                                alt="Sleeve Preview"
-                                                className="absolute top-0 left-0 object-cover transition-transform"
-                                                style={{
-                                                    width: '100%',
-                                                    height: '100%',
-                                                    transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale}) rotate(${sleeveTransform.rotation}deg)`,
-                                                    transformOrigin: 'center center'
-                                                }}
-                                                onError={() => setSleevePreviewUrl('')}
-                                            />
-                                        </div>
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: playerSleeve }}>
-                                            <div className="text-center">
-                                                <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-2">
-                                                    <div className="w-12 h-12 rounded-full border-2 border-white/20"></div>
+                                    <div className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10" style={{ width: '250px', height: '350px' }}>
+                                        {sleevePreviewUrl ? (
+                                            <div
+                                                className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
+                                                onWheel={handleSleeveWheel}
+                                                onMouseDown={handleSleeveMouseDown}
+                                                onMouseMove={handleSleeveMouseMove}
+                                                onMouseUp={handleSleeveMouseUp}
+                                                onMouseLeave={handleSleeveMouseUp}
+                                            >
+                                                <img
+                                                    ref={sleeveImageRef}
+                                                    src={sleevePreviewUrl}
+                                                    alt="Sleeve Preview"
+                                                    className="absolute top-0 left-0 object-cover transition-transform"
+                                                    style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        transform: `translate(${sleeveTransform.x}px, ${sleeveTransform.y}px) scale(${sleeveTransform.scale}) rotate(${sleeveTransform.rotation}deg)`,
+                                                        transformOrigin: 'center center'
+                                                    }}
+                                                    onError={() => setSleevePreviewUrl('')}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: playerSleeve }}>
+                                                <div className="text-center">
+                                                    <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mx-auto mb-2">
+                                                        <div className="w-12 h-12 rounded-full border-2 border-white/20"></div>
+                                                    </div>
+                                                    <p className="text-sm text-white/60">Current: {playerSleeve}</p>
                                                 </div>
-                                                <p className="text-sm text-white/60">Current: {playerSleeve}</p>
+                                            </div>
+                                        )}
+                                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                            <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.min(prev.scale + 0.1, 5) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom In">
+                                                <ZoomIn size={14} />
+                                            </button>
+                                            <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.max(prev.scale - 0.1, 0.1) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom Out">
+                                                <ZoomOut size={14} />
+                                            </button>
+                                            <button onClick={() => setSleeveTransform(prev => ({ ...prev, rotation: (prev.rotation + 90) % 360 }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Rotate">
+                                                <RotateCcw size={14} />
+                                            </button>
+                                            <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
+                                                <RefreshCcw size={14} />
+                                            </button>
+                                            <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
+                                                {Math.round(sleeveTransform.scale * 100)}%
                                             </div>
                                         </div>
-                                    )}
-                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.min(prev.scale + 0.1, 5) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom In">
-                                            <ZoomIn size={14} />
-                                        </button>
-                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, scale: Math.max(prev.scale - 0.1, 0.1) }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Zoom Out">
-                                            <ZoomOut size={14} />
-                                        </button>
-                                        <button onClick={() => setSleeveTransform(prev => ({ ...prev, rotation: (prev.rotation + 90) % 360 }))} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Rotate">
-                                            <RotateCcw size={14} />
-                                        </button>
-                                        <button onClick={resetSleeveTransform} className="p-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full" title="Reset View">
-                                            <RefreshCcw size={14} />
-                                        </button>
-                                        <div className="px-2 py-1 bg-black/50 text-white rounded-full text-xs">
-                                            {Math.round(sleeveTransform.scale * 100)}%
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                            <button
+                                                onClick={() => {
+                                                    const input = document.createElement('input');
+                                                    input.type = 'file';
+                                                    input.accept = 'image/*';
+                                                    input.onchange = (e) => {
+                                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                                        if (file) {
+                                                            const reader = new FileReader();
+                                                            reader.onload = (e) => setSleevePreviewUrl(e.target?.result as string);
+                                                            reader.readAsDataURL(file);
+                                                        }
+                                                    };
+                                                    input.click();
+                                                }}
+                                                className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2 pointer-events-auto shadow-xl"
+                                            >
+                                                <Image size={16} /> Upload Image
+                                            </button>
                                         </div>
                                     </div>
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Or paste image URL..."
+                                            value={sleevePreviewUrl || customSleeveUrl}
+                                            onChange={(e) => setSleevePreviewUrl(e.target.value)}
+                                            className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                                        />
                                         <button
                                             onClick={() => {
-                                                const input = document.createElement('input');
-                                                input.type = 'file';
-                                                input.accept = 'image/*';
-                                                input.onchange = (e) => {
-                                                    const file = (e.target as HTMLInputElement).files?.[0];
-                                                    if (file) {
-                                                        const reader = new FileReader();
-                                                        reader.onload = (e) => setSleevePreviewUrl(e.target?.result as string);
-                                                        reader.readAsDataURL(file);
-                                                    }
-                                                };
-                                                input.click();
+                                                setCustomSleeveUrl(sleevePreviewUrl);
+                                                setCustomSleeveTransform(sleeveTransform);
+                                                setSleevePreviewUrl('');
                                             }}
-                                            className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold flex items-center gap-2"
+                                            disabled={!sleevePreviewUrl}
+                                            className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            <Image size={16} /> Upload Image
+                                            <Check size={16} />
                                         </button>
                                     </div>
+                                    {customSleeveUrl && (
+                                        <button
+                                            onClick={() => setCustomSleeveUrl('')}
+                                            className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
+                                        >
+                                            <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
+                                        </button>
+                                    )}
                                 </div>
-                                <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        placeholder="Or paste image URL..."
-                                        value={sleevePreviewUrl || customSleeveUrl}
-                                        onChange={(e) => setSleevePreviewUrl(e.target.value)}
-                                        className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                                    />
-                                    <button
-                                        onClick={() => {
-                                            setCustomSleeveUrl(sleevePreviewUrl);
-                                            setCustomSleeveTransform(sleeveTransform);
-                                            setSleevePreviewUrl('');
-                                        }}
-                                        disabled={!sleevePreviewUrl}
-                                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <Check size={16} />
-                                    </button>
-                                </div>
-                                {customSleeveUrl && (
-                                    <button
-                                        onClick={() => setCustomSleeveUrl('')}
-                                        className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
-                                    >
-                                        <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
-                                    </button>
-                                )}
                             </div>
                         </div>
                     </div>
