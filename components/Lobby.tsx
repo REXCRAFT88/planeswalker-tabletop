@@ -74,12 +74,15 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleMatMouseDown = (e: React.MouseEvent) => {
+        if (e.button !== 2) return; // Right-click only
+        e.preventDefault();
         isDraggingMat.current = true;
         dragStartMat.current = { x: e.clientX - matTransform.x, y: e.clientY - matTransform.y };
     };
 
     const handleMatMouseMove = (e: React.MouseEvent) => {
         if (!isDraggingMat.current) return;
+        e.preventDefault();
         setMatTransform(prev => ({
             ...prev,
             x: e.clientX - dragStartMat.current.x,
@@ -99,12 +102,15 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleSleeveMouseDown = (e: React.MouseEvent) => {
+        if (e.button !== 2) return; // Right-click only
+        e.preventDefault();
         isDraggingSleeve.current = true;
         dragStartSleeve.current = { x: e.clientX - sleeveTransform.x, y: e.clientY - sleeveTransform.y };
     };
 
     const handleSleeveMouseMove = (e: React.MouseEvent) => {
         if (!isDraggingSleeve.current) return;
+        e.preventDefault();
         setSleeveTransform(prev => ({
             ...prev,
             x: e.clientX - dragStartSleeve.current.x,
@@ -596,10 +602,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                             {/* Mat Customization */}
                             <div className="flex-1 flex flex-col gap-4">
                                 <h4 className="text-lg font-bold text-white">Playmat</h4>
-                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '21/10' }}>
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '21/10' }}
+                                    onContextMenu={(e) => e.preventDefault()}
+                                >
                                     {matPreviewUrl ? (
                                         <div
-                                            className="w-full h-full overflow-hidden cursor-move"
+                                            className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
                                             onWheel={handleMatWheel}
                                             onMouseDown={handleMatMouseDown}
                                             onMouseMove={handleMatMouseMove}
@@ -667,6 +675,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         </button>
                                     </div>
                                 </div>
+                                <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
@@ -702,10 +711,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                             {/* Sleeve Customization */}
                             <div className="flex-1 flex flex-col gap-4">
                                 <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
-                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '2.5/3.5', maxHeight: '200px' }}>
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group" style={{ aspectRatio: '2.5/3.5', height: 'auto', maxWidth: '45%', alignSelf: 'flex-start' }}
+                                    onContextMenu={(e) => e.preventDefault()}
+                                >
                                     {sleevePreviewUrl ? (
                                         <div
-                                            className="w-full h-full overflow-hidden cursor-move"
+                                            className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
                                             onWheel={handleSleeveWheel}
                                             onMouseDown={handleSleeveMouseDown}
                                             onMouseMove={handleSleeveMouseMove}
@@ -775,6 +786,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         </button>
                                     </div>
                                 </div>
+                                <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
