@@ -455,12 +455,34 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, customSleeveUrl
                     )}
 
                     {/* Counters Visual */}
-                    {(object.counters["+1/+1"] || 0) !== 0 && (
-                        <div className={`absolute top-2 right-2 font-bold rounded-full w-8 h-8 flex items-center justify-center border-2 shadow-lg z-10 pointer-events-none ${(object.counters["+1/+1"] || 0) > 0 ? "bg-white text-black border-blue-500" : "bg-red-600 text-white border-red-800"
-                            }`}>
-                            {object.counters["+1/+1"]}
-                        </div>
-                    )}
+                    <div className="absolute top-1 right-1 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                        {Object.entries(object.counters || {}).map(([k, v]) => {
+                            if (v === 0) return null;
+                            const isP1P1 = k === '+1/+1' || k === '-1/-1';
+
+                            // Color mapping for tags
+                            const colorNames = ['blue', 'red', 'green', 'yellow', 'purple', 'pink', 'gray'];
+                            const tagColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#a855f7', '#ec4899', '#64748b'];
+                            const colorIndex = colorNames.indexOf(k.toLowerCase());
+
+                            const bgColor = colorIndex !== -1 ? tagColors[colorIndex] : (isP1P1 ? (v > 0 ? '#ffffff' : '#dc2626') : '#000000');
+                            const textColor = (bgColor === '#ffffff' || bgColor === '#eab308') ? '#000000' : '#ffffff';
+
+                            return (
+                                <div
+                                    key={k}
+                                    className={`font-bold rounded-full w-8 h-8 flex items-center justify-center border-2 shadow-lg`}
+                                    style={{
+                                        backgroundColor: bgColor,
+                                        color: textColor,
+                                        borderColor: isP1P1 ? (v > 0 ? '#3b82f6' : '#991b1b') : 'rgba(255,255,255,0.3)'
+                                    }}
+                                >
+                                    {v}
+                                </div>
+                            );
+                        })}
+                    </div>
 
                     {/* Hover Actions */}
                     <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-1 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>

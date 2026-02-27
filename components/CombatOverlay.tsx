@@ -29,6 +29,8 @@ interface CombatOverlayProps {
 
 const TRAY_CARD_W = 70;
 const TRAY_CARD_H = 98;
+const COUNTER_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#eab308', '#a855f7', '#ec4899', '#64748b'];
+const COLOR_NAMES = ['Blue', 'Red', 'Green', 'Yellow', 'Purple', 'Pink', 'Gray'];
 
 export const CombatOverlay: React.FC<CombatOverlayProps> = ({
     combatState,
@@ -158,25 +160,37 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     >
                                         <img
                                             src={obj.cardData.imageUrl}
-                                            className="w-full h-full object-cover rounded-lg shadow-lg border-2 border-red-500/50"
+                                            className="w-full h-full object-cover rounded-lg shadow-lg border border-gray-700"
                                             alt="Attacker"
                                         />
 
                                         <div className="absolute top-1 right-1 flex flex-col gap-0.5 pointer-events-none z-10">
-                                            {/* Object Counters */}
-                                            {Object.entries(obj.counters || {}).map(([k, v]) => (
-                                                v !== 0 && (
-                                                    <div key={`c-${k}`} className="bg-black/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-gray-500 shadow-sm leading-tight text-center font-bold">
-                                                        {k === '+1/+1' ? `+${v}/+${v}` : `${v} ${k}`}
+                                            {/* Object Counters (e.g., +1/+1) */}
+                                            {Object.entries(obj.counters || {}).map(([k, v]) => {
+                                                if (v === 0) return null;
+                                                const colorIdx = COLOR_NAMES.findIndex(name => name.toLowerCase() === k.toLowerCase());
+                                                const bgColor = colorIdx !== -1 ? COUNTER_COLORS[colorIdx] : 'rgba(0,0,0,0.9)';
+
+                                                return (
+                                                    <div
+                                                        key={`c-${k}`}
+                                                        className="text-white text-[8px] px-1.5 py-0.5 rounded-full border border-white/20 shadow-sm leading-tight text-center font-bold"
+                                                        style={{ backgroundColor: bgColor }}
+                                                    >
+                                                        {(k === '+1/+1' || k === '-1/-1') ? (v > 0 ? `+${v}/+${v}` : `${v}/${v}`) : v}
                                                     </div>
-                                                )
-                                            ))}
-                                            {/* Floating Counters */}
-                                            {boardObjects.filter(o => o.type === 'COUNTER' && Math.abs(o.x - obj.x) < CARD_WIDTH / 2 && Math.abs(o.y - obj.y) < CARD_HEIGHT / 2).map(fc => (
-                                                <div key={`fc-${fc.id}`} className="bg-blue-900/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-blue-400 shadow-sm leading-tight text-center font-bold">
-                                                    {fc.cardData.name}
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
+                                            {/* Floating Counters (Color tags) */}
+                                            {boardObjects.filter(o => o.type === 'COUNTER' && Math.abs(o.x - obj.x) < CARD_WIDTH / 2 && Math.abs(o.y - obj.y) < CARD_HEIGHT / 2).map(fc => {
+                                                const colorIndex = fc.counters?.colorIndex || 0;
+                                                return (
+                                                    <div key={`fc-${fc.id}`} className="text-white text-[9px] w-5 h-5 flex items-center justify-center rounded-full border shadow-sm leading-none font-black"
+                                                        style={{ backgroundColor: COUNTER_COLORS[colorIndex] || '#3b82f6', borderColor: 'rgba(255,255,255,0.4)' }}>
+                                                        {fc.quantity}
+                                                    </div>
+                                                );
+                                            })}
                                             {/* Attacker Stack Badge */}
                                             {obj.quantity > 1 && (
                                                 <div className="bg-red-900/90 text-white text-[8px] px-1.5 py-0.5 rounded border border-red-500 font-bold self-end text-center mt-0.5">
@@ -185,10 +199,10 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                             )}
                                         </div>
 
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 rounded-lg">
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 rounded-lg pointer-events-none">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); if (onInspectCard) onInspectCard(obj.cardData); }}
-                                                className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-sm"
+                                                className="p-1.5 bg-white/20 hover:bg-white/40 rounded-full text-white backdrop-blur-sm pointer-events-auto"
                                                 title="Inspect"
                                             >
                                                 <Eye size={14} />
@@ -220,13 +234,24 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                                             className="w-full h-full object-cover rounded border border-blue-400 shadow-md"
                                                         />
                                                         <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 pointer-events-none z-10 scale-75 origin-top-right">
+                                                            {/* Object Counters */}
                                                             {Object.entries(bObj.counters || {}).map(([k, v]) => (
                                                                 v !== 0 && (
                                                                     <div key={`bc-${k}`} className="bg-black/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-gray-500 font-bold leading-none">
-                                                                        {k === '+1/+1' ? `+${v}/+${v}` : `${v} ${k}`}
+                                                                        {(k === '+1/+1' || k === '-1/-1') ? (v > 0 ? `+${v}/+${v}` : `${v}/${v}`) : `${v} ${k}`}
                                                                     </div>
                                                                 )
                                                             ))}
+                                                            {/* Floating Counters */}
+                                                            {boardObjects.filter(o => o.type === 'COUNTER' && Math.abs(o.x - bObj.x) < CARD_WIDTH / 2 && Math.abs(o.y - bObj.y) < CARD_HEIGHT / 2).map(fc => {
+                                                                const colorIndex = fc.counters?.colorIndex || 0;
+                                                                return (
+                                                                    <div key={`bfc-${fc.id}`} className="text-white text-[9px] w-5 h-5 flex items-center justify-center rounded-full border shadow-sm leading-none font-black"
+                                                                        style={{ backgroundColor: COUNTER_COLORS[colorIndex] || '#3b82f6', borderColor: 'rgba(255,255,255,0.4)' }}>
+                                                                        {fc.quantity}
+                                                                    </div>
+                                                                );
+                                                            })}
                                                             {/* Blocker Stack Badge */}
                                                             {bObj.quantity > 1 && (
                                                                 <div className="bg-blue-900/90 text-white text-[8px] px-1.5 py-0.5 rounded border border-blue-500 font-bold self-end text-center mt-0.5">
@@ -261,6 +286,8 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                         const isSelected = combatState.selectedCardIds.includes(obj.id);
                         const isAssigned = combatState.assignments.some(a => a.attackerId === obj.id);
                         if (!isSelected && !isAssigned) return null;
+                        const isStack = (obj.quantity || 1) > 1;
+                        const untappedCount = (obj.quantity || 1) - (obj.tappedQuantity || 0);
                         return (
                             <div
                                 key={`select-glow-${obj.id}`}
@@ -277,7 +304,8 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     boxShadow: isSelected
                                         ? '0 0 20px rgba(245,158,11,0.8), inset 0 0 10px rgba(245,158,11,0.4)'
                                         : '0 0 15px rgba(239,68,68,0.6)',
-                                    zIndex: (obj.z || 0) - 1,
+                                    zIndex: (obj.z || 0) + 1,
+                                    backgroundColor: 'rgba(255, 255, 255, 0.01)'
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -287,7 +315,13 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                         onToggleAttackerSelection(obj.id);
                                     }
                                 }}
-                            />
+                            >
+                                {isStack && (
+                                    <div className={`absolute -top-2 -right-1 font-mono rounded-lg px-2 h-6 border-2 border-gray-900 shadow-xl z-20 flex items-center justify-center text-xs font-bold pointer-events-none whitespace-nowrap ${untappedCount === 0 ? 'bg-gray-600 text-gray-400' : 'bg-blue-600 text-white'}`}>
+                                        {untappedCount} / {obj.quantity}
+                                    </div>
+                                )}
+                            </div>
                         );
                     })
             )}
@@ -365,6 +399,9 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                     .map(obj => {
                         const isBlocker = combatState.assignments.some(a => a.blockerIds.includes(obj.id));
                         const isSelected = selectedBlockerId === obj.id;
+                        const isStack = (obj.quantity || 1) > 1;
+                        const untappedCount = (obj.quantity || 1) - (obj.tappedQuantity || 0);
+
                         return (
                             <div
                                 key={`block-glow-${obj.id}`}
@@ -375,21 +412,25 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     width: CARD_WIDTH + 8,
                                     height: CARD_HEIGHT + 8,
                                     border: isSelected ? '3px solid #3b82f6' : isBlocker ? '3px solid #22c55e' : '2px dashed #3b82f680',
-                                    borderRadius: 8,
+                                    borderRadius: '12px',
                                     transform: `rotate(${obj.rotation || 0}deg)`,
                                     transformOrigin: '50% 50%',
-                                    boxShadow: isSelected
-                                        ? '0 0 15px rgba(59,130,246,0.6)'
-                                        : isBlocker
-                                            ? '0 0 15px rgba(34,197,94,0.6)'
-                                            : 'none',
-                                    zIndex: (obj.z || 0) - 1,
+                                    boxShadow: (isSelected || isBlocker) ? `0 0 20px ${isSelected ? '#3b82f640' : '#22c55e40'}` : 'none',
+                                    zIndex: (obj.z || 0) + 1,
+                                    pointerEvents: 'auto',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.01)' // Make it clickable over the whole card
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     handleBlockerClick(obj.id);
                                 }}
-                            />
+                            >
+                                {isStack && (
+                                    <div className={`absolute -top-2 -right-1 font-mono rounded-lg px-2 h-6 border-2 border-gray-900 shadow-xl z-20 flex items-center justify-center text-xs font-bold pointer-events-none whitespace-nowrap ${untappedCount === 0 ? 'bg-gray-600 text-gray-400' : 'bg-blue-600 text-white'}`}>
+                                        {untappedCount} / {obj.quantity}
+                                    </div>
+                                )}
+                            </div>
                         );
                     })
             )}

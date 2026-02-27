@@ -39,6 +39,10 @@ interface Player {
     name: string;
     room: string;
     color: string;
+    customMatUrl?: string;
+    customSleeveUrl?: string;
+    customMatTransform?: any;
+    customSleeveTransform?: any;
     disconnected: boolean;
     disconnectedAt?: number;
 }
@@ -47,7 +51,7 @@ interface Player {
 const rooms: Record<string, Player[]> = {};
 const roomMeta: Record<string, { started: boolean, hostId?: string, gameType?: 'standard' | 'local_table' }> = {};
 const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
-const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
+const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string, customMatUrl?: string, customSleeveUrl?: string, customMatTransform?: any, customSleeveTransform?: any }> = {};
 
 // --- Security Helpers ---
 const MAX_STATE_SIZE = 1 * 1024 * 1024; // 1MB max for state backups
@@ -89,7 +93,7 @@ const getSafeColor = (roomPlayers: Player[], requestedColor: string) => {
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('join_room', ({ room, name, color, userId, isTable }) => {
+    socket.on('join_room', ({ room, name, color, userId, isTable, customMatUrl, customSleeveUrl, customMatTransform, customSleeveTransform }) => {
         if (!room) return;
         const rawRoom = room;
         room = room.trim().toUpperCase();
@@ -106,6 +110,10 @@ io.on('connection', (socket) => {
             if (existingPlayer) {
                 existingPlayer.disconnected = false;
                 existingPlayer.id = socket.id; // Update socket id
+                if (customMatUrl !== undefined) existingPlayer.customMatUrl = customMatUrl;
+                if (customSleeveUrl !== undefined) existingPlayer.customSleeveUrl = customSleeveUrl;
+                if (customMatTransform !== undefined) existingPlayer.customMatTransform = customMatTransform;
+                if (customSleeveTransform !== undefined) existingPlayer.customSleeveTransform = customSleeveTransform;
                 socket.join(room);
 
                 // If the reconnected player was the host, re-assign host role
@@ -150,11 +158,13 @@ io.on('connection', (socket) => {
             const hostId = roomMeta[room].hostId;
             const host = rooms[room].find(p => p.id === hostId);
             if (host && !host.disconnected) {
-                pendingJoins[socket.id] = { room, name, color, userId };
+                pendingJoins[socket.id] = { room, name, color, userId, customMatUrl, customSleeveUrl, customMatTransform, customSleeveTransform };
                 io.to(host.id).emit('host_approval_request', {
                     applicantId: socket.id,
                     name,
-                    color
+                    color,
+                    customMatUrl,
+                    customSleeveUrl
                 });
                 socket.emit('join_pending', { message: 'Game in progress. Waiting for host approval...' });
                 return;
@@ -172,6 +182,10 @@ io.on('connection', (socket) => {
             name,
             room,
             color: assignedColor,
+            customMatUrl,
+            customSleeveUrl,
+            customMatTransform,
+            customSleeveTransform,
             disconnected: false
         };
 
@@ -222,6 +236,10 @@ io.on('connection', (socket) => {
                 name: pending.name,
                 room,
                 color: assignedColor,
+                customMatUrl: pending.customMatUrl,
+                customSleeveUrl: pending.customSleeveUrl,
+                customMatTransform: pending.customMatTransform,
+                customSleeveTransform: pending.customSleeveTransform,
                 disconnected: false
             };
             rooms[room].push(newPlayer);
