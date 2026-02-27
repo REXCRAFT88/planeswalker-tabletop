@@ -104,16 +104,17 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
         const trayWidth = Math.max(assignments.length * (TRAY_CARD_W + 12) + 40, 240);
 
         // Position relative to mat
+        const yOffset = (combatState.phase !== 'SELECTING_ATTACKERS') ? 80 : 0;
         let trayX = pos.x + matW / 2;
-        let trayY = pos.y - trayHeight / 2 - 20;
+        let trayY = pos.y - trayHeight / 2 - 20 - yOffset;
 
         if (rot === 180) {
-            trayY = pos.y + matH + trayHeight / 2 + 20;
+            trayY = pos.y + matH + trayHeight / 2 + 20 + yOffset;
         } else if (rot === 90) {
-            trayX = pos.x + matW + trayWidth / 2 + 20;
+            trayX = pos.x + matW + trayWidth / 2 + 20 + yOffset;
             trayY = pos.y + matH / 2;
         } else if (rot === -90) {
-            trayX = pos.x - trayWidth / 2 - 20;
+            trayX = pos.x - trayWidth / 2 - 20 - yOffset;
             trayY = pos.y + matH / 2;
         }
 
@@ -147,7 +148,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                             return (
                                 <div key={a.attackerId} className="flex flex-col items-center gap-2">
                                     <div
-                                        className={`relative group transition-all duration-300 hover:-translate-y-1 ${((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) ? 'ring-4 ring-blue-500 ring-offset-2 ring-offset-gray-900 rounded-lg scale-110' : ''}`}
+                                        className={`relative group transition-all duration-300 hover:-translate-y-1`}
                                         style={{ width: TRAY_CARD_W, height: TRAY_CARD_H }}
                                         onClick={() => {
                                             if ((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) {
@@ -160,6 +161,29 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                             className="w-full h-full object-cover rounded-lg shadow-lg border-2 border-red-500/50"
                                             alt="Attacker"
                                         />
+
+                                        <div className="absolute top-1 right-1 flex flex-col gap-0.5 pointer-events-none z-10">
+                                            {/* Object Counters */}
+                                            {Object.entries(obj.counters || {}).map(([k, v]) => (
+                                                v !== 0 && (
+                                                    <div key={`c-${k}`} className="bg-black/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-gray-500 shadow-sm leading-tight text-center font-bold">
+                                                        {k === '+1/+1' ? `+${v}/+${v}` : `${v} ${k}`}
+                                                    </div>
+                                                )
+                                            ))}
+                                            {/* Floating Counters */}
+                                            {boardObjects.filter(o => o.type === 'COUNTER' && Math.abs(o.x - obj.x) < CARD_WIDTH / 2 && Math.abs(o.y - obj.y) < CARD_HEIGHT / 2).map(fc => (
+                                                <div key={`fc-${fc.id}`} className="bg-blue-900/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-blue-400 shadow-sm leading-tight text-center font-bold">
+                                                    {fc.cardData.name}
+                                                </div>
+                                            ))}
+                                            {/* Attacker Stack Badge */}
+                                            {obj.quantity > 1 && (
+                                                <div className="bg-red-900/90 text-white text-[8px] px-1.5 py-0.5 rounded border border-red-500 font-bold self-end text-center mt-0.5">
+                                                    x{obj.quantity}
+                                                </div>
+                                            )}
+                                        </div>
 
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 rounded-lg">
                                             <button
@@ -195,6 +219,21 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                                             src={bObj.cardData.imageUrl}
                                                             className="w-full h-full object-cover rounded border border-blue-400 shadow-md"
                                                         />
+                                                        <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 pointer-events-none z-10 scale-75 origin-top-right">
+                                                            {Object.entries(bObj.counters || {}).map(([k, v]) => (
+                                                                v !== 0 && (
+                                                                    <div key={`bc-${k}`} className="bg-black/90 text-white text-[8px] px-1.5 py-0.5 rounded-full border border-gray-500 font-bold leading-none">
+                                                                        {k === '+1/+1' ? `+${v}/+${v}` : `${v} ${k}`}
+                                                                    </div>
+                                                                )
+                                                            ))}
+                                                            {/* Blocker Stack Badge */}
+                                                            {bObj.quantity > 1 && (
+                                                                <div className="bg-blue-900/90 text-white text-[8px] px-1.5 py-0.5 rounded border border-blue-500 font-bold self-end text-center mt-0.5">
+                                                                    x{bObj.quantity}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/blocker:opacity-100 transition-opacity flex items-center justify-center rounded">
                                                             <Eye size={10} className="text-white" />
                                                         </div>
@@ -233,10 +272,12 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     height: CARD_HEIGHT + 8,
                                     border: isSelected ? '4px solid #f59e0b' : '3px solid #ef4444',
                                     borderRadius: 6,
+                                    transform: `rotate(${obj.rotation || 0}deg)`,
+                                    transformOrigin: '50% 50%',
                                     boxShadow: isSelected
                                         ? '0 0 20px rgba(245,158,11,0.8), inset 0 0 10px rgba(245,158,11,0.4)'
                                         : '0 0 15px rgba(239,68,68,0.6)',
-                                    zIndex: 9999,
+                                    zIndex: (obj.z || 0) - 1,
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -335,12 +376,14 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     height: CARD_HEIGHT + 8,
                                     border: isSelected ? '3px solid #3b82f6' : isBlocker ? '3px solid #22c55e' : '2px dashed #3b82f680',
                                     borderRadius: 8,
+                                    transform: `rotate(${obj.rotation || 0}deg)`,
+                                    transformOrigin: '50% 50%',
                                     boxShadow: isSelected
                                         ? '0 0 15px rgba(59,130,246,0.6)'
                                         : isBlocker
                                             ? '0 0 15px rgba(34,197,94,0.6)'
                                             : 'none',
-                                    zIndex: 9999,
+                                    zIndex: (obj.z || 0) - 1,
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -351,13 +394,6 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                     })
             )}
 
-            {/* Blocker selection hint */}
-            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && selectedBlockerId && (
-                <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[10000] bg-blue-600/90 backdrop-blur-sm text-white px-4 py-2 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 animate-pulse">
-                    <Shield size={16} />
-                    Click an attacker in the tray to assign this blocker
-                </div>
-            )}
         </>
     );
 };

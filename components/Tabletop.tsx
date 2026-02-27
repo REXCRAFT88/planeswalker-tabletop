@@ -474,12 +474,11 @@ const Playmat: React.FC<PlaymatProps> = ({
                 left: x, top: y, width, height,
                 borderColor: sleeveColor,
                 boxShadow: `0 0 15px ${sleeveColor}20`,
-                transform: `rotate(${rotation}deg)`,
-                overflow: 'hidden',
+                transform: `rotate(${rotation}deg)`
             }}
         >
             {customMatUrl && (
-                <div className="absolute inset-0 pointer-events-none" style={{ overflow: 'hidden' }}>
+                <div className="absolute inset-0 pointer-events-none rounded-3xl" style={{ overflow: 'hidden' }}>
                     <img
                         src={customMatUrl}
                         alt=""
@@ -967,6 +966,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
+    const [areRemovedExpanded, setAreRemovedExpanded] = useState(false);
     const [incomingStealRequest, setIncomingStealRequest] = useState<{ id: string, requesterId: string, name: string, cardName: string } | null>(null);
 
     // UI State
@@ -3126,10 +3126,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     };
 
     const advancePhase = () => {
-        // If combat is active and we're resolving, pressing enter/advance moves to MAIN2
+        // If combat is active and we're resolving, pressing shift/advance moves to MAIN2
         if (combatState?.isActive) {
             if (combatState.phase === 'SELECTING_ATTACKERS') {
-                cancelCombat();
+                if (combatState.assignments.length > 0) {
+                    declareAttackers();
+                } else {
+                    cancelCombat();
+                }
                 return;
             }
             if (combatState.phase === 'ATTACKERS_DECLARED' || combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') {
@@ -3149,6 +3153,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         if (idx < TURN_PHASES.length - 1) {
             const next = TURN_PHASES[idx + 1];
             setTurnSubPhase(next);
+            emitAction('UPDATE_STATE', { turnSubPhase: next });
             if (soundEnabled) SFX.soundPhaseAdvance();
 
             // Auto-actions for phases
@@ -3255,16 +3260,52 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         const assignment = combatState.assignments[assignmentIdx];
         if (blockerObj.controllerId !== assignment.defenderId) return;
 
+        const hasBlocker = assignment.blockerIds.includes(blockerId);
+
+        let finalBlockerId = blockerId;
+
+        if (!hasBlocker && blockerObj.quantity > 1) {
+            const blockQtyStr = window.prompt(`How many of these ${blockerObj.cardData.name}s should block this attacker? \n(Max: ${blockerObj.quantity})`, '1');
+            if (blockQtyStr === null) return; // cancelled
+            const blockQty = parseInt(blockQtyStr, 10) || 1;
+            const validQty = Math.max(1, Math.min(blockQty, blockerObj.quantity));
+
+            if (validQty < blockerObj.quantity) {
+                // Split the stack!
+                const newTapped = Math.min(blockerObj.tappedQuantity, validQty);
+                finalBlockerId = crypto.randomUUID();
+                const leftoverQuantity = blockerObj.quantity - validQty;
+                const leftoverTapped = Math.max(0, blockerObj.tappedQuantity - newTapped);
+
+                // Update original (leftover)
+                updateBoardObject(blockerId, { quantity: leftoverQuantity, tappedQuantity: leftoverTapped });
+
+                // Create new object for assignment
+                const newBlockerObj: BoardObject = {
+                    ...blockerObj,
+                    id: finalBlockerId,
+                    quantity: validQty,
+                    tappedQuantity: newTapped,
+                    x: blockerObj.x + 20,
+                    y: blockerObj.y + 20,
+                    z: maxZ + 1
+                };
+                setMaxZ(prev => prev + 1);
+                setBoardObjects(prev => [...prev, newBlockerObj]);
+                emitAction('ADD_OBJECT', newBlockerObj);
+                addLog(`split ${validQty} ${blockerObj.cardData.name}s from stack to block`);
+            }
+        }
+
         const updated: CombatState = {
             ...combatState,
             assignments: combatState.assignments.map((a, i) => {
                 if (i === assignmentIdx) {
-                    const hasBlocker = a.blockerIds.includes(blockerId);
                     return {
                         ...a,
                         blockerIds: hasBlocker
                             ? a.blockerIds.filter(id => id !== blockerId)
-                            : [...a.blockerIds, blockerId],
+                            : [...a.blockerIds, finalBlockerId],
                     };
                 }
                 return a;
@@ -3584,7 +3625,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         const defaultX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
         const defaultY = myPos.y + MAT_H / 2 - CARD_HEIGHT / 2;
         const newObject: BoardObject = {
-            id: crypto.randomUUID(), type: 'CARD', cardData: card,
+            id: crypto.randomUUID(), type: 'CARD', cardData: { ...card, isRemoved: false },
             x: spawnX ?? (defaultX + (Math.random() * 40 - 20)),
             y: spawnY ?? (defaultY + (Math.random() * 40 - 20)),
             z: maxZ + 1, rotation: myPos.rot, isFaceDown: false, isTransformed: false,
@@ -3595,7 +3636,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
-        if (!card.isToken) setHand(prev => prev.filter(c => c.id !== card.id));
+        if (!card.isToken || card.isRemoved) setHand(prev => prev.filter(c => c.id !== card.id));
         if (soundEnabled) SFX.soundCardPlay();
 
         // Track last played card for auto-tap
@@ -4024,6 +4065,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 target.type === 'CARD' &&
                 target.controllerId === obj.controllerId &&
                 target.cardData.name === obj.cardData.name &&
+                !!target.isCopy === !!obj.isCopy &&
+                !!target.cardData.isToken === !!obj.cardData.isToken &&
                 x < target.x + CARD_WIDTH && x + CARD_WIDTH > target.x &&
                 y < target.y + CARD_HEIGHT && y + CARD_HEIGHT > target.y
             );
@@ -4087,7 +4130,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 break;
             case 'r': rollDice(6); break;
             case 'f': spawnCounter(); break;
-            case 'enter': nextTurn(); break;
+            case 'shift':
+                if (!e.repeat) advancePhase();
+                break;
+            case 'delete':
+            case 'backspace':
+                if (hoveredCardId) {
+                    const obj = boardObjects.find(o => o.id === hoveredCardId);
+                    if (obj && obj.type === 'CARD') {
+                        setHand(prev => [...prev, { ...obj.cardData, isRemoved: true }]);
+                        setBoardObjects(prev => prev.filter(o => o.id !== hoveredCardId));
+                        emitAction('REMOVE_OBJECT', { id: hoveredCardId });
+                        addLog(`removed ${obj.cardData.name} from the game completely`);
+                    }
+                }
+                break;
             case 'arrowup': handleLifeChange(1); break;
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
@@ -4466,7 +4523,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 style={{
                     backgroundImage: `url("/table_texture.png")`,
                     backgroundRepeat: 'repeat',
-                    backgroundSize: `${768 * viewState.scale}px`,
+                    backgroundSize: `${1500 * viewState.scale}px`,
                     backgroundPosition: `${viewState.x}px ${viewState.y}px`
                 }}
             />
@@ -4596,7 +4653,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
                     const controller = playersList.find(p => p.id === obj.controllerId);
                     const objSleeveColor = controller ? controller.color : sleeveColor;
-                    const objCustomSleeveUrl = (isControlled || isLocal) ? customSleeveUrl : undefined;
+
+                    const isMyCard = obj.controllerId === socket.id || (isLocal && controllerIdx === 0);
+                    const objCustomSleeveUrl = isMyCard ? customSleeveUrl : (controller ? controller.customSleeveUrl : undefined);
                     const isSelected = mobileActionCardId === obj.id;
 
                     return (
@@ -4672,8 +4731,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         </div>
     );
 
-    const cardsInHand = hand.filter(c => !c.isToken);
-    const tokensInHand = hand.filter(c => c.isToken);
+    const cardsInHand = hand.filter(c => !c.isToken && !c.isRemoved);
+    const tokensInHand = hand.filter(c => c.isToken && !c.isRemoved);
+    const removedInHand = hand.filter(c => c.isRemoved);
     const cardsInHandWithShortcuts = cardsInHand.map((c, i) => ({ ...c, shortcutKey: i < 9 ? `${i + 1}` : i === 9 ? '0' : undefined }));
 
 
@@ -5235,9 +5295,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     <div className="grid grid-cols-2 gap-4 mb-8">
                         <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700 col-span-2">
                             <span className="text-gray-400 font-bold">Life</span>
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 relative">
                                 <button onClick={() => handleLifeChange(-1)} className="w-10 h-10 bg-red-900/50 text-red-400 rounded-full flex items-center justify-center font-bold text-xl border border-red-800">-</button>
-                                <span className="text-2xl font-bold text-white w-8 text-center">{life}</span>
+                                <span className="text-2xl font-bold text-white w-8 text-center relative">{life}
+                                    {pendingLifeChange !== 0 && (
+                                        <div className={`absolute -top-6 left-1/2 -translate-x-1/2 font-bold text-sm ${pendingLifeChange > 0 ? 'text-green-400' : 'text-red-400'} animate-bounce pointer-events-none drop-shadow-md`}>
+                                            {pendingLifeChange > 0 ? '+' : ''}{pendingLifeChange}
+                                        </div>
+                                    )}
+                                </span>
                                 <button onClick={() => handleLifeChange(1)} className="w-10 h-10 bg-green-900/50 text-green-400 rounded-full flex items-center justify-center font-bold text-xl border border-green-800">+</button>
                             </div>
                         </div>
@@ -5418,6 +5484,49 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                 </div>
                                             )}
                                         </div>
+
+                                        {/* Removed Cards Pile */}
+                                        {removedInHand.length > 0 && (
+                                            <div className={`flex items-center justify-center h-full ${isMobile && isLandscape ? 'flex-row pl-1' : 'flex-col pb-1 ml-2'}`}>
+                                                {!areRemovedExpanded ? (
+                                                    <div
+                                                        className={`relative flex-shrink-0 bg-gray-800 border-2 border-red-500 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer hover:scale-105 transition-transform shadow-lg`}
+                                                        style={{ width: 140 * handScale, height: 196 * handScale }}
+                                                        onClick={() => setAreRemovedExpanded(true)}
+                                                        title="Expand Removed Cards"
+                                                    >
+                                                        <Trash2 className="text-red-500 mb-2" size={24} />
+                                                        <span className="font-bold text-xs text-white">Removed ({removedInHand.length})</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className={`flex gap-2 animate-in items-end ${isMobile && isLandscape ? 'flex-col slide-in-from-right-10' : 'slide-in-from-bottom-10'}`}>
+                                                        {removedInHand.map((card) => (
+                                                            <HandCard
+                                                                key={card.id + "-removed"}
+                                                                card={card}
+                                                                scale={handScale}
+                                                                onInspect={setInspectCard}
+                                                                onPlay={playCardFromHand}
+                                                                onSendToZone={sendToZone}
+                                                                isMobile={isMobile}
+                                                                onMobileAction={() => setMobileActionCardId(card.id)}
+                                                                onDoubleClick={() => setInspectCard(card)}
+                                                                onReveal={revealHandCard}
+                                                            />
+                                                        ))}
+                                                        <div className={`flex gap-2 ${isMobile && isLandscape ? 'flex-row pl-10' : 'flex-col pb-10'}`}>
+                                                            <button
+                                                                onClick={() => setAreRemovedExpanded(false)}
+                                                                className="w-8 h-8 bg-red-900/50 hover:bg-red-800 text-red-200 rounded-full flex items-center justify-center shadow-lg border border-red-900"
+                                                                title="Collapse"
+                                                            >
+                                                                <X size={16} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                                 {hand.length === 0 && <div className="absolute bottom-10 text-gray-500 italic z-10">Hand is empty</div>}
@@ -5721,7 +5830,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
             {showShortcuts && (
                 <div className="fixed inset-0 z-[11000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowShortcuts(false)}>
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-2xl w-full animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                 <Keyboard className="text-blue-400" /> Keyboard Shortcuts
@@ -5732,12 +5841,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Draw Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">D</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Untap All</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">U</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Shuffle Library</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">S</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Help / Shortcuts</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">?</kbd></div>
+                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Undo Last Action</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space (Hold) + Drag</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Zoom Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Mouse Wheel</kbd></div>
 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Play Commander</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">C</kbd></div>
+                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Remove Card to Exile</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Delete / Bksp</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Library</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">X</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Graveyard</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">G</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Exile</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">E</kbd></div>
@@ -5745,8 +5854,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Tokens View</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L-Alt</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Roll Die</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">R</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Create Counter</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">F</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Pass Turn</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Enter</kbd></div>
+                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Pass Phase / Accept</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Shift</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Life +/-</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">↑ / ↓</kbd></div>
+                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Board</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Right-Click + Drag</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Alt Pan</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space + Drag</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Stats</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Q</kbd></div>
@@ -5754,10 +5864,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Opponent View</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">V</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Switch Opponent</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">← / →</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Play Hand Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">1 - 0</kbd></div>
-                            <div className="col-span-2 pt-2 border-t border-gray-700 mt-1 text-xs text-gray-500 font-bold uppercase">Mana & Undo</div>
-                            <div className="flex justify-between items-center p-2 bg-blue-900/30 rounded border border-blue-800/30"><span className="text-gray-300">Mana Panel</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">M</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-yellow-900/30 rounded border border-yellow-800/30"><span className="text-gray-300">Auto-Tap</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Tab</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-amber-900/30 rounded border border-amber-800/30 col-span-2"><span className="text-gray-300">Undo Last Action</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
                         </div>
                     </div>
                 </div>

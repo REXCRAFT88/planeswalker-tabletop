@@ -746,11 +746,11 @@ export const Lobby: React.FC<LobbyProps> = ({
                                     <h4 className="text-lg font-bold text-white">Card Sleeves</h4>
                                     <div className="text-[10px] text-gray-500">2.5 x 3.5 Ratio</div>
                                 </div>
-                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group flex items-center justify-center p-8 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
-                                    style={{ aspectRatio: '1/1', minHeight: '400px' }}
+                                <div className="relative bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700 group flex items-center justify-center py-4 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+                                    style={{ aspectRatio: '21/10' }}
                                     onContextMenu={(e) => e.preventDefault()}
                                 >
-                                    <div className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10 flex-shrink-0" style={{ width: '250px', height: '350px', maxWidth: '100%' }}>
+                                    <div className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10 flex-shrink-0 h-full max-h-[100%]" style={{ aspectRatio: '2.5/3.5' }}>
                                         {sleevePreviewUrl ? (
                                             <div
                                                 className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
@@ -823,36 +823,38 @@ export const Lobby: React.FC<LobbyProps> = ({
                                             </button>
                                         </div>
                                     </div>
-                                    <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            placeholder="Or paste image URL..."
-                                            value={sleevePreviewUrl || customSleeveUrl}
-                                            onChange={(e) => setSleevePreviewUrl(e.target.value)}
-                                            className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                                        />
-                                        <button
-                                            onClick={() => {
-                                                setCustomSleeveUrl(sleevePreviewUrl);
-                                                setCustomSleeveTransform(sleeveTransform);
-                                                setSleevePreviewUrl('');
-                                            }}
-                                            disabled={!sleevePreviewUrl}
-                                            className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <Check size={16} />
-                                        </button>
-                                    </div>
-                                    {customSleeveUrl && (
+                                </div>
+                                <p className="text-[10px] text-gray-500 mt-1 text-center">Right-click drag to reposition • Scroll to zoom</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Or paste image URL..."
+                                        value={sleevePreviewUrl || customSleeveUrl}
+                                        onChange={(e) => setSleevePreviewUrl(e.target.value)}
+                                        className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            setCustomSleeveUrl(sleevePreviewUrl);
+                                            setCustomSleeveTransform(sleeveTransform);
+                                            setSleevePreviewUrl('');
+                                        }}
+                                        disabled={!sleevePreviewUrl}
+                                        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <Check size={16} />
+                                    </button>
+                                </div>
+                                {customSleeveUrl && (
+                                    <div>
                                         <button
                                             onClick={() => setCustomSleeveUrl('')}
                                             className="w-full px-4 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-lg font-bold border border-red-800"
                                         >
                                             <Trash2 size={16} className="inline mr-2" /> Remove Custom Sleeve
                                         </button>
-                                    )}
-                                </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

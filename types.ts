@@ -22,6 +22,7 @@ export interface CardData {
   manaAbilityType?: 'tap' | 'activated' | 'multi' | 'complex'; // How this card produces mana
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
+  isRemoved?: boolean;
   shortcutKey?: string;
 }
 
