@@ -3129,6 +3129,27 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         emitAction('UPDATE_SETTINGS', { combatEnabled: val });
     };
 
+    // Manually jump to a specific phase
+    const jumpToPhase = (phase: TurnSubPhase) => {
+        const myId = isLocal ? playersList[mySeatIndex]?.id : socket.id;
+        if (!isLocal && currentTurnPlayerId !== myId) return;
+
+        // Cancel combat if we're leaving COMBAT phase
+        if (combatState?.isActive && turnSubPhase === 'COMBAT' && phase !== 'COMBAT') {
+            setCombatState(null);
+            emitAction('COMBAT_UPDATE', { combatState: null });
+        }
+
+        setTurnSubPhase(phase);
+        emitAction('UPDATE_STATE', { turnSubPhase: phase });
+        if (soundEnabled) SFX.soundPhaseAdvance();
+
+        // Auto-actions for phases
+        if (phase === 'UNTAP') {
+            untapAll();
+        }
+    };
+
     const advancePhase = () => {
         // If combat is active and we're resolving, pressing shift/advance moves to MAIN2
         // Only apply combat logic if we're actually in the COMBAT phase
@@ -3412,14 +3433,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
     const cancelCombat = () => {
         setCombatState(null);
-        // If cancelling during combat phase, go back to MAIN1, otherwise stay in current phase
-        const backToMain = turnSubPhase === 'COMBAT';
-        if (backToMain) {
-            setTurnSubPhase('MAIN1');
-            emitAction('UPDATE_STATE', { turnSubPhase: 'MAIN1' });
-        }
+        // When cancelling combat, skip directly to MAIN2 to prevent cycling between MAIN1 and COMBAT
+        // This is more intuitive - if you skip combat, you go to the post-combat phase
+        setTurnSubPhase('MAIN2');
+        emitAction('UPDATE_STATE', { turnSubPhase: 'MAIN2' });
         emitAction('COMBAT_UPDATE', { combatState: null });
-        addLog('combat cancelled', 'ACTION');
+        addLog('combat cancelled - entering Main Phase 2', 'ACTION');
     };
 
     const removeAttacker = (attackerId: string) => {
@@ -5268,30 +5287,124 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         <button onClick={() => handleLifeChange(1)} className="text-green-400 hover:text-green-300 font-bold text-lg px-2 active:scale-90 transition">+</button>
                     </div>
 
-                    <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-1 md:mx-2">
-                        <div className="flex items-center gap-1 md:gap-2 px-2 border-r border-gray-600">
-                            <Clock size={16} className="text-gray-400 hidden md:block" />
-                            <span className="text-xs md:text-sm font-bold text-white">{isMobile ? `#${turn}` : `Turn ${turn}`}</span>
-                        </div>
-                        <div className="px-1 flex items-center gap-1">
-                            <span className="text-xs md:text-sm text-blue-400 font-bold max-w-[60px] md:max-w-[100px] truncate">
-                                {playersList.find(p => p.id === currentTurnPlayerId)?.name || '...'}
-                            </span>
-                            {gamePhase === 'PLAYING' && (
-                                <span className="text-[10px] md:text-xs bg-gray-700 text-yellow-400 px-1.5 py-0.5 rounded font-mono">
-                                    {PHASE_LABELS[turnSubPhase]}
+                    {/* Phase Selector - displays all phases for easy navigation */}
+                    {gamePhase === 'PLAYING' && (
+                        <div className="hidden md:flex items-center gap-1 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-1 md:mx-2 relative z-[10010]">
+                            <div className="flex items-center gap-1 md:gap-2 px-2 border-r border-gray-600">
+                                <Clock size={16} className="text-gray-400" />
+                                <span className="text-xs md:text-sm font-bold text-white">Turn {turn}</span>
+                            </div>
+                            <div className="px-1 flex items-center gap-1">
+                                <span className="text-xs md:text-sm text-blue-400 font-bold max-w-[80px] truncate">
+                                    {playersList.find(p => p.id === currentTurnPlayerId)?.name || '...'}
                                 </span>
+                            </div>
+                            {TURN_PHASES.map((phase, idx) => {
+                                const isCurrent = phase === turnSubPhase;
+                                const canClick = isLocal || currentTurnPlayerId === socket.id;
+                                const isPast = TURN_PHASES.indexOf(turnSubPhase) > idx;
+                                return (
+                                    <button
+                                        key={phase}
+                                        onClick={() => canClick && jumpToPhase(phase)}
+                                        disabled={!canClick}
+                                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                                            isCurrent
+                                                ? 'bg-yellow-600 text-white scale-105 shadow-md'
+                                                : isPast
+                                                    ? 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                        } ${!canClick ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        title={PHASE_LABELS[phase]}
+                                    >
+                                        {PHASE_LABELS[phase]}
+                                    </button>
+                                );
+                            })}
+                            {/* Skip Combat button - only visible when in COMBAT phase */}
+                            {combatState?.isActive && turnSubPhase === 'COMBAT' && (isLocal || currentTurnPlayerId === socket.id) && (
+                                <button
+                                    onClick={() => cancelCombat()}
+                                    className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-red-400 transition-all"
+                                    title="Skip to Main Phase 2"
+                                >
+                                    Skip
+                                </button>
                             )}
                         </div>
-                        <button
-                            onClick={nextTurn}
-                            disabled={!isLocal && currentTurnPlayerId !== socket.id}
-                            className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed"
-                            title={turnSubPhase === 'END' ? 'Pass Turn' : `Next: ${PHASE_LABELS[TURN_PHASES[TURN_PHASES.indexOf(turnSubPhase) + 1] || 'END']}`}
-                        >
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
+                    )}
+
+                    {/* Mobile version - phase display with navigation and skip combat */}
+                    {gamePhase === 'PLAYING' && isMobile && (
+                        <div className="flex md:hidden items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-1 md:mx-2 relative z-[10010]">
+                            <div className="flex items-center gap-1 px-2 border-r border-gray-600">
+                                <Clock size={14} className="text-gray-400" />
+                                <span className="text-xs font-bold text-white">#{turn}</span>
+                            </div>
+                            <div className="px-1 flex items-center gap-1">
+                                <span className="text-xs text-blue-400 font-bold max-w-[50px] truncate">
+                                    {playersList.find(p => p.id === currentTurnPlayerId)?.name || '...'}
+                                </span>
+                                <span className="text-[9px] bg-gray-700 text-yellow-400 px-1 py-0.5 rounded font-mono">
+                                    {PHASE_LABELS[turnSubPhase]}
+                                </span>
+                            </div>
+                            {/* Previous phase button */}
+                            <button
+                                onClick={() => {
+                                    const idx = TURN_PHASES.indexOf(turnSubPhase);
+                                    if (idx > 0) jumpToPhase(TURN_PHASES[idx - 1]);
+                                }}
+                                disabled={!isLocal && currentTurnPlayerId !== socket.id}
+                                className="p-1 hover:bg-gray-700 rounded text-gray-400 disabled:text-gray-600 disabled:opacity-50"
+                                title="Previous Phase"
+                            >
+                                <ChevronLeft size={14} />
+                            </button>
+                            {/* Next phase button */}
+                            <button
+                                onClick={nextTurn}
+                                disabled={!isLocal && currentTurnPlayerId !== socket.id}
+                                className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600"
+                                title={turnSubPhase === 'END' ? 'Pass Turn' : `Next: ${PHASE_LABELS[TURN_PHASES[TURN_PHASES.indexOf(turnSubPhase) + 1] || 'END']}`}
+                            >
+                                <ChevronRight size={14} />
+                            </button>
+                            {/* Skip Combat button for mobile */}
+                            {combatState?.isActive && turnSubPhase === 'COMBAT' && (isLocal || currentTurnPlayerId === socket.id) && (
+                                <button
+                                    onClick={() => cancelCombat()}
+                                    className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-900/50 text-red-300 hover:bg-red-800 hover:text-red-200 transition-all"
+                                    title="Skip Combat"
+                                >
+                                    Skip
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Desktop version when not in PLAYING phase */}
+                    {gamePhase !== 'PLAYING' && !isMobile && (
+                        <div className="hidden md:flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-600 mx-1 md:mx-2">
+                            <div className="flex items-center gap-1 md:gap-2 px-2 border-r border-gray-600">
+                                <Clock size={16} className="text-gray-400" />
+                                <span className="text-xs md:text-sm font-bold text-white">{isMobile ? `#${turn}` : `Turn ${turn}`}</span>
+                            </div>
+                            <div className="px-1 flex items-center gap-1">
+                                <span className="text-xs md:text-sm text-blue-400 font-bold max-w-[60px] md:max-w-[100px] truncate">
+                                    {playersList.find(p => p.id === currentTurnPlayerId)?.name || '...'}
+                                </span>
+                            </div>
+                            <button
+                                onClick={nextTurn}
+                                disabled={!isLocal && currentTurnPlayerId !== socket.id}
+                                className="p-1 hover:bg-gray-700 rounded text-green-400 disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                                title={turnSubPhase === 'END' ? 'Pass Turn' : `Next: ${PHASE_LABELS[TURN_PHASES[TURN_PHASES.indexOf(turnSubPhase) + 1] || 'END']}`}
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+                        </div>
+                    )}
 
                     {/* Combat HUD removed per user request */}
                     {isLocal && isMobile && (
