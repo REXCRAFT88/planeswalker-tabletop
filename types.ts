@@ -143,8 +143,9 @@ export interface CombatAssignment {
 
 export interface CombatState {
   isActive: boolean;
-  phase: 'SELECTING_ATTACKERS' | 'ATTACKERS_DECLARED' | 'SELECTING_BLOCKERS' | 'BLOCKERS_DECLARED' | 'RESOLVING';
+  phase: 'ASSIGNING' | 'RESOLVING';
   attackerPlayerId: string; // The player who initiated combat (current turn player)
   assignments: CombatAssignment[];
-  selectedCardIds: string[];// Cards currently selected (pre-assignment)
+  selectedCardIds: string[];// Cards currently selected (for attacker)
+  selectedBlockerId: string | null; // Card currently selected for blocking
 }

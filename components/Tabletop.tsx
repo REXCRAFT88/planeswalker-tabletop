@@ -913,7 +913,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         UNTAP: 'Untap', UPKEEP: 'Upkeep', DRAW: 'Draw',
         MAIN1: 'Main 1', COMBAT: 'Combat', MAIN2: 'Main 2', END: 'End',
     };
-    const [turnSubPhase, setTurnSubPhase] = useState<TurnSubPhase>('MAIN1');
+    const [turnSubPhase, setTurnSubPhase] = useState<TurnSubPhase>('UNTAP');
     const [soundEnabled, setSoundEnabled] = useState(true);
     const [roomLocked, setRoomLocked] = useState(false);
     const [kickVotes, setKickVotes] = useState<Record<string, string[]>>({}); // targetId -> array of voterIds
@@ -922,6 +922,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     // Combat system state
     const [combatEnabled, setCombatEnabled] = useState(true);
     const [combatState, setCombatState] = useState<CombatState | null>(null);
+    // Track if combat was just cancelled to prevent auto-re-entering
+    const skipAutoCombatRef = useRef(false);
 
     const [playersList, setPlayersList] = useState<Player[]>([
         {
@@ -3151,22 +3153,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     };
 
     const advancePhase = () => {
-        // If combat is active and we're resolving, pressing shift/advance moves to MAIN2
-        // Only apply combat logic if we're actually in the COMBAT phase
+        // Simplified combat flow: ASSIGNING phase allows simultaneous attacker/blocker assignment
         if (combatState?.isActive && turnSubPhase === 'COMBAT') {
-            if (combatState.phase === 'SELECTING_ATTACKERS') {
-                if (combatState.assignments.length > 0) {
-                    declareAttackers();
-                } else {
-                    cancelCombat();
-                }
-                return;
-            }
-            if (combatState.phase === 'ATTACKERS_DECLARED' || combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'BLOCKERS_DECLARED') {
-                // Move to resolving
+            if (combatState.phase === 'ASSIGNING') {
+                // Move to resolving combat
                 const resolved: CombatState = { ...combatState, phase: 'RESOLVING' };
                 setCombatState(resolved);
                 emitAction('COMBAT_UPDATE', { combatState: resolved });
+                addLog('resolving combat', 'ACTION');
                 return;
             }
             if (combatState.phase === 'RESOLVING') {
@@ -3186,13 +3180,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             if (next === 'UNTAP') {
                 untapAll();
             }
-            // Auto-enter combat mode
-            if (next === 'COMBAT' && combatEnabled) {
+            // Auto-enter combat mode (skip if combat was just cancelled)
+            if (next === 'COMBAT' && combatEnabled && !skipAutoCombatRef.current) {
                 enterCombatMode();
             }
+            // Reset the skip flag after checking
+            skipAutoCombatRef.current = false;
             return; // stay on this player's turn
         }
-        // END phase reached â€” pass the turn
+        // END phase reached — pass the turn
         passTurnToNextPlayer();
     };
 
@@ -3203,10 +3199,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         const myId = getMyControllerId();
         const newState: CombatState = {
             isActive: true,
-            phase: 'SELECTING_ATTACKERS',
+            phase: 'ASSIGNING',
             attackerPlayerId: myId,
             assignments: [],
             selectedCardIds: [],
+            selectedBlockerId: null,
         };
         setCombatState(newState);
         setTurnSubPhase('COMBAT');
@@ -3216,7 +3213,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     };
 
     const toggleAttackerSelection = (boardObjectId: string) => {
-        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
+        if (!combatState || combatState.phase !== 'ASSIGNING') return;
         const myId = getMyControllerId();
         if (combatState.attackerPlayerId !== myId) return;
 
@@ -3235,7 +3232,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     };
 
     const assignAttackersToDefender = (defenderId: string) => {
-        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
+        if (!combatState || combatState.phase !== 'ASSIGNING') return;
         if (combatState.selectedCardIds.length === 0) return;
         const myId = getMyControllerId();
         if (combatState.attackerPlayerId !== myId) return;
@@ -3289,6 +3286,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             ...combatState,
                             assignments: [...combatState.assignments, newAssignment],
                             selectedCardIds: [],
+                            selectedBlockerId: null,
                         };
                         setCombatState(updated);
                         emitAction('COMBAT_UPDATE', { combatState: updated });
@@ -3311,6 +3309,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             ...combatState,
             assignments: [...combatState.assignments, ...newAssignments],
             selectedCardIds: [],
+            selectedBlockerId: null,
         };
         setCombatState(updated);
         emitAction('COMBAT_UPDATE', { combatState: updated });
@@ -3320,21 +3319,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
     };
 
     const declareAttackers = () => {
-        if (!combatState || combatState.phase !== 'SELECTING_ATTACKERS') return;
-        if (combatState.assignments.length === 0) return;
+        // Simplified: move directly to resolving
+        if (!combatState || combatState.phase !== 'ASSIGNING') return;
 
-        const updated: CombatState = {
-            ...combatState,
-            phase: 'SELECTING_BLOCKERS',
-            selectedCardIds: [],
-        };
-        setCombatState(updated);
-        emitAction('COMBAT_UPDATE', { combatState: updated });
-        addLog('declared attackers â€” defenders may assign blockers', 'ACTION');
+        const resolved: CombatState = { ...combatState, phase: 'RESOLVING' };
+        setCombatState(resolved);
+        emitAction('COMBAT_UPDATE', { combatState: resolved });
+        addLog('resolving combat', 'ACTION');
     };
 
     const assignBlocker = (blockerId: string, attackerId: string) => {
-        if (!combatState || (combatState.phase !== 'SELECTING_BLOCKERS' && combatState.phase !== 'ATTACKERS_DECLARED')) return;
+        if (!combatState || combatState.phase !== 'ASSIGNING') return;
 
         // Verify the blocker belongs to the defender
         const blockerObj = boardObjects.find(o => o.id === blockerId);
@@ -3433,8 +3428,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
     const cancelCombat = () => {
         setCombatState(null);
-        // When cancelling combat, skip directly to MAIN2 to prevent cycling between MAIN1 and COMBAT
-        // This is more intuitive - if you skip combat, you go to the post-combat phase
+        // Go to MAIN2 after cancelling combat (next phase after COMBAT)
         setTurnSubPhase('MAIN2');
         emitAction('UPDATE_STATE', { turnSubPhase: 'MAIN2' });
         emitAction('COMBAT_UPDATE', { combatState: null });
@@ -4840,7 +4834,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         <div key={obj.id} className="pointer-events-auto"
                             onClick={(e) => {
                                 // Combat mode card click intercept
-                                if (combatState?.isActive && combatState.phase === 'SELECTING_ATTACKERS' && obj.type === 'CARD') {
+                                if (combatState?.isActive && combatState.phase === 'ASSIGNING' && obj.type === 'CARD') {
                                     const myControllerId = isLocal ? playersList[mySeatIndex].id : socket.id;
                                     if (combatState.attackerPlayerId === myControllerId && obj.controllerId === myControllerId) {
                                         e.stopPropagation();
@@ -5302,7 +5296,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                             {TURN_PHASES.map((phase, idx) => {
                                 const isCurrent = phase === turnSubPhase;
                                 const canClick = isLocal || currentTurnPlayerId === socket.id;
-                                const isPast = TURN_PHASES.indexOf(turnSubPhase) > idx;
                                 return (
                                     <button
                                         key={phase}
@@ -5311,9 +5304,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                         className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
                                             isCurrent
                                                 ? 'bg-yellow-600 text-white scale-105 shadow-md'
-                                                : isPast
-                                                    ? 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                                                : 'bg-gray-700 text-gray-200 hover:bg-gray-600 hover:text-white'
                                         } ${!canClick ? 'opacity-50 cursor-not-allowed' : ''}`}
                                         title={PHASE_LABELS[phase]}
                                     >

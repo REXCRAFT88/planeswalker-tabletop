@@ -53,6 +53,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
 }) => {
     const isAttacker = combatState.attackerPlayerId === myId;
     const attackerPlayer = playersList.find(p => p.id === combatState.attackerPlayerId);
+    const isAssigning = combatState.phase === 'ASSIGNING';
 
     // Group assignments by defender
     const assignmentsByDefender = useMemo(() => {
@@ -147,7 +148,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                             const obj = getObj(a.attackerId);
                             if (!obj) return null;
                             const hasBlockers = a.blockerIds.length > 0;
-                            const canBlockThis = (combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId !== null;
+                            const canBlockThis = combatState.phase === 'ASSIGNING' && selectedBlockerId !== null && !isAttacker;
 
                             return (
                                 <div key={a.attackerId} className="flex flex-col items-center gap-2">
@@ -291,7 +292,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
     return (
         <>
             {/* Attacker selection glow on board cards */}
-            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && (
+            {combatState.phase === 'ASSIGNING' && isAttacker && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
                     .map(obj => {
@@ -373,7 +374,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
             </svg>
 
             {/* Right-click targets on opponent mats for assigning attackers */}
-            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.selectedCardIds.length > 0 && (
+            {combatState.phase === 'ASSIGNING' && isAttacker && combatState.selectedCardIds.length > 0 && (
                 playersList.map((p, idx) => {
                     if (p.id === myId) return null;
                     const pos = layout[idx];
@@ -405,49 +406,8 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                 })
             )}
 
-            {/* Small "Assign" button for attacker (only shows when attackers selected) */}
-            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.selectedCardIds.length > 0 && combatState.assignments.length === 0 && (
-                <div
-                    className="fixed top-4 right-4 z-[10000] bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
-                    onClick={() => {
-                        const defender = playersList.find(p => p.id !== myId);
-                        if (defender) {
-                            onAssignAttackersToDefender(defender.id);
-                        }
-                    }}
-                >
-                    <Swords size={16} /> Assign to Opponent
-                </div>
-            )}
-
-            {/* Small "Declare" button for attacker (only shows when attackers assigned but not declared) */}
-            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.assignments.length > 0 && (
-                <div
-                    className="fixed top-4 right-4 z-[10000] bg-green-600 hover:bg-green-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
-                    onClick={onDeclareAttackers}
-                >
-                    <CheckCircle size={16} /> Declare Attackers
-                </div>
-            )}
-
-            {/* Small "Done Blocking" button for defender (only shows when blockers phase) */}
-            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && (
-                <div
-                    className="fixed top-4 right-4 z-[10000] bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
-                    onClick={() => {
-                        onSetCombatState(prev => {
-                            if (!prev) return prev;
-                            const newState = { ...prev, phase: 'BLOCKERS_DECLARED' };
-                            return newState;
-                        });
-                    }}
-                >
-                    <Shield size={16} /> Done Blocking
-                </div>
-            )}
-
-            {/* Blocker selection mode */}
-            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && (
+            {/* Blocker selection mode - also available during ASSIGNING for defenders */}
+            {combatState.phase === 'ASSIGNING' && amDefender && (
                 boardObjects
                     .filter(o => o.controllerId === myId && o.type === 'CARD')
                     .map(obj => {
