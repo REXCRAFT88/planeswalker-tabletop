@@ -3131,7 +3131,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
 
     const advancePhase = () => {
         // If combat is active and we're resolving, pressing shift/advance moves to MAIN2
-        if (combatState?.isActive) {
+        // Only apply combat logic if we're actually in the COMBAT phase
+        if (combatState?.isActive && turnSubPhase === 'COMBAT') {
             if (combatState.phase === 'SELECTING_ATTACKERS') {
                 if (combatState.assignments.length > 0) {
                     declareAttackers();
@@ -4887,6 +4888,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                         onAssignBlocker={assignBlocker}
                         onResolveCombat={resolveCombat}
                         onCancelCombat={cancelCombat}
+                        onSetCombatState={setCombatState}
                         onRemoveAttacker={removeAttacker}
                         onInspectCard={setInspectCard}
                     />

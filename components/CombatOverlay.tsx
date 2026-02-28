@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { CombatState, CombatAssignment, BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { Swords, Shield, Eye, ArrowRight } from 'lucide-react';
+import { Swords, Shield, Eye, ArrowRight, CheckCircle } from 'lucide-react';
 
 interface Player {
     id: string;
@@ -23,6 +23,7 @@ interface CombatOverlayProps {
     onAssignBlocker: (blockerId: string, attackerId: string) => void;
     onResolveCombat: () => void;
     onCancelCombat: () => void;
+    onSetCombatState: (state: CombatState | null) => void;
     onRemoveAttacker?: (attackerId: string) => void;
     onInspectCard?: (card: CardData) => void;
 }
@@ -46,6 +47,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
     onAssignBlocker,
     onResolveCombat,
     onCancelCombat,
+    onSetCombatState,
     onRemoveAttacker,
     onInspectCard,
 }) => {
@@ -106,17 +108,16 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
         const trayWidth = Math.max(assignments.length * (TRAY_CARD_W + 12) + 40, 240);
 
         // Position relative to mat
-        const yOffset = (combatState.phase !== 'SELECTING_ATTACKERS') ? 80 : 0;
         let trayX = pos.x + matW / 2;
-        let trayY = pos.y - trayHeight / 2 - 20 - yOffset;
+        let trayY = pos.y - trayHeight / 2 - 20;
 
         if (rot === 180) {
-            trayY = pos.y + matH + trayHeight / 2 + 20 + yOffset;
+            trayY = pos.y + matH + trayHeight / 2 + 20;
         } else if (rot === 90) {
-            trayX = pos.x + matW + trayWidth / 2 + 20 + yOffset;
+            trayX = pos.x + matW + trayWidth / 2 + 20;
             trayY = pos.y + matH / 2;
         } else if (rot === -90) {
-            trayX = pos.x - trayWidth / 2 - 20 - yOffset;
+            trayX = pos.x - trayWidth / 2 - 20;
             trayY = pos.y + matH / 2;
         }
 
@@ -146,23 +147,34 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                             const obj = getObj(a.attackerId);
                             if (!obj) return null;
                             const hasBlockers = a.blockerIds.length > 0;
+                            const canBlockThis = (combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId !== null;
 
                             return (
                                 <div key={a.attackerId} className="flex flex-col items-center gap-2">
                                     <div
-                                        className={`relative group transition-all duration-300 hover:-translate-y-1`}
+                                        className={`relative group transition-all duration-300 ${canBlockThis ? 'cursor-pointer hover:-translate-y-1' : ''}`}
                                         style={{ width: TRAY_CARD_W, height: TRAY_CARD_H }}
-                                        onClick={() => {
-                                            if ((combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && selectedBlockerId) {
+                                        onClick={(e) => {
+                                            if (canBlockThis) {
+                                                e.stopPropagation();
+                                                e.preventDefault();
                                                 handleAttackerClickForBlock(a.attackerId);
                                             }
                                         }}
                                     >
                                         <img
                                             src={obj.cardData.imageUrl}
-                                            className="w-full h-full object-cover rounded-lg shadow-lg border border-gray-700"
+                                            className={`w-full h-full object-cover rounded-lg shadow-lg ${canBlockThis ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-900' : 'border border-gray-700'}`}
                                             alt="Attacker"
                                         />
+                                        {canBlockThis && (
+                                            <div className="absolute inset-0 bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors rounded-lg pointer-events-none"></div>
+                                        )}
+                                        {canBlockThis && (
+                                            <div className="absolute top-1 left-1 bg-blue-600 text-white text-[8px] px-1.5 py-0.5 rounded font-bold shadow-lg z-20">
+                                                Click to block
+                                            </div>
+                                        )}
 
                                         <div className="absolute top-1 right-1 flex flex-col gap-0.5 pointer-events-none z-10">
                                             {/* Object Counters (e.g., +1/+1) */}
@@ -360,7 +372,7 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                 )}
             </svg>
 
-            {/* Assign-to-defender click targets on opponent mats */}
+            {/* Right-click targets on opponent mats for assigning attackers */}
             {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.selectedCardIds.length > 0 && (
                 playersList.map((p, idx) => {
                     if (p.id === myId) return null;
@@ -370,26 +382,68 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                     return (
                         <div
                             key={`assign-target-${p.id}`}
-                            className="absolute cursor-pointer transition-all hover:scale-105 group"
+                            className="absolute"
                             style={{
                                 left: pos.x,
                                 top: pos.y,
                                 width: matW,
                                 height: matH,
-                                zIndex: 9980,
+                                zIndex: 9970,
                             }}
-                            onClick={() => onAssignAttackersToDefender(p.id)}
-                        >
-                            <div className="w-full h-full rounded-xl border-4 border-dashed border-red-500/50 group-hover:border-red-400 bg-red-500/10 group-hover:bg-red-500/20 flex items-center justify-center transition-all"
-                                style={{ transform: `rotate(${pos.rot}deg)` }}
-                            >
-                                <div className="bg-red-600/90 px-4 py-2 rounded-lg text-white font-bold flex items-center gap-2 shadow-lg">
-                                    <Swords size={18} /> Attack {p.name}
-                                </div>
-                            </div>
-                        </div>
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onAssignAttackersToDefender(p.id);
+                            }}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onAssignAttackersToDefender(p.id);
+                            }}
+                        />
                     );
                 })
+            )}
+
+            {/* Small "Assign" button for attacker (only shows when attackers selected) */}
+            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.selectedCardIds.length > 0 && combatState.assignments.length === 0 && (
+                <div
+                    className="fixed top-4 right-4 z-[10000] bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
+                    onClick={() => {
+                        const defender = playersList.find(p => p.id !== myId);
+                        if (defender) {
+                            onAssignAttackersToDefender(defender.id);
+                        }
+                    }}
+                >
+                    <Swords size={16} /> Assign to Opponent
+                </div>
+            )}
+
+            {/* Small "Declare" button for attacker (only shows when attackers assigned but not declared) */}
+            {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && combatState.assignments.length > 0 && (
+                <div
+                    className="fixed top-4 right-4 z-[10000] bg-green-600 hover:bg-green-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
+                    onClick={onDeclareAttackers}
+                >
+                    <CheckCircle size={16} /> Declare Attackers
+                </div>
+            )}
+
+            {/* Small "Done Blocking" button for defender (only shows when blockers phase) */}
+            {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED') && amDefender && (
+                <div
+                    className="fixed top-4 right-4 z-[10000] bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-lg shadow-lg cursor-pointer font-bold text-sm flex items-center gap-2 transition-all"
+                    onClick={() => {
+                        onSetCombatState(prev => {
+                            if (!prev) return prev;
+                            const newState = { ...prev, phase: 'BLOCKERS_DECLARED' };
+                            return newState;
+                        });
+                    }}
+                >
+                    <Shield size={16} /> Done Blocking
+                </div>
             )}
 
             {/* Blocker selection mode */}
@@ -411,23 +465,29 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
                                     top: obj.y - 4,
                                     width: CARD_WIDTH + 8,
                                     height: CARD_HEIGHT + 8,
-                                    border: isSelected ? '3px solid #3b82f6' : isBlocker ? '3px solid #22c55e' : '2px dashed #3b82f680',
+                                    border: isSelected ? '4px solid #3b82f6' : isBlocker ? '3px solid #22c55e' : '3px dashed #3b82f6',
                                     borderRadius: '12px',
                                     transform: `rotate(${obj.rotation || 0}deg)`,
                                     transformOrigin: '50% 50%',
-                                    boxShadow: (isSelected || isBlocker) ? `0 0 20px ${isSelected ? '#3b82f640' : '#22c55e40'}` : 'none',
+                                    boxShadow: (isSelected || isBlocker) ? `0 0 25px ${isSelected ? 'rgba(59,130,246,0.6)' : 'rgba(34,197,94,0.5)'}` : '0 0 10px rgba(59,130,246,0.3)',
                                     zIndex: (obj.z || 0) + 1,
                                     pointerEvents: 'auto',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.01)' // Make it clickable over the whole card
+                                    backgroundColor: 'rgba(255, 255, 255, 0.01)'
                                 }}
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    e.preventDefault();
                                     handleBlockerClick(obj.id);
                                 }}
                             >
                                 {isStack && (
                                     <div className={`absolute -top-2 -right-1 font-mono rounded-lg px-2 h-6 border-2 border-gray-900 shadow-xl z-20 flex items-center justify-center text-xs font-bold pointer-events-none whitespace-nowrap ${untappedCount === 0 ? 'bg-gray-600 text-gray-400' : 'bg-blue-600 text-white'}`}>
                                         {untappedCount} / {obj.quantity}
+                                    </div>
+                                )}
+                                {isSelected && (
+                                    <div className="absolute -top-1 -left-1 bg-blue-600 text-white text-xs px-2 py-1 rounded-lg font-bold shadow-lg z-30">
+                                        Click attacker to block
                                     </div>
                                 )}
                             </div>
