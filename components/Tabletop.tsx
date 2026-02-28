@@ -1938,28 +1938,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 }
             }
 
-            // Shift cards to follow mats if the count changed (meaning mats rearranged)
-            if (newSorted.length !== prevPlayers.length && gamePhaseRef.current !== 'SETUP') {
-                const oldLayout = getLayout(prevPlayers.length, (prevPlayers.length === 2) ? 450 : 625);
-                const newLayout = getLayout(newSorted.length, (newSorted.length === 2) ? 450 : 625);
-
-                setBoardObjects(prevItems => {
-                    return prevItems.map(obj => {
-                        const oldIdx = prevPlayers.findIndex(p => p.id === obj.controllerId);
-                        const newIdx = newSorted.findIndex(p => p.id === obj.controllerId);
-                        if (oldIdx === -1 || newIdx === -1) return obj;
-                        if (!oldLayout[oldIdx] || !newLayout[newIdx]) return obj;
-
-                        const oldPos = oldLayout[oldIdx];
-                        const newPos = newLayout[newIdx];
-                        const dx = newPos.x - oldPos.x;
-                        const dy = newPos.y - oldPos.y;
-
-                        if (dx === 0 && dy === 0) return obj;
-                        return { ...obj, x: obj.x + dx, y: obj.y + dy };
-                    });
-                });
-            }
+            // Note: Card repositioning when mats rearrange is handled by the Layout Update Effect
+            // which correctly tracks player positions and applies transformations
 
             // Detect new players and Sync Game State if Host
             const newPlayers = roomPlayers.filter(rp => !prevPlayers.find(p => p.id === rp.id));
@@ -2208,6 +2188,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             else if (action === 'UPDATE_LIFE') {
                 if (sender && sender.id !== socket.id) {
                     setOpponentsLife(prev => ({ ...prev, [sender.id]: data.life }));
+                }
+            }
+            else if (action === 'UPDATE_STATE') {
+                if (data.turnSubPhase) {
+                    setTurnSubPhase(data.turnSubPhase);
                 }
             }
             else if (action === 'UPDATE_PLAYER_LIFE') {
@@ -3202,7 +3187,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             selectedCardIds: [],
         };
         setCombatState(newState);
+        setTurnSubPhase('COMBAT');
         emitAction('COMBAT_UPDATE', { combatState: newState });
+        emitAction('UPDATE_STATE', { turnSubPhase: 'COMBAT' });
         addLog('entered combat phase', 'ACTION');
     };
 
@@ -3418,11 +3405,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
         setCombatState(null);
         setTurnSubPhase('MAIN2');
         emitAction('COMBAT_UPDATE', { combatState: null });
-        addLog('combat resolved â€” entering Main Phase 2', 'ACTION');
+        emitAction('UPDATE_STATE', { turnSubPhase: 'MAIN2' });
+        addLog('combat resolved â€" entering Main Phase 2', 'ACTION');
     };
 
     const cancelCombat = () => {
         setCombatState(null);
+        // If cancelling during combat phase, go back to MAIN1, otherwise stay in current phase
+        const backToMain = turnSubPhase === 'COMBAT';
+        if (backToMain) {
+            setTurnSubPhase('MAIN1');
+            emitAction('UPDATE_STATE', { turnSubPhase: 'MAIN1' });
+        }
         emitAction('COMBAT_UPDATE', { combatState: null });
         addLog('combat cancelled', 'ACTION');
     };
@@ -4478,6 +4472,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
             return { ...prev, items: newItems };
         });
     };
+
+    // Reveal a card to opponents (broadcast to all players)
+    const revealCardToOpponents = (card: CardData) => {
+        addLog(`revealed ${card.name} from ${searchModal.source.toLowerCase()} to opponents`);
+        emitAction('REVEAL_CARDS', { cards: [card] });
+    };
     const handleSearchAction = (id: string, action: 'HAND') => {
         const item = searchModal.items.find(i => i.card.id === id);
         if (!item) return;
@@ -5417,16 +5417,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                     <div className="grid grid-cols-2 gap-4 mb-8">
                         <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700 col-span-2">
                             <span className="text-gray-400 font-bold">Life</span>
-                            <div className="flex items-center gap-4 relative">
-                                <button onClick={() => handleLifeChange(-1)} className="w-10 h-10 bg-red-900/50 text-red-400 rounded-full flex items-center justify-center font-bold text-xl border border-red-800">-</button>
-                                <span className="text-2xl font-bold text-white w-8 text-center relative">{life}
-                                    {pendingLifeChange !== 0 && (
-                                        <div className={`absolute -top-6 left-1/2 -translate-x-1/2 font-bold text-sm ${pendingLifeChange > 0 ? 'text-green-400' : 'text-red-400'} animate-bounce pointer-events-none drop-shadow-md`}>
-                                            {pendingLifeChange > 0 ? '+' : ''}{pendingLifeChange}
+                            <div className="flex items-center gap-4">
+                                <div className="relative">
+                                    <button onClick={() => handleLifeChange(-1)} className="w-10 h-10 bg-red-900/50 text-red-400 rounded-full flex items-center justify-center font-bold text-xl border border-red-800">-</button>
+                                    {pendingLifeChange < 0 && (
+                                        <div className="absolute -right-8 top-1/2 -translate-y-1/2 font-bold text-sm text-red-400 animate-bounce pointer-events-none drop-shadow-md">
+                                            {pendingLifeChange}
                                         </div>
                                     )}
-                                </span>
-                                <button onClick={() => handleLifeChange(1)} className="w-10 h-10 bg-green-900/50 text-green-400 rounded-full flex items-center justify-center font-bold text-xl border border-green-800">+</button>
+                                </div>
+                                <span className="text-2xl font-bold text-white w-8 text-center">{life}</span>
+                                <div className="relative">
+                                    <button onClick={() => handleLifeChange(1)} className="w-10 h-10 bg-green-900/50 text-green-400 rounded-full flex items-center justify-center font-bold text-xl border border-green-800">+</button>
+                                    {pendingLifeChange > 0 && (
+                                        <div className="absolute -left-8 top-1/2 -translate-y-1/2 font-bold text-sm text-green-400 animate-bounce pointer-events-none drop-shadow-md">
+                                            +{pendingLifeChange}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -6139,7 +6147,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                 <div
                                                     className="w-full h-full rounded-lg border-2 border-white/10 flex items-center justify-center cursor-pointer hover:border-blue-400 transition"
                                                     style={{ backgroundColor: displaySleeveColor }}
-                                                    onClick={() => isMobile ? toggleRevealItem(idx) : toggleRevealItem(idx)}
+                                                    onClick={() => setInspectCard(item.card)}
                                                 >
                                                     <div className="w-10 h-10 rounded-full bg-black/20" />
                                                 </div>
@@ -6150,8 +6158,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                 <div
                                                     className={`absolute inset-0 z-20 ${!item.isRevealed && 'flex items-center justify-center'}`}
                                                     onClick={() => {
-                                                        if (!item.isRevealed) toggleRevealItem(idx);
-                                                        else setInspectCard(item.card);
+                                                        setInspectCard(item.card);
                                                     }}
                                                     onContextMenu={(e) => {
                                                         e.preventDefault();
@@ -6160,7 +6167,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                 >
                                                     {!item.isRevealed ? (
                                                         <div className="flex flex-col items-center gap-2">
-                                                            <div className="text-white text-[10px] font-bold bg-black/50 px-2 py-1 rounded-full">Reveal</div>
+                                                            <div className="text-white text-[10px] font-bold bg-black/50 px-2 py-1 rounded-full">Tap to Inspect</div>
                                                             {!(searchModal.source === 'TOKENS' || searchModal.source === 'GLOBAL') && !searchModal.isReadOnly && (
                                                                 <button
                                                                     onClick={(e) => { e.stopPropagation(); addToTray(item.card.id); }}
@@ -6195,6 +6202,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                                     <>
                                                                         <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center justify-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
                                                                         <button onClick={() => toggleRevealItem(idx)} className="w-full text-xs flex items-center justify-center gap-2 bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded"><Eye size={12} /> Hide</button>
+                                                                        <button onClick={() => revealCardToOpponents(item.card)} className="w-full text-xs flex items-center justify-center gap-2 bg-cyan-700 hover:bg-cyan-600 px-2 py-1.5 rounded"><Eye size={12} /> Reveal to Opponents</button>
                                                                     </>
                                                                 )
                                                             ) : (
@@ -6208,7 +6216,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                                                     ) : (
                                                         <div className="flex flex-col gap-2 w-full">
                                                             <div className="text-white text-xs font-bold text-center">Card Hidden</div>
-                                                            <button onClick={() => toggleRevealItem(idx)} className="w-full text-xs flex items-center justify-center gap-2 bg-cyan-700 hover:bg-cyan-600 px-2 py-1.5 rounded"><Eye size={12} /> Reveal</button>
+                                                            <button onClick={() => revealCardToOpponents(item.card)} className="w-full text-xs flex items-center justify-center gap-2 bg-cyan-700 hover:bg-cyan-600 px-2 py-1.5 rounded"><Eye size={12} /> Reveal to Opponents</button>
                                                             {!(searchModal.source === 'TOKENS' || searchModal.source === 'GLOBAL') && !searchModal.isReadOnly && (
                                                                 <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center justify-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
                                                             )}

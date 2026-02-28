@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { CombatState, CombatAssignment, BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { Swords, Shield, Eye, ArrowRight } from 'lucide-react';
+import { Swords, Shield, Eye, ArrowRight, Check } from 'lucide-react';
 
 interface Player {
     id: string;
@@ -278,6 +278,57 @@ export const CombatOverlay: React.FC<CombatOverlayProps> = ({
 
     return (
         <>
+            {/* Combat Action Buttons - Top Center */}
+            {combatState.isActive && (
+                <div
+                    className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-gray-900/95 backdrop-blur-md border-2 border-red-500/50 rounded-xl p-3 shadow-2xl"
+                    style={{ transform: `translateX(-50%)` }}
+                >
+                    <div className="flex items-center gap-3">
+                        {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && (
+                            <>
+                                <button
+                                    onClick={onCancelCombat}
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center gap-2 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={onDeclareAttackers}
+                                    disabled={combatState.assignments.length === 0}
+                                    className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-bold flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <Swords size={16} /> Declare Attackers
+                                </button>
+                            </>
+                        )}
+                        {(combatState.phase === 'SELECTING_BLOCKERS' || combatState.phase === 'ATTACKERS_DECLARED' || combatState.phase === 'BLOCKERS_DECLARED') && (
+                            <>
+                                {amDefender && (
+                                    <div className="text-sm text-blue-400 font-bold">
+                                        Select your blockers, then click on attackers to assign them
+                                    </div>
+                                )}
+                                <button
+                                    onClick={onResolveCombat}
+                                    className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold flex items-center gap-2 transition-colors"
+                                >
+                                    <Swords size={16} /> Resolve Combat
+                                </button>
+                            </>
+                        )}
+                        {combatState.phase === 'RESOLVING' && (
+                            <button
+                                onClick={onResolveCombat}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold flex items-center gap-2 transition-colors"
+                            >
+                                <Check size={16} /> Complete Combat
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Attacker selection glow on board cards */}
             {combatState.phase === 'SELECTING_ATTACKERS' && isAttacker && (
                 boardObjects
