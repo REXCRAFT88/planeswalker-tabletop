@@ -6068,6 +6068,77 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialSideboar
                 </div>
             )}
 
+            {quantityModal.isOpen && (
+                <div className="fixed inset-0 z-[14000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95">
+                        <div className="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center">
+                            <h3 className="font-bold text-white text-lg">{quantityModal.title}</h3>
+                            <button onClick={() => setQuantityModal(prev => ({ ...prev, isOpen: false }))} className="hover:text-white text-gray-400"><X /></button>
+                        </div>
+                        <div className="p-6">
+                            <div className="flex flex-col gap-4">
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max={quantityModal.max}
+                                    defaultValue="1"
+                                    className="w-full"
+                                    id="quantity-range"
+                                    onChange={(e) => {
+                                        const display = document.getElementById('quantity-display') as HTMLSpanElement;
+                                        if (display) display.textContent = e.target.value;
+                                    }}
+                                />
+                                <div className="flex items-center justify-between gap-4">
+                                    <button
+                                        onClick={() => {
+                                            const display = document.getElementById('quantity-display') as HTMLSpanElement;
+                                            let val = parseInt(display.textContent || '1');
+                                            if (val > 1) val--;
+                                            display.textContent = val.toString();
+                                        }}
+                                        className="bg-gray-700 hover:bg-gray-600 text-white w-10 h-10 rounded-lg font-bold text-xl"
+                                    >
+                                        -
+                                    </button>
+                                    <span id="quantity-display" className="text-white text-2xl font-bold w-12 text-center">1</span>
+                                    <button
+                                        onClick={() => {
+                                            const display = document.getElementById('quantity-display') as HTMLSpanElement;
+                                            let val = parseInt(display.textContent || '1');
+                                            if (val < quantityModal.max) val++;
+                                            display.textContent = val.toString();
+                                        }}
+                                        className="bg-gray-700 hover:bg-gray-600 text-white w-10 h-10 rounded-lg font-bold text-xl"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setQuantityModal(prev => ({ ...prev, isOpen: false }))}
+                                        className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const display = document.getElementById('quantity-display') as HTMLSpanElement;
+                                            const qty = parseInt(display.textContent || '1');
+                                            quantityModal.onConfirm(qty);
+                                            setQuantityModal(prev => ({ ...prev, isOpen: false }));
+                                        }}
+                                        className="flex-1 bg-green-600 hover:bg-green-500 text-white px-4 py-3 rounded-lg font-bold"
+                                    >
+                                        Confirm
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {searchModal.isOpen && (
                 <div
                     className={`fixed z-[13000] bg-gray-900/95 backdrop-blur-xl flex flex-col animate-in fade-in ${isMobile ? 'p-0' : 'p-8'}`}
