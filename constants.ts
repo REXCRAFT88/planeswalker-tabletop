@@ -13,14 +13,3 @@ export const PLAYER_COLORS = [
   '#a855f7', // Purple
   '#f97316', // Orange
 ];
-
-export const MOCK_CARDS = [
-  "Sol Ring",
-  "Arcane Signet",
-  "Command Tower",
-  "Swamp",
-  "Island",
-  "Mountain",
-  "Forest",
-  "Plains"
-];
