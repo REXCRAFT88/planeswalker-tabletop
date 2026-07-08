@@ -3,8 +3,9 @@ import { aiEnabled, callLLM, availableProviders, defaultProvider } from './clien
 import type { NormMessage } from './client';
 import { TURN_TOOLS, MULLIGAN_TOOL } from './tools';
 import { buildTurnSystemPrompt, buildMulliganSystemPrompt, formatStateView } from './prompts';
+import { runVoiceReply } from './voice';
 import type {
-    AiDeckCard, GameStateView, AiToolResult, AiPersonaId, AiUsage, AiProviderId,
+    AiDeckCard, GameStateView, AiToolResult, AiPersonaId, AiUsage, AiProviderId, VoiceChatTurn,
 } from '../../services/aiTypes';
 
 const MAX_ROUNDS = parseInt(process.env.AI_MAX_ROUNDS || '12', 10);
@@ -148,6 +149,30 @@ export function createAiRouter(): express.Router {
         } catch (e: any) {
             console.error('[AI] continue error', e?.message || e);
             res.status(502).json({ error: 'AI continue failed', detail: e?.message, done: true });
+        }
+    });
+
+    // Voice / negotiation: the player talks to an AI opponent's voice model, which is
+    // firewalled from hidden info and consults the strategist (brain) as needed.
+    router.post('/voice', async (req, res) => {
+        try {
+            const { seatName, persona, provider, view, dealLog, history, userText } = req.body || {};
+            if (!view || !view.you) return res.status(400).json({ error: 'view required' });
+            if (typeof userText !== 'string' || !userText.trim()) return res.status(400).json({ error: 'userText required' });
+
+            const result = await runVoiceReply({
+                seatName: seatName || 'AI',
+                persona: (persona as AiPersonaId) || 'balanced',
+                provider: provider as AiProviderId,
+                view: view as GameStateView,
+                dealLog: Array.isArray(dealLog) ? dealLog : [],
+                history: (Array.isArray(history) ? history : []) as VoiceChatTurn[],
+                userText: userText.slice(0, 2000),
+            });
+            res.json(result);
+        } catch (e: any) {
+            console.error('[AI] voice error', e?.message || e);
+            res.status(502).json({ error: 'AI voice failed', detail: e?.message, speak: false, text: '', consulted: false });
         }
     });
 

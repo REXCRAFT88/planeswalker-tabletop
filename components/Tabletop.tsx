@@ -15,11 +15,12 @@ import {
 } from '../services/mana';
 import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
 import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
-import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId } from '../services/aiTypes';
+import { getVoiceBackend, voiceInputSupported, requestVoiceReply } from '../services/voice';
+import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId, VoiceChatTurn, VoiceBackendId } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -1123,6 +1124,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const aiTokenCounter = useRef(0);
     const aiMulliganRunning = useRef(false);
     const aiUsageTotals = useRef({ input: 0, cacheRead: 0, output: 0 });
+    // Binding deals the player has struck with each AI seat (fed into the brain's turns).
+    const aiDeals = useRef<Record<string, string[]>>({});
+
+    // --- Voice / negotiation UI state ---
+    const [voiceOpen, setVoiceOpen] = useState(false);
+    const [voiceTargetSeat, setVoiceTargetSeat] = useState<string | null>(null);
+    const [voiceHistory, setVoiceHistory] = useState<Record<string, VoiceChatTurn[]>>({});
+    const [voiceListening, setVoiceListening] = useState(false);
+    const [voiceBusy, setVoiceBusy] = useState(false);
+    const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+    const [voicePartial, setVoicePartial] = useState('');
+    const [voiceTextInput, setVoiceTextInput] = useState('');
+    const [voiceBackendId, setVoiceBackendId] = useState<VoiceBackendId>('web-speech');
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -3054,7 +3068,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
         const defaultRotations: Record<string, number> = {};
         playersList.forEach((p, i) => { defaultRotations[p.id] = layout[i]?.rot ?? 0; });
-        const recentLog = logsRef.current.slice(0, 15).reverse().map(l => `${l.playerName}: ${l.message}`);
+        // Prepend any binding deals this seat agreed to, so the brain honors them.
+        const deals = (aiDeals.current[seatId] || []).map(d => `[DEAL you agreed to] ${d}`);
+        const recentLog = [...deals, ...logsRef.current.slice(0, 15).reverse().map(l => `${l.playerName}: ${l.message}`)];
         return buildGameStateView({
             turn: turnRef.current,
             aiSeatId: seatId,
@@ -3245,6 +3261,76 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (allSeatsKept()) setGamePhase('PLAYING');
         })();
     }, [gamePhase, isLocal, aiAvailable, localOpponents]);
+
+    // --- Voice / negotiation handlers ---
+    // The AI seats the player can talk to.
+    const voiceAiSeats = () => playersList.filter(p => localOpponents.some(o => (o.id || '') === p.id && o.type === 'ai'));
+
+    const handleVoiceSend = async (seatId: string, userText: string) => {
+        const text = userText.trim();
+        if (!text) return;
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || !localPlayerStates.current[seatId]) return;
+        const history = voiceHistory[seatId] || [];
+        setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'user', text }] }));
+        setVoiceBusy(true);
+        try {
+            const view = buildAiView(seatId);
+            const reply = await requestVoiceReply({
+                seatName: opp.name,
+                persona: (opp.persona || 'balanced') as AiPersonaId,
+                provider: opp.provider,
+                view,
+                dealLog: aiDeals.current[seatId] || [],
+                history,
+                userText: text,
+            });
+            accumulateUsage(reply.usage);
+            const spoken = reply.speak && reply.text ? reply.text : '(stays quiet)';
+            setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: spoken }] }));
+            if (reply.deal) {
+                aiDeals.current[seatId] = [...(aiDeals.current[seatId] || []), reply.deal];
+                addLog(`agreed with you: ${reply.deal}`, 'SYSTEM', opp.name);
+            }
+            if (reply.speak && reply.text) {
+                setVoiceSpeaking(true);
+                try { await getVoiceBackend(voiceBackendId).speak(reply.text); } finally { setVoiceSpeaking(false); }
+            }
+        } catch (e: any) {
+            setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: `(voice error: ${e?.message || 'failed'})` }] }));
+        } finally {
+            setVoiceBusy(false);
+        }
+    };
+
+    const startTalk = () => {
+        if (!voiceTargetSeat || voiceBusy) return;
+        getVoiceBackend(voiceBackendId).cancelSpeech();
+        setVoicePartial('');
+        setVoiceListening(true);
+        getVoiceBackend(voiceBackendId).startListening(setVoicePartial);
+    };
+    const endTalk = async () => {
+        if (!voiceListening) return;
+        setVoiceListening(false);
+        const said = await getVoiceBackend(voiceBackendId).stopListening();
+        setVoicePartial('');
+        if (said && voiceTargetSeat) handleVoiceSend(voiceTargetSeat, said);
+    };
+    const sendTypedVoice = () => {
+        const t = voiceTextInput.trim();
+        if (!t || !voiceTargetSeat) return;
+        setVoiceTextInput('');
+        handleVoiceSend(voiceTargetSeat, t);
+    };
+
+    // Default the talk target to the first AI seat when the panel opens.
+    useEffect(() => {
+        if (voiceOpen && !voiceTargetSeat) {
+            const first = voiceAiSeats()[0];
+            if (first) setVoiceTargetSeat(first.id);
+        }
+    }, [voiceOpen]);
 
 
     const confirmKeepHand = () => {
@@ -5519,6 +5605,92 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     <div className="bg-purple-900/80 backdrop-blur text-purple-100 px-4 py-1.5 rounded-full text-sm font-bold border border-purple-500/40 shadow-xl flex items-center gap-2">
                         <Loader size={14} className="animate-spin" />
                         🤖 {aiSeatName(aiThinkingSeat)} is thinking…
+                    </div>
+                </div>
+            )}
+
+            {/* Negotiate (talk to an AI opponent) — local games with an AI seat */}
+            {isLocal && aiAvailable && gamePhase !== 'SETUP' && voiceAiSeats().length > 0 && !voiceOpen && (
+                <button
+                    onClick={() => setVoiceOpen(true)}
+                    className="fixed bottom-24 left-4 z-[9400] bg-purple-700 hover:bg-purple-600 text-white rounded-full shadow-xl border border-purple-400/40 px-4 py-3 flex items-center gap-2 font-bold text-sm active:scale-95"
+                    title="Talk / negotiate with an AI opponent"
+                >
+                    <Mic size={18} /> Negotiate
+                </button>
+            )}
+
+            {isLocal && aiAvailable && voiceOpen && (
+                <div className="fixed bottom-4 left-4 z-[9600] w-[92vw] max-w-sm bg-gray-900/95 backdrop-blur border border-purple-500/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-left-4">
+                    <div className="flex items-center justify-between px-4 py-2 bg-purple-900/40 border-b border-purple-500/30">
+                        <div className="flex items-center gap-2 font-bold text-purple-100 text-sm"><MessageSquare size={16} /> Negotiate</div>
+                        <div className="flex items-center gap-2">
+                            {voiceSpeaking && <Volume2 size={14} className="text-purple-300 animate-pulse" />}
+                            <button onClick={() => setVoiceOpen(false)} className="text-gray-400 hover:text-white"><X size={18} /></button>
+                        </div>
+                    </div>
+
+                    {/* Who to talk to */}
+                    <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-800">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Talking to</span>
+                        <select
+                            value={voiceTargetSeat || ''}
+                            onChange={e => setVoiceTargetSeat(e.target.value)}
+                            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none"
+                        >
+                            {voiceAiSeats().map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Transcript */}
+                    <div className="flex-1 max-h-56 overflow-y-auto px-3 py-2 space-y-2 text-sm">
+                        {(voiceTargetSeat && voiceHistory[voiceTargetSeat] || []).length === 0 && (
+                            <div className="text-gray-500 text-xs text-center py-6">
+                                Hold the mic (or type) to negotiate. They won't reveal their hand or plan unless they choose to.
+                            </div>
+                        )}
+                        {(voiceTargetSeat && voiceHistory[voiceTargetSeat] || []).map((t, i) => (
+                            <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`px-3 py-1.5 rounded-2xl max-w-[80%] ${t.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-purple-100 border border-purple-500/20'}`}>
+                                    {t.text}
+                                </div>
+                            </div>
+                        ))}
+                        {voiceBusy && <div className="text-purple-300 text-xs flex items-center gap-1"><Loader size={12} className="animate-spin" /> thinking…</div>}
+                        {voiceListening && <div className="text-green-400 text-xs italic">🎙 {voicePartial || 'listening…'}</div>}
+                    </div>
+
+                    {/* Deals struck */}
+                    {voiceTargetSeat && (aiDeals.current[voiceTargetSeat] || []).length > 0 && (
+                        <div className="px-3 py-1.5 border-t border-gray-800 text-[11px] text-amber-300/90">
+                            <span className="font-bold">Deals:</span> {(aiDeals.current[voiceTargetSeat] || []).join(' · ')}
+                        </div>
+                    )}
+
+                    {/* Controls */}
+                    <div className="p-3 border-t border-gray-800 flex items-center gap-2">
+                        {voiceInputSupported() ? (
+                            <button
+                                onMouseDown={startTalk} onMouseUp={endTalk} onMouseLeave={() => voiceListening && endTalk()}
+                                onTouchStart={(e) => { e.preventDefault(); startTalk(); }} onTouchEnd={(e) => { e.preventDefault(); endTalk(); }}
+                                disabled={voiceBusy}
+                                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border transition-colors ${voiceListening ? 'bg-green-600 border-green-400 animate-pulse' : 'bg-purple-700 hover:bg-purple-600 border-purple-400/40'} disabled:opacity-40`}
+                                title="Hold to talk"
+                            >
+                                <Mic size={20} className="text-white" />
+                            </button>
+                        ) : null}
+                        <input
+                            value={voiceTextInput}
+                            onChange={e => setVoiceTextInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') sendTypedVoice(); }}
+                            placeholder={voiceInputSupported() ? 'hold mic or type…' : 'type your message…'}
+                            disabled={voiceBusy}
+                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+                        />
+                        <button onClick={sendTypedVoice} disabled={voiceBusy || !voiceTextInput.trim()} className="shrink-0 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg text-sm font-bold">
+                            Send
+                        </button>
                     </div>
                 </div>
             )}

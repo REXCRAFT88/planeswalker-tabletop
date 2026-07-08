@@ -122,6 +122,30 @@ export interface AiMulliganResponse {
     provider?: AiProviderId;
 }
 
+// --- Voice / negotiation ---
+
+export interface VoiceChatTurn {
+    role: 'user' | 'assistant';
+    text: string;
+}
+
+export interface VoiceReplyResponse {
+    speak: boolean;       // false = the AI chose to stay silent
+    text: string;         // what to speak (empty if silent)
+    deal?: string;        // a binding agreement the AI committed to this exchange
+    consulted: boolean;   // whether the negotiator consulted the strategist (brain)
+    usage?: AiUsage;
+    provider?: AiProviderId;
+}
+
+export type VoiceBackendId = 'web-speech' | 'openai-realtime' | 'cloud-pipeline';
+
+export const VOICE_BACKEND_LABELS: Record<VoiceBackendId, string> = {
+    'web-speech': 'Browser voice (free)',
+    'openai-realtime': 'OpenAI Realtime (key required)',
+    'cloud-pipeline': 'Cloud STT + TTS (key required)',
+};
+
 // The list of tool names the host knows how to apply. Kept here so both the
 // server tool schema and the client driver reference a single source of truth.
 export const AI_TOOL_NAMES = [

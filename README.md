@@ -73,6 +73,29 @@ returns `503`, and any opponent marked AI falls back to hot-seat (manual) play.
 3. Start the game. On the AI's turn a "🤖 …is thinking" badge appears while it plays; its
    actions animate on the board and appear in the log. The AI's hand stays hidden.
 
+### Voice negotiation (dual-model)
+
+You can **talk to an AI opponent** — negotiate deals, bluff, or trash-talk — in local
+games. Open the **Negotiate** panel, pick an opponent, and **hold the mic** (push-to-talk)
+or type. This uses a deliberately two-model design:
+
+- The **brain model** makes the game decisions and is the only one that ever sees the
+  AI's hand and plan.
+- The **voice model** is the table-talk personality. It is *walled off from hidden
+  information* — it only sees public board state. To learn anything about its own side,
+  or to strike a deal, it must call `consult_strategist`, and the brain decides what (if
+  anything) is safe to reveal. So the AI **can't leak its hand or plan unless it chooses
+  to**; bluffing and deflecting are first-class.
+- It **doesn't talk over you**: push-to-talk means it only responds when addressed, and
+  it can choose to `stay_silent`.
+- Deals it commits to are recorded and fed into the brain's future turns, so agreements
+  are honored. Both models share the goal of **winning**.
+
+Voice tech is pluggable (`services/voice.ts`). The default is the browser's built-in
+**Web Speech API** — free, no extra keys, works in Chrome/Edge. If speech isn't available
+you can type instead. OpenAI Realtime and a cloud STT+TTS pipeline are scaffolded as
+additional backends for higher quality later.
+
 ### How it works
 
 - The host browser owns all local-game state, so it drives AI seats: it serializes a

@@ -16,6 +16,7 @@ import type { NormMessage } from '../server/ai/providers';
 import { toAnthropicMessages } from '../server/ai/providers/anthropic';
 import { toOpenAIMessages } from '../server/ai/providers/openai';
 import { toGeminiContents } from '../server/ai/providers/gemini';
+import { formatPublicForVoice } from '../server/ai/voice';
 import type { GameStateView, AiDeckCard, AiToolResult } from '../services/aiTypes';
 
 const DECK: AiDeckCard[] = [
@@ -77,6 +78,14 @@ function offlineChecks(): boolean {
         ['anthropic: tool_use + tool_result blocks', a[1].content.some((b: any) => b.type === 'tool_use') && a[2].content[0].type === 'tool_result'],
         ['openai: assistant tool_calls + tool role', !!o.find((m: any) => m.role === 'assistant' && m.tool_calls) && !!o.find((m: any) => m.role === 'tool' && m.tool_call_id === 'play_land##0')],
         ['gemini: functionCall + functionResponse name recovered', g[1].parts.some((p: any) => p.functionCall?.name === 'play_land') && g[2].parts[0].functionResponse?.name === 'play_land'],
+    );
+
+    // Voice information firewall: the public view the negotiator sees must NOT contain
+    // hand-only cards (Cultivate is in hand only), but should show board + opponents.
+    const pub = formatPublicForVoice(VIEW);
+    checks.push(
+        ['voice firewall: hand-only card hidden from negotiator', !pub.includes('Cultivate')],
+        ['voice public view: shows board + opponents', pub.includes('Forest') && pub.includes('Human')],
     );
     let ok = true;
     for (const [name, pass] of checks) {
