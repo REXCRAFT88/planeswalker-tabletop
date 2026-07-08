@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { socket, connectSocket } from '../services/socket';
-import { Loader2, User, Check, AlertCircle, Heart, Shield, Layers } from 'lucide-react';
+import { Loader2, User, Check, AlertCircle, Heart, Layers } from 'lucide-react';
 
 interface MobileControllerProps {
     roomId: string;
@@ -51,31 +51,36 @@ export const MobileController: React.FC<MobileControllerProps> = ({ roomId, play
     useEffect(() => {
         const s = connectSocket();
 
-        // Join the room as a "mobile controller" (client)
-        // We already joined in Lobby, so we just need to listen for slots.
-        // Actually, we need to know WHICH slots are open.
-        // Let's ask the host for slots.
-        s.emit('get_slots', { room: roomId });
-
-        s.on('slots_update', (availableSlots: any[]) => {
+        // We already joined the room in the Lobby; here we only ask the host which
+        // seats are open and listen for claim results. Register once on mount so we
+        // don't re-emit get_slots on every status transition.
+        const handleSlots = (availableSlots: any[]) => {
             setSlots(availableSlots);
-            if (status === 'CONNECTING') setStatus('SELECT_SLOT');
-        });
-
-        s.on('slot_claimed', ({ success, message }) => {
+            setStatus(prev => (prev === 'CONNECTING' ? 'SELECT_SLOT' : prev));
+        };
+        const handleClaimed = ({ success, message }: { success: boolean, message?: string }) => {
             if (success) {
                 setStatus('PLAYING');
             } else {
                 setStatus('SELECT_SLOT');
                 setError(message || "Failed to claim slot.");
             }
-        });
+        };
+
+        s.on('slots_update', handleSlots);
+        s.on('slot_claimed', handleClaimed);
+        s.emit('get_slots', { room: roomId });
 
         return () => {
-            s.off('slots_update');
-            s.off('slot_claimed');
+            s.off('slots_update', handleSlots);
+            s.off('slot_claimed', handleClaimed);
         };
-    }, [roomId, status]);
+    }, [roomId]);
+
+    const refreshSlots = () => {
+        setError(null);
+        socket.emit('get_slots', { room: roomId });
+    };
 
     const handleSlotClick = (slotId: string) => {
         setSelectedSlotId(slotId);
@@ -257,7 +262,19 @@ export const MobileController: React.FC<MobileControllerProps> = ({ roomId, play
                                     </div>
                                 </div>
                                 <div className="bg-gray-800/50 border border-gray-700 p-4 rounded-xl flex flex-col items-center justify-center">
-                                    <div className="text-gray-500 text-xs italic text-center">Commander Damage coming soon</div>
+                                    <div className="text-amber-400 font-bold mb-2 text-sm uppercase tracking-wider">Cmdr Dmg</div>
+                                    {Object.keys(commanderDamage).length === 0 ? (
+                                        <div className="text-gray-500 text-xs text-center">None taken</div>
+                                    ) : (
+                                        <div className="flex flex-col gap-1 w-full">
+                                            {Object.entries(commanderDamage).map(([source, dmg]) => (
+                                                <div key={source} className="flex justify-between text-xs">
+                                                    <span className="text-gray-400 truncate">{source.replace(/^cmd-/, '')}</span>
+                                                    <span className="font-bold tabular-nums">{dmg}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -279,13 +296,6 @@ export const MobileController: React.FC<MobileControllerProps> = ({ roomId, play
                     >
                         <Heart size={24} />
                         <span className="text-[10px] font-bold">Life</span>
-                    </button>
-                    <button
-                        className="flex flex-col items-center gap-1 p-2 w-20 rounded-xl text-gray-600 cursor-not-allowed opacity-50"
-                        title="Coming Soon"
-                    >
-                        <Shield size={24} />
-                        <span className="text-[10px] font-bold">Cmdr</span>
                     </button>
                 </div>
             </div>
@@ -316,11 +326,16 @@ export const MobileController: React.FC<MobileControllerProps> = ({ roomId, play
 
             {status === 'SELECT_SLOT' && (
                 <div className="flex-1 overflow-y-auto">
-                    <h2 className="text-lg font-bold mb-4">Select Your Seat</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-bold">Select Your Seat</h2>
+                        <button onClick={refreshSlots} className="text-xs text-blue-400 hover:text-blue-300 border border-gray-700 rounded-lg px-3 py-1.5">
+                            Refresh
+                        </button>
+                    </div>
                     {error && <div className="bg-red-900/50 text-red-200 p-3 rounded-lg mb-4 flex items-center gap-2"><AlertCircle size={16} /> {error}</div>}
 
                     <div className="space-y-3">
-                        {slots.length === 0 && <p className="text-gray-500 text-center py-8">No open slots found.</p>}
+                        {slots.length === 0 && <p className="text-gray-500 text-center py-8">No open slots found. Tap Refresh once the host has added open slots.</p>}
                         {slots.map(slot => (
                             <button
                                 key={slot.id}

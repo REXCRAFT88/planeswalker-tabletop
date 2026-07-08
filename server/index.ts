@@ -16,7 +16,12 @@ app.use(helmet({ contentSecurityPolicy: false }));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: process.env.NODE_ENV === 'production' ? false : "http://localhost:5173", // Allow Vite dev server
+        // In production the client is served from the same origin, so CORS is disabled.
+        // In dev, allow the Vite dev server on either its default port (5173) or the
+        // port configured in vite.config.ts (3000).
+        origin: process.env.NODE_ENV === 'production'
+            ? false
+            : ["http://localhost:5173", "http://localhost:3000"],
         methods: ["GET", "POST"]
     }
 });
@@ -355,6 +360,23 @@ io.on('connection', (socket) => {
     });
 
     // --- Local Table Slot Logic ---
+    // A mobile controller asks the table host for the list of available seats.
+    socket.on('get_slots', ({ room }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
+        const hostId = roomMeta[room]?.hostId;
+        if (hostId) io.to(hostId).emit('get_slots', { requesterId: socket.id });
+    });
+
+    // The table host answers with the seat list, targeting the requester (or
+    // broadcasting to the room when a claim changes availability for everyone).
+    socket.on('slots_update', ({ room, targetId, slots }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return; // Only the host is the source of truth
+        if (targetId) io.to(targetId).emit('slots_update', slots);
+        else socket.to(room).emit('slots_update', slots);
+    });
+
     socket.on('request_claim_slot', ({ room, slotId, deck, tokens, playerName }) => {
         if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
@@ -390,6 +412,14 @@ io.on('connection', (socket) => {
             if (!isInRoom(socket.id, r)) return;
         }
         io.to(targetId).emit('hand_update', { hand, phase, mulliganCount });
+    });
+
+    // Table host pushes life/poison/commander-damage down to a specific mobile controller.
+    socket.on('send_stats_update', ({ roomId, targetId, life, poison, commanderDamage }) => {
+        if (!roomId || !targetId) return;
+        const r = roomId.trim().toUpperCase();
+        if (!isInRoom(socket.id, r)) return;
+        io.to(targetId).emit('send_stats_update', { life, poison, commanderDamage });
     });
 
     socket.on('play_card', ({ room, cardId }) => {

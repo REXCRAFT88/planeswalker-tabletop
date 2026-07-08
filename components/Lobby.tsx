@@ -24,7 +24,7 @@ interface LobbyProps {
     savedDecks: SavedDeck[];
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
-    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string) => void;
+    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, manaRules?: Record<string, ManaRule>, id?: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -206,7 +206,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         // If no deck is active, load the most recent one.
         if (activeDeck.length === 0 && savedDecks.length > 0) {
             const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens);
+            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, false, mostRecentDeck.name, mostRecentDeck.manaRules, mostRecentDeck.id);
         }
 
         onLocalGame();
@@ -221,14 +221,9 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name);
+        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name, deck.manaRules, deck.id);
         setIsLibraryOpen(false);
     };
-
-    // Since I missed adding `onLoadDeck` in App.tsx diff, I will add it now in the App.tsx diff above?
-    // No, I can't go back. I will add it to the LobbyProps and assume App passes it.
-    // Actually, I can just edit the App.tsx diff to include it.
-    // Let's assume I will add `onLoadDeck` to LobbyProps and pass `handleDeckReady` from App.
 
     const toggleCommanderInEdit = (cardId: string) => {
         if (!editingDeck) return;
@@ -240,14 +235,14 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
-        onLoadDeck(deck.deck, deck.tokens, false, deck.name);
+        onLoadDeck(deck.deck, deck.tokens, false, deck.name, deck.manaRules, deck.id);
         // Then go to builder
         onImportDeck();
     };
 
     const handleCreateNewDeck = () => {
-        // Clear current active deck
-        onLoadDeck([], [], false, 'New Deck');
+        // Clear current active deck (empty mana rules, no id)
+        onLoadDeck([], [], false, 'New Deck', {}, undefined);
         onImportDeck();
     };
 

@@ -918,28 +918,33 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // For now, let's join as the "Host" player.
             s.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId: 'host-table-' + Date.now(), isTable: true });
 
-            // Allow mobile players to join Open Slots
-            s.on('get_slots', () => {
-                const slots = localOpponents
-                    .filter(opp => opp.type === 'open_slot' || opp.type === 'human_local')
-                    .map(opp => ({
-                        id: opp.id,
-                        name: opp.name,
-                        isTaken: opp.type === 'human_local' && opp.id !== 'open-slot-placeholder' // Simplification
-                    }));
-
-                // For now, let's just send all "Open Slots"
-                const openSlots = localOpponents.map(opp => ({
+            // Build the seat list a mobile controller sees. A slot is "taken" when it
+            // is not an open_slot to begin with, or once a phone has claimed it.
+            const buildSlots = () => localOpponents.map(opp => {
+                const taken = opp.type !== 'open_slot' || !!claimedSlots.current[opp.id];
+                return {
                     id: opp.id,
-                    name: opp.type === 'open_slot' ? opp.name : `${opp.name} (Taken)`,
-                    isTaken: opp.type !== 'open_slot'
-                }));
-                s.emit('slots_update', openSlots);
+                    name: taken ? `${opp.name} (Taken)` : opp.name,
+                    isTaken: taken,
+                };
+            });
+
+            // Allow mobile players to join Open Slots. The server relays get_slots
+            // with the requesting phone's socket id so we can answer it directly.
+            s.on('get_slots', ({ requesterId }: { requesterId: string }) => {
+                s.emit('slots_update', { room: roomId, targetId: requesterId, slots: buildSlots() });
             });
 
             s.on('slot_claim_request', ({ applicantId, slotId, deck, tokens, playerName }) => {
+                // Reject if the slot is already taken by another phone.
+                if (claimedSlots.current[slotId]) {
+                    s.emit('confirm_slot_claim', { room: roomId, applicantId, slotId, approved: false });
+                    return;
+                }
+
                 // Emit success to the mobile client
                 s.emit('confirm_slot_claim', { room: roomId, applicantId, slotId, approved: true });
+                claimedSlots.current[slotId] = applicantId;
 
                 // Update local state to reflect the new player
                 setPlayersList(prev => prev.map(p => {
@@ -976,13 +981,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     [applicantId]: 40
                 }));
 
-                // Also update localOpponents reference if possible, or just rely on playersList?
-                // PlayersList is the source of truth for rendering the board.
-
-                // Trigger a re-broadcast of slots so other mobile clients see it's taken
-                // We can just emit slots_update again if needed, or let them poll.
-
-                // TODO: Store the full deck in a ref for resolving effects later
+                // PlayersList (updated above) is the source of truth for rendering the board.
+                // Store the seat's full private state, keyed by the phone's socket id.
                 localPlayerStates.current[applicantId] = {
                     id: applicantId,
                     hand: [], // Hand is on mobile
@@ -997,13 +997,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     hasKeptHand: false
                 };
 
+                // Mark the seat (by its new socket id) as remote-controlled so the host
+                // hides local hand controls for it.
                 setMobileControllers(prev => {
                     const next = new Set(prev);
-                    next.add(slotId);
+                    next.add(applicantId);
                     return next;
                 });
 
-
+                // Re-broadcast the seat list so other phones see this slot is now taken,
+                // and push the seat's starting stats to the phone that just claimed it.
+                s.emit('slots_update', { room: roomId, slots: buildSlots() });
+                sendStatsToSeat(applicantId);
             });
 
             return () => {
@@ -1085,6 +1090,24 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
+
+    // Local Table: maps an original open-slot id -> the mobile socket id that claimed it,
+    // so the host can report seat availability and route stats to the right phone.
+    const claimedSlots = useRef<Record<string, string>>({});
+
+    // Push a mobile-controlled seat's life/poison/commander-damage down to its phone.
+    const sendStatsToSeat = (seatId: string) => {
+        if (!isLocalTableHost) return;
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        socket.emit('send_stats_update', {
+            roomId,
+            targetId: seatId,
+            life: state.life,
+            poison: state.counters['poison'] || 0,
+            commanderDamage: state.commanderDamage || {},
+        });
+    };
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -1528,26 +1551,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [life, gamePhase, roomId, isLocal]);
 
-    // Sync Stats to Mobile
+    // Sync stats to mobile controllers. Pushes each remote-controlled seat's current
+    // life/poison/commander-damage to its phone whenever host-side state that could
+    // affect those values changes. Mobile-originated changes also push imperatively
+    // from their handlers (which mutate the localPlayerStates ref without a re-render).
     useEffect(() => {
-        if (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN') {
-            const myId = playersList[mySeatIndex]?.id;
-            if (myId) {
-                let poison = 0;
-                let cmdDmg = {};
-
-                if (isLocal && localPlayerStates.current[myId]) {
-                    const s = localPlayerStates.current[myId];
-                    if (s) {
-                        poison = s.counters['poison'] || 0;
-                        cmdDmg = s.commanderDamage || {};
-                    }
-                }
-
-                socket.emit('send_stats_update', { roomId, targetId: myId, life, poison, commanderDamage: cmdDmg });
-            }
-        }
-    }, [life, gamePhase, roomId, playersList, mySeatIndex, isLocal]);
+        if (!isLocalTableHost) return;
+        if (gamePhase !== 'PLAYING' && gamePhase !== 'MULLIGAN') return;
+        mobileControllers.forEach(seatId => sendStatsToSeat(seatId));
+    }, [isLocalTableHost, gamePhase, mobileControllers, life, commanderDamage, opponentsLife]);
 
     // Emit Count Changes
     useEffect(() => {
@@ -1673,7 +1685,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else if (action === 'UPDATE_OBJECT' && data.updates && data.updates.controllerId === 'local-player') {
             payload = { ...data, updates: { ...data.updates, controllerId: socket.id } };
         }
-        socket.emit('game_action', { room: roomId, action, data: payload });
         socket.emit('game_action', { room: roomId, action, data: payload });
     };
 
@@ -2674,12 +2685,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (playersList[mySeatIndex]?.id === playerId) {
             setLife(state.life);
         }
-        // Send stats update back to mobile to confirm
-        sendHandUpdate(playerId, state.hand, gamePhase, state.mulliganCount);
-        // Note: Life update is separate, handled by useEffect on [life] change, 
-        // BUT need to ensure it fires. 
-        // Since we called setLife(state.life), the useEffect [life] WILL fire.
-        // Correct.
+        // Confirm the updated stats back to the phone.
+        sendStatsToSeat(playerId);
     };
 
     const handleMobileUpdateCounter = ({ playerId, type, amount, targetId }: { playerId: string, type: string, amount: number, targetId?: string }) => {
@@ -2725,6 +2732,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else {
             state.counters[type] = (state.counters[type] || 0) + amount;
         }
+        // Confirm the updated stats back to the phone.
+        sendStatsToSeat(playerId);
     };
 
     useEffect(() => {

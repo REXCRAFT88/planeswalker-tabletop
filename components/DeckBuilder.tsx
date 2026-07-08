@@ -68,14 +68,77 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     };
 
     const handleImport = async () => {
-        // ... (existing import logic, huge block, I should avoid replacing if possible but I selected a large range)
-        // I will just use the exact logic as before for handleImport, I only need to change finalizeDeck and Props
-        // Wait, replace_file_content shouldn't need me to paste the whole huge block if I can target smaller chunks.
-        // But my 'EndLine' is 164 which includes handleImport.
-        // I will use multi_replace to be surgical.
+        if (!deckText.trim()) {
+            setError("Please paste a deck list first.");
+            return;
+        }
+
         setLoading(true);
-        // ...
-        // Actually, let me cancel this replace_file_content and use multi_replace to target Props and finalizeDeck separately.
+        setError(null);
+        setProgress(null);
+
+        try {
+            const parsed = parseDeckList(deckText);
+            if (parsed.length === 0) {
+                setError("No valid cards found in the list.");
+                return;
+            }
+
+            const uniqueNames = parsed.map(p => p.name);
+            const cardMap = await fetchBatch(uniqueNames, (current, total) => setProgress({ current, total }));
+
+            const deck: CardData[] = [];
+            const tokens: CardData[] = [];
+            const missing: string[] = [];
+
+            for (const item of parsed) {
+                const data = cardMap.get(item.name.toLowerCase());
+                if (!data) {
+                    missing.push(item.name);
+                    continue;
+                }
+                for (let i = 0; i < item.count; i++) {
+                    const instance = { ...data, id: crypto.randomUUID() };
+                    if (data.isToken) tokens.push(instance);
+                    else deck.push(instance);
+                }
+            }
+
+            if (deck.length === 0 && tokens.length === 0) {
+                setError("Could not load any cards. Please check the card names.");
+                return;
+            }
+
+            // Auto-generate default mana rules for mana sources, keyed by scryfallId.
+            // Don't overwrite rules the user has already customized.
+            const generatedRules: Record<string, ManaRule> = {};
+            const seenScryfall = new Set<string>();
+            for (const card of [...deck, ...tokens]) {
+                if (seenScryfall.has(card.scryfallId)) continue;
+                seenScryfall.add(card.scryfallId);
+                if (manaRules[card.scryfallId]) continue; // preserve existing/custom rule
+                const rule = generateDefaultManaRule(card);
+                if (rule) generatedRules[card.scryfallId] = rule;
+            }
+            if (Object.keys(generatedRules).length > 0) {
+                setManaRules(prev => ({ ...generatedRules, ...prev }));
+            }
+
+            setStagedDeck(deck);
+            setStagedTokens(prev => [...prev, ...tokens]);
+
+            if (missing.length > 0) {
+                const preview = missing.slice(0, 8).join(", ");
+                const extra = missing.length > 8 ? ` (+${missing.length - 8} more)` : "";
+                setError(`Imported ${deck.length} cards. Could not find: ${preview}${extra}`);
+            }
+        } catch (e) {
+            console.error("Deck import failed", e);
+            setError("Failed to import deck. Please try again.");
+        } finally {
+            setLoading(false);
+            setProgress(null);
+        }
     };
 
     const setCommander = (id: string) => {
