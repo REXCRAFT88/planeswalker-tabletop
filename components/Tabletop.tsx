@@ -15,7 +15,7 @@ import {
 } from '../services/mana';
 import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
 import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
-import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty } from '../services/aiTypes';
+import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
@@ -31,7 +31,7 @@ interface TabletopProps {
     initialGameStarted?: boolean;
     isLocal?: boolean;
     isLocalTableHost?: boolean;
-    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty }[];
+    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId }[];
     manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
@@ -3091,7 +3091,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty }) => {
+    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
         const state = localPlayerStates.current[seatId];
         if (!state) { nextTurn(); return; }
         const name = opp.name;
@@ -3114,7 +3114,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             let resp;
             try {
-                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId) });
+                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId), provider: opp.provider });
             } catch (e: any) {
                 addLog(`could not take its turn (${e?.message || 'AI error'}); passing`, 'SYSTEM', name);
                 nextTurn();
@@ -3157,7 +3157,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty }) => {
+    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
         const seatId = opp.id;
         if (!seatId) return;
         const state = localPlayerStates.current[seatId];
@@ -3171,7 +3171,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const hand = state.hand.filter(c => !c.isToken).map(c => ({ id: c.id, name: c.name, manaCost: c.manaCost, typeLine: c.typeLine }));
                 let dec;
                 try {
-                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand });
+                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand, provider: opp.provider });
                 } catch {
                     state.hasKeptHand = true;
                     addLog('keeps its hand', 'ACTION', opp.name);

@@ -3,10 +3,16 @@
 // in dev.
 import type {
     GameStateView, AiDeckCard, AiToolResult, AiTurnResponse, AiMulliganResponse,
-    AiPersonaId, AiDifficulty, AiCardRef,
+    AiPersonaId, AiDifficulty, AiCardRef, AiProviderId,
 } from './aiTypes';
 
 const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
+
+export interface AiStatus {
+    enabled: boolean;
+    providers: { id: AiProviderId; label: string }[];
+    defaultProvider: AiProviderId | null;
+}
 
 async function post<T>(path: string, body: any): Promise<T> {
     const resp = await fetch(`${API_BASE}/api/ai${path}`, {
@@ -24,17 +30,17 @@ async function post<T>(path: string, body: any): Promise<T> {
 
 let cachedEnabled: boolean | null = null;
 
-// Whether the server has an API key configured. Cached after the first check.
-export async function aiStatus(): Promise<{ enabled: boolean; model: string }> {
+// Whether the server has any provider configured, and which are available.
+export async function aiStatus(): Promise<AiStatus> {
     try {
         const resp = await fetch(`${API_BASE}/api/ai/status`);
-        if (!resp.ok) return { enabled: false, model: '' };
+        if (!resp.ok) return { enabled: false, providers: [], defaultProvider: null };
         const data = await resp.json();
         cachedEnabled = !!data.enabled;
-        return data;
+        return { enabled: !!data.enabled, providers: data.providers || [], defaultProvider: data.defaultProvider ?? null };
     } catch {
         cachedEnabled = false;
-        return { enabled: false, model: '' };
+        return { enabled: false, providers: [], defaultProvider: null };
     }
 }
 
@@ -48,6 +54,7 @@ export interface MulliganArgs {
     difficulty: AiDifficulty;
     deckSummary: string;
     hand: AiCardRef[];
+    provider?: AiProviderId;
 }
 
 export function requestMulligan(args: MulliganArgs): Promise<AiMulliganResponse> {
@@ -60,6 +67,7 @@ export interface TurnArgs {
     difficulty: AiDifficulty;
     deck: AiDeckCard[];
     stateView: GameStateView;
+    provider?: AiProviderId;
 }
 
 export function requestTurn(args: TurnArgs): Promise<AiTurnResponse> {

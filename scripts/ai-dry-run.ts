@@ -10,7 +10,12 @@
 import { buildTurnSystemPrompt, formatStateView } from '../server/ai/prompts';
 import { suggestPersona } from '../server/ai/personas';
 import { TURN_TOOLS } from '../server/ai/tools';
-import { aiEnabled, callClaude } from '../server/ai/client';
+import { aiEnabled, callLLM } from '../server/ai/client';
+import { availableProviders } from '../server/ai/providers';
+import type { NormMessage } from '../server/ai/providers';
+import { toAnthropicMessages } from '../server/ai/providers/anthropic';
+import { toOpenAIMessages } from '../server/ai/providers/openai';
+import { toGeminiContents } from '../server/ai/providers/gemini';
 import type { GameStateView, AiDeckCard, AiToolResult } from '../services/aiTypes';
 
 const DECK: AiDeckCard[] = [
@@ -57,6 +62,22 @@ function offlineChecks(): boolean {
         ['13 turn tools', TURN_TOOLS.length === 13],
         ['tool schemas well-formed', TURN_TOOLS.every(t => t.input_schema?.type === 'object' && Array.isArray(t.input_schema.required))],
     ];
+
+    // Provider message-conversion round-trip: a user turn, an assistant tool call,
+    // and a tool result must convert to each provider's wire format correctly.
+    const convo: NormMessage[] = [
+        { role: 'user', text: 'play your turn' },
+        { role: 'assistant', text: 'ok', toolCalls: [{ id: 'play_land##0', name: 'play_land', input: { cardId: 'c2' } }] },
+        { role: 'tool_results', results: [{ id: 'play_land##0', ok: true, detail: 'Played Forest.' }] },
+    ];
+    const a = toAnthropicMessages(convo);
+    const o = toOpenAIMessages('sys', convo);
+    const g = toGeminiContents(convo);
+    checks.push(
+        ['anthropic: tool_use + tool_result blocks', a[1].content.some((b: any) => b.type === 'tool_use') && a[2].content[0].type === 'tool_result'],
+        ['openai: assistant tool_calls + tool role', !!o.find((m: any) => m.role === 'assistant' && m.tool_calls) && !!o.find((m: any) => m.role === 'tool' && m.tool_call_id === 'play_land##0')],
+        ['gemini: functionCall + functionResponse name recovered', g[1].parts.some((p: any) => p.functionCall?.name === 'play_land') && g[2].parts[0].functionResponse?.name === 'play_land'],
+    );
     let ok = true;
     for (const [name, pass] of checks) {
         console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}`);
@@ -67,27 +88,24 @@ function offlineChecks(): boolean {
 
 async function liveRun(): Promise<void> {
     if (!aiEnabled()) {
-        console.log('\n--live requested but ANTHROPIC_API_KEY is not set. Skipping.');
+        console.log('\n--live requested but no provider API key is set (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY). Skipping.');
         return;
     }
-    console.log('\n=== LIVE TURN ===');
+    console.log('\n=== LIVE TURN ===  providers:', availableProviders().map(p => p.id).join(', '));
     const system = buildTurnSystemPrompt('balanced', 'Bot Alice', DECK);
-    const messages: any[] = [{ role: 'user', content: formatStateView(VIEW) }];
+    const messages: NormMessage[] = [{ role: 'user', text: formatStateView(VIEW) }];
     for (let round = 0; round < 12; round++) {
-        const res = await callClaude({ system, messages, tools: TURN_TOOLS, effort: 'medium' });
-        if (res.text) console.log(`  [says] ${res.text}`);
+        const res = await callLLM({ system, messages, tools: TURN_TOOLS, effort: 'medium' });
+        if (res.text) console.log(`  [${res.provider} says] ${res.text}`);
         for (const tc of res.toolCalls) console.log(`  [tool] ${tc.name}(${JSON.stringify(tc.input)})`);
-        messages.push({ role: 'assistant', content: res.content });
-        if (res.toolCalls.some(t => t.name === 'end_turn') || res.stopReason !== 'tool_use') {
+        messages.push({ role: 'assistant', text: res.text, toolCalls: res.toolCalls });
+        if (res.toolCalls.some(t => t.name === 'end_turn') || res.done) {
             console.log('  [turn ended]');
             break;
         }
         // Mock apply: echo success for every tool call.
         const results: AiToolResult[] = res.toolCalls.map(tc => ({ id: tc.id, ok: true, detail: 'applied (dry-run)' }));
-        messages.push({
-            role: 'user',
-            content: results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: JSON.stringify(r), is_error: false })),
-        });
+        messages.push({ role: 'tool_results', results });
     }
 }
 

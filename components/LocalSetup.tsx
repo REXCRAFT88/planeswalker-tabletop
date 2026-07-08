@@ -6,7 +6,7 @@ import { PLAYER_COLORS } from '../constants';
 import { SavedDeck } from '../App';
 import { aiStatus } from '../services/ai';
 import { suggestPersonaForDeck } from '../services/aiState';
-import { AI_PERSONA_LABELS, type AiPersonaId, type AiDifficulty } from '../services/aiTypes';
+import { AI_PERSONA_LABELS, AI_PROVIDER_LABELS, type AiPersonaId, type AiDifficulty, type AiProviderId } from '../services/aiTypes';
 
 interface LocalOpponent {
     id: string;
@@ -17,6 +17,7 @@ interface LocalOpponent {
     type: 'ai' | 'human_local' | 'open_slot';
     persona?: AiPersonaId;
     difficulty?: AiDifficulty;
+    provider?: AiProviderId;
 }
 
 interface LocalSetupProps {
@@ -43,11 +44,17 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     const [stagedType, setStagedType] = useState<'ai' | 'human_local'>('ai');
     const [stagedDifficulty, setStagedDifficulty] = useState<AiDifficulty>('casual');
     const [stagedPersona, setStagedPersona] = useState<AiPersonaId>('balanced');
+    const [stagedProvider, setStagedProvider] = useState<AiProviderId | undefined>(undefined);
 
-    // Whether the server has an ANTHROPIC_API_KEY (AI opponents require it).
+    // Which providers the server has keys for (AI opponents require at least one).
+    const [aiProviders, setAiProviders] = useState<{ id: AiProviderId; label: string }[]>([]);
     const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
     useEffect(() => {
-        aiStatus().then(s => setAiAvailable(!!s.enabled)).catch(() => setAiAvailable(false));
+        aiStatus().then(s => {
+            setAiAvailable(!!s.enabled);
+            setAiProviders(s.providers || []);
+            setStagedProvider(s.defaultProvider ?? undefined);
+        }).catch(() => setAiAvailable(false));
     }, []);
 
     // When a deck is staged, default the persona to a sensible suggestion and the
@@ -138,7 +145,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
             type: isAi ? 'ai' : 'human_local',
-            ...(isAi ? { persona: stagedPersona, difficulty: stagedDifficulty } : {}),
+            ...(isAi ? { persona: stagedPersona, difficulty: stagedDifficulty, provider: stagedProvider } : {}),
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
@@ -302,6 +309,20 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                     )}
                                 </div>
 
+                                {stagedType === 'ai' && aiAvailable !== false && aiProviders.length > 1 && (
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Model</label>
+                                        <div className="flex gap-1 flex-wrap">
+                                            {aiProviders.map(p => (
+                                                <button key={p.id} onClick={() => setStagedProvider(p.id)}
+                                                    className={`px-3 py-1.5 rounded text-xs font-bold border ${stagedProvider === p.id ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300'}`}>
+                                                    {p.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {stagedType === 'ai' && aiAvailable !== false && (
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
@@ -359,7 +380,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                             ) : (
                                                 <>
                                                     {opp.type === 'ai' ? (
-                                                        <span className="text-purple-400 font-bold flex items-center gap-0.5"><Bot size={11} /> AI · {opp.difficulty || 'casual'}</span>
+                                                        <span className="text-purple-400 font-bold flex items-center gap-0.5"><Bot size={11} /> AI · {opp.difficulty || 'casual'}{opp.provider ? ` · ${AI_PROVIDER_LABELS[opp.provider]}` : ''}</span>
                                                     ) : (
                                                         <span className="text-blue-400 font-bold flex items-center gap-0.5"><User size={11} /> Hot-seat</span>
                                                     )}

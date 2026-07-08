@@ -37,24 +37,32 @@ NODE_ENV=production node --import tsx server/index.ts   # serves dist/ + sockets
 
 ## AI opponents
 
-Local games can include AI Commander opponents driven by the Claude API. The AI plays
-its own turns — mulligans, plays lands, casts spells (mana is auto-tapped and validated
-against the real board), attacks, and announces triggers/targeting in the game log so
-humans can resolve anything the sandbox can't.
+Local games can include AI Commander opponents driven by an LLM. The AI plays its own
+turns — mulligans, plays lands, casts spells (mana is auto-tapped and validated against
+the real board), attacks, and announces triggers/targeting in the game log so humans can
+resolve anything the sandbox can't.
 
-### Enabling
+### Providers
 
-Set an Anthropic API key on the **server** (never the client):
+The AI "brain" runs on any of three providers behind one abstraction
+(`server/ai/providers/`): **Claude**, **ChatGPT (OpenAI)**, or **Gemini**. Set a key for
+each provider you want available:
 
 ```bash
 cp .env.example .env
-# edit .env and set ANTHROPIC_API_KEY=sk-ant-...
+# set one or more of:
+#   ANTHROPIC_API_KEY=sk-ant-...   (Claude,  default model claude-opus-4-8)
+#   OPENAI_API_KEY=sk-...          (ChatGPT, default model gpt-4o)
+#   GEMINI_API_KEY=...             (Gemini,  default model gemini-2.0-flash)
 ```
 
-Optional overrides: `AI_MODEL` (default `claude-opus-4-8`), `AI_MAX_ROUNDS` (default 12).
+Optional: `AI_PROVIDER` sets the default when multiple keys are present;
+`ANTHROPIC_MODEL` / `OPENAI_MODEL` / `GEMINI_MODEL` override the per-provider model;
+`AI_MAX_ROUNDS` (default 12) caps tool rounds per turn. When more than one provider is
+configured, each AI opponent can be assigned a specific provider in the setup UI.
 
-Without a key, AI is disabled: the setup UI shows AI as unavailable, `/api/ai/*` returns
-`503`, and any opponent marked AI simply falls back to hot-seat (manual) play.
+Without any key, AI is disabled: the setup UI shows AI as unavailable, `/api/ai/*`
+returns `503`, and any opponent marked AI falls back to hot-seat (manual) play.
 
 ### Using
 
@@ -71,10 +79,11 @@ Without a key, AI is disabled: the setup UI shows AI as unavailable, `/api/ai/*`
   hidden-info-free view of the board (`services/aiState.ts`), calls the server
   (`services/ai.ts` → `/api/ai/turn`), then validates and applies each returned tool call
   through the same board/emit path as human actions (`components/Tabletop.tsx`).
-- The server (`server/ai/`) is a thin Claude proxy: it holds the API key, builds the
-  persona + rules-of-engagement + decklist system prompt (cached), exposes the turn tool
+- The server (`server/ai/`) is a thin LLM proxy: it holds the API key(s), builds the
+  persona + rules-of-engagement + decklist system prompt, exposes the turn tool
   vocabulary, and keeps the per-turn tool-use conversation in memory so the loop can span
-  HTTP round-trips.
+  HTTP round-trips. A provider layer (`server/ai/providers/`) normalizes messages and
+  tool calls so the same code runs on Claude, OpenAI, or Gemini.
 - Each tool result the host returns (`{ ok, error, detail }`) is fed back to the model, so
   an illegal move (e.g. not enough mana) produces a correction rather than a crash.
 

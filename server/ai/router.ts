@@ -1,9 +1,10 @@
 import express from 'express';
-import { aiEnabled, callClaude } from './client';
+import { aiEnabled, callLLM, availableProviders, defaultProvider } from './client';
+import type { NormMessage } from './client';
 import { TURN_TOOLS, MULLIGAN_TOOL } from './tools';
 import { buildTurnSystemPrompt, buildMulliganSystemPrompt, formatStateView } from './prompts';
 import type {
-    AiDeckCard, GameStateView, AiToolResult, AiPersonaId, AiUsage,
+    AiDeckCard, GameStateView, AiToolResult, AiPersonaId, AiUsage, AiProviderId,
 } from '../../services/aiTypes';
 
 const MAX_ROUNDS = parseInt(process.env.AI_MAX_ROUNDS || '12', 10);
@@ -13,8 +14,9 @@ const MAX_BODY = 200 * 1024; // ~200 KB per request
 interface Conversation {
     system: string;
     tools: any[];
-    messages: any[];
+    messages: NormMessage[];
     effort: 'low' | 'medium' | 'high';
+    provider?: AiProviderId;
     rounds: number;
     lastUsed: number;
 }
@@ -38,51 +40,43 @@ function effortFor(difficulty: string | undefined): 'low' | 'medium' | 'high' {
     return difficulty === 'competitive' ? 'high' : 'medium';
 }
 
-function toolResultsToUserMessage(results: AiToolResult[]) {
-    return {
-        role: 'user',
-        content: results.map(r => ({
-            type: 'tool_result',
-            tool_use_id: r.id,
-            content: JSON.stringify({ ok: r.ok, error: r.error, detail: r.detail }),
-            is_error: !r.ok,
-        })),
-    };
-}
-
 export function createAiRouter(): express.Router {
     const router = express.Router();
     router.use(express.json({ limit: MAX_BODY }));
 
-    // Lets the client hide/disable AI features when the server has no API key.
+    // Lets the client hide/disable AI features and pick a provider.
     router.get('/status', (_req, res) => {
-        res.json({ enabled: aiEnabled(), model: process.env.AI_MODEL || 'claude-opus-4-8' });
+        const providers = availableProviders();
+        res.json({
+            enabled: aiEnabled(),
+            providers,
+            defaultProvider: defaultProvider(),
+        });
     });
 
-    // Guard every generative endpoint behind the key check.
     router.use((req, res, next) => {
         if (req.path === '/status') return next();
         if (!aiEnabled()) {
-            return res.status(503).json({ error: 'AI is unavailable: the server has no ANTHROPIC_API_KEY configured.' });
+            return res.status(503).json({ error: 'AI is unavailable: the server has no API key configured for any provider.' });
         }
         next();
     });
 
     router.post('/mulligan', async (req, res) => {
         try {
-            const { seatName, persona, difficulty, deckSummary, hand } = req.body || {};
+            const { seatName, persona, difficulty, deckSummary, hand, provider } = req.body || {};
             if (!Array.isArray(hand)) return res.status(400).json({ error: 'hand[] required' });
 
             const system = buildMulliganSystemPrompt((persona as AiPersonaId) || 'balanced', seatName || 'AI', deckSummary || '');
             const handText = hand.map((c: any) => `- ${c.name}${c.typeLine ? ' (' + c.typeLine + ')' : ''}`).join('\n');
-            const result = await callClaude({
+            const result = await callLLM({
                 system,
-                messages: [{ role: 'user', content: `Your opening hand:\n${handText}\n\nDecide.` }],
+                messages: [{ role: 'user', text: `Your opening hand:\n${handText}\n\nDecide.` }],
                 tools: [MULLIGAN_TOOL],
-                toolChoice: { type: 'tool', name: 'mulligan_decision' },
+                toolChoice: 'mulligan_decision',
                 effort: effortFor(difficulty),
                 maxTokens: 2048,
-            });
+            }, provider as AiProviderId);
             const call = result.toolCalls.find(t => t.name === 'mulligan_decision');
             const input = call?.input || {};
             res.json({
@@ -90,6 +84,7 @@ export function createAiRouter(): express.Router {
                 bottomCards: Array.isArray(input.bottomCards) ? input.bottomCards : [],
                 comment: input.comment || '',
                 usage: result.usage,
+                provider: result.provider,
             });
         } catch (e: any) {
             console.error('[AI] mulligan error', e?.message || e);
@@ -99,26 +94,27 @@ export function createAiRouter(): express.Router {
 
     router.post('/turn', async (req, res) => {
         try {
-            const { seatName, persona, difficulty, deck, stateView } = req.body || {};
+            const { seatName, persona, difficulty, deck, stateView, provider } = req.body || {};
             if (!stateView || !stateView.you) return res.status(400).json({ error: 'stateView required' });
 
             const system = buildTurnSystemPrompt((persona as AiPersonaId) || 'balanced', seatName || 'AI', (deck as AiDeckCard[]) || []);
             const effort = effortFor(difficulty);
-            const messages: any[] = [{ role: 'user', content: formatStateView(stateView as GameStateView) }];
+            const messages: NormMessage[] = [{ role: 'user', text: formatStateView(stateView as GameStateView) }];
 
-            const result = await callClaude({ system, messages, tools: TURN_TOOLS, effort });
-            messages.push({ role: 'assistant', content: result.content });
+            const result = await callLLM({ system, messages, tools: TURN_TOOLS, effort }, provider as AiProviderId);
+            messages.push({ role: 'assistant', text: result.text, toolCalls: result.toolCalls });
 
             const id = newId();
-            conversations.set(id, { system, tools: TURN_TOOLS, messages, effort, rounds: 1, lastUsed: Date.now() });
+            conversations.set(id, { system, tools: TURN_TOOLS, messages, effort, provider: result.provider, rounds: 1, lastUsed: Date.now() });
 
             const endTurn = result.toolCalls.some(t => t.name === 'end_turn');
             res.json({
                 conversationId: id,
                 toolCalls: result.toolCalls,
                 text: result.text,
-                done: endTurn || result.stopReason !== 'tool_use',
+                done: endTurn || result.done,
                 usage: result.usage,
+                provider: result.provider,
             });
         } catch (e: any) {
             console.error('[AI] turn error', e?.message || e);
@@ -138,17 +134,17 @@ export function createAiRouter(): express.Router {
                 return res.json({ conversationId, toolCalls: [], text: '', done: true, usage: emptyUsage() });
             }
 
-            convo.messages.push(toolResultsToUserMessage(toolResults as AiToolResult[]));
-            const result = await callClaude({ system: convo.system, messages: convo.messages, tools: convo.tools, effort: convo.effort });
-            convo.messages.push({ role: 'assistant', content: result.content });
+            convo.messages.push({ role: 'tool_results', results: toolResults as AiToolResult[] });
+            const result = await callLLM({ system: convo.system, messages: convo.messages, tools: convo.tools, effort: convo.effort }, convo.provider);
+            convo.messages.push({ role: 'assistant', text: result.text, toolCalls: result.toolCalls });
             convo.rounds += 1;
             convo.lastUsed = Date.now();
 
             const endTurn = result.toolCalls.some(t => t.name === 'end_turn');
-            const done = endTurn || result.stopReason !== 'tool_use';
+            const done = endTurn || result.done;
             if (done) conversations.delete(conversationId);
 
-            res.json({ conversationId, toolCalls: result.toolCalls, text: result.text, done, usage: result.usage });
+            res.json({ conversationId, toolCalls: result.toolCalls, text: result.text, done, usage: result.usage, provider: result.provider });
         } catch (e: any) {
             console.error('[AI] continue error', e?.message || e);
             res.status(502).json({ error: 'AI continue failed', detail: e?.message, done: true });

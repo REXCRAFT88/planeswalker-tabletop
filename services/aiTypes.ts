@@ -4,6 +4,15 @@
 export type AiDifficulty = 'casual' | 'competitive';
 export type AiPersonaId = 'timmy' | 'spike' | 'johnny' | 'balanced';
 
+// LLM provider that powers the "brain" (game-decision) model.
+export type AiProviderId = 'anthropic' | 'openai' | 'gemini';
+
+export const AI_PROVIDER_LABELS: Record<AiProviderId, string> = {
+    anthropic: 'Claude',
+    openai: 'ChatGPT',
+    gemini: 'Gemini',
+};
+
 export const AI_PERSONA_LABELS: Record<AiPersonaId, string> = {
     timmy: 'Timmy — big, splashy plays',
     spike: 'Spike — tight and competitive',
@@ -102,6 +111,7 @@ export interface AiTurnResponse {
     text: string;
     done: boolean;
     usage?: AiUsage;
+    provider?: AiProviderId;
 }
 
 export interface AiMulliganResponse {
@@ -109,6 +119,7 @@ export interface AiMulliganResponse {
     bottomCards: string[];
     comment: string;
     usage?: AiUsage;
+    provider?: AiProviderId;
 }
 
 // The list of tool names the host knows how to apply. Kept here so both the
