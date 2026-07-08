@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import helmet from 'helmet';
+import { createAiRouter } from './ai/router';
+import { aiEnabled } from './ai/client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +14,11 @@ const app = express();
 
 // Security headers (CSP disabled — requires careful tuning for CDN scripts)
 app.use(helmet({ contentSecurityPolicy: false }));
+
+// AI opponent endpoints (Claude API proxy). Mounted before the production
+// catch-all so /api/ai/* isn't swallowed by the SPA fallback.
+app.use('/api/ai', createAiRouter());
+console.log(`AI opponents: ${aiEnabled() ? 'ENABLED' : 'disabled (set ANTHROPIC_API_KEY to enable)'}`);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
