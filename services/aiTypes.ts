@@ -4,6 +4,13 @@
 export type AiDifficulty = 'casual' | 'competitive';
 export type AiPersonaId = 'timmy' | 'spike' | 'johnny' | 'balanced';
 
+export const AI_PERSONA_LABELS: Record<AiPersonaId, string> = {
+    timmy: 'Timmy — big, splashy plays',
+    spike: 'Spike — tight and competitive',
+    johnny: 'Johnny — combos and synergy',
+    balanced: 'Balanced — solid all-rounder',
+};
+
 export interface AiCardRef {
     id: string;
     name: string;

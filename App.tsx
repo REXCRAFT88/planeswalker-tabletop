@@ -5,6 +5,7 @@ import { Tabletop } from './components/Tabletop';
 import { LocalSetup } from './components/LocalSetup';
 import { MobileController } from './components/MobileController';
 import { CardData, ManaRule } from './types';
+import type { AiPersonaId, AiDifficulty } from './services/aiTypes';
 import { PLAYER_COLORS } from './constants';
 
 enum View {
@@ -79,7 +80,7 @@ function App() {
     });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
-    const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
+    const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
     const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() =>

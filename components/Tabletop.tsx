@@ -13,6 +13,9 @@ import {
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
+import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
+import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
+import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
@@ -28,7 +31,7 @@ interface TabletopProps {
     initialGameStarted?: boolean;
     isLocal?: boolean;
     isLocalTableHost?: boolean;
-    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
+    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty }[];
     manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
@@ -1108,6 +1111,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             commanderDamage: state.commanderDamage || {},
         });
     };
+
+    // --- AI Opponent State ---
+    // Whether the server has an ANTHROPIC_API_KEY (AI seats fall back to hot-seat if not).
+    const [aiAvailable, setAiAvailable] = useState(false);
+    // The seat id currently being driven by the AI (drives the "thinking" badge).
+    const [aiThinkingSeat, setAiThinkingSeat] = useState<string | null>(null);
+    const aiTurnActive = useRef(false);                       // re-entry guard for the turn loop
+    const aiLandsPlayed = useRef<Record<string, number>>({}); // seatId -> lands played this turn
+    const aiCommanderCasts = useRef<Record<string, number>>({}); // commander cardId -> times cast (tax)
+    const aiTokenCounter = useRef(0);
+    const aiMulliganRunning = useRef(false);
+    const aiUsageTotals = useRef({ input: 0, cacheRead: 0, output: 0 });
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -2793,6 +2808,443 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             socket.off('mobile_update_counter', handleMobileUpdateCounter);
         };
     }, [isLocal, playersList, mySeatIndex, maxZ, gamePhase]);
+
+
+    // ============================================================================
+    // AI Opponent Driver (local games). The host browser drives AI seats: it
+    // serializes the seat's game state, asks the server (Claude API proxy) for a
+    // turn as a sequence of tool calls, validates and applies each one through the
+    // same board/emit path as human actions, and passes the turn when done. AI
+    // hidden information stays on the host; opponents only get public info.
+    // ============================================================================
+    const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+    const accumulateUsage = (u?: { inputTokens: number; cacheReadTokens: number; outputTokens: number }) => {
+        if (!u) return;
+        aiUsageTotals.current.input += u.inputTokens || 0;
+        aiUsageTotals.current.cacheRead += u.cacheReadTokens || 0;
+        aiUsageTotals.current.output += u.outputTokens || 0;
+    };
+
+    const aiSeatIndex = (seatId: string) => playersList.findIndex(p => p.id === seatId);
+    const aiSeatRotation = (seatId: string) => layout[aiSeatIndex(seatId)]?.rot ?? 0;
+    const aiSeatName = (seatId: string) => playersList.find(p => p.id === seatId)?.name || 'AI';
+
+    const aiSpawnCard = (seatId: string, card: CardData) => {
+        const idx = aiSeatIndex(seatId);
+        const pos = layout[idx] || { x: 0, y: 0, rot: 0 };
+        const z = maxZ + (++aiTokenCounter.current);
+        const obj: BoardObject = {
+            id: crypto.randomUUID(), type: 'CARD', cardData: card,
+            x: pos.x + MAT_W / 2 - CARD_WIDTH / 2 + (Math.random() * 40 - 20),
+            y: pos.y + MAT_H / 2 - CARD_HEIGHT / 2 + (Math.random() * 40 - 20),
+            z, rotation: pos.rot, isFaceDown: false, isTransformed: false,
+            counters: {}, commanderDamage: {}, controllerId: seatId, quantity: 1, tappedQuantity: 0,
+        };
+        setMaxZ(prev => Math.max(prev, z) + 1);
+        setBoardObjects(prev => [...prev, obj]);
+        emitAction('ADD_OBJECT', obj);
+        return obj;
+    };
+
+    const aiTapSources = (seatId: string, tappedIds: string[]) => {
+        const rot = aiSeatRotation(seatId);
+        const tappedRot = (rot + 90) % 360;
+        const counts: Record<string, number> = {};
+        tappedIds.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        Object.entries(counts).forEach(([id, count]) => {
+            const o = boardObjectsRef.current.find(x => x.id === id);
+            if (!o) return;
+            if (o.quantity > 1) updateBoardObject(id, { tappedQuantity: Math.min(o.quantity, (o.tappedQuantity || 0) + count) });
+            else updateBoardObject(id, { rotation: tappedRot });
+        });
+    };
+
+    const poolStr = (p: ManaPool) => ['W', 'U', 'B', 'R', 'G', 'C'].map(c => `${c}:${(p as any)[c] || 0}`).join(' ');
+
+    // Applies one AI tool call to the AI seat's state. Returns a result the model
+    // can react to (so an illegal move produces a correction rather than a crash).
+    const aiApplyToolCall = (seatId: string, call: AiToolCall): AiToolResult => {
+        const ok = (detail?: string): AiToolResult => ({ id: call.id, ok: true, detail });
+        const fail = (error: string): AiToolResult => ({ id: call.id, ok: false, error });
+        const state = localPlayerStates.current[seatId];
+        if (!state) return fail('Seat state missing.');
+        const name = aiSeatName(seatId);
+        const input = call.input || {};
+        try {
+            switch (call.name) {
+                case 'play_land': {
+                    const card = state.hand.find(c => c.id === input.cardId && c.isLand);
+                    if (!card) return fail('That land is not in your hand.');
+                    if ((aiLandsPlayed.current[seatId] || 0) >= 1) return fail('You have already played a land this turn.');
+                    state.hand = state.hand.filter(c => c.id !== card.id);
+                    aiSpawnCard(seatId, card);
+                    aiLandsPlayed.current[seatId] = (aiLandsPlayed.current[seatId] || 0) + 1;
+                    addLog(`played ${card.name}`, 'ACTION', name);
+                    return ok(`Played ${card.name}.`);
+                }
+                case 'cast_spell': {
+                    const card = state.hand.find(c => c.id === input.cardId);
+                    if (!card) return fail('That card is not in your hand.');
+                    if (card.isLand) return fail('Use play_land for lands.');
+                    const cost = parseManaCost(card.manaCost || '');
+                    const rot = aiSeatRotation(seatId);
+                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+                    const res = autoTapForCost(cost, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
+                    if (!res.success) return fail(`Not enough mana for ${card.name} (${card.manaCost || 'free'}). Available: ${poolStr(manaInfo.pool)}.`);
+                    aiTapSources(seatId, res.tappedIds);
+                    state.hand = state.hand.filter(c => c.id !== card.id);
+                    const type = (card.typeLine || '').toLowerCase();
+                    const isPermanent = /creature|artifact|enchantment|planeswalker|battle/.test(type) && !/instant|sorcery/.test(type);
+                    if (isPermanent) aiSpawnCard(seatId, card);
+                    else state.graveyard = [...state.graveyard, card];
+                    const tgt = input.targetsDescription ? ` (${input.targetsDescription})` : '';
+                    addLog(`cast ${card.name}${tgt}`, 'ACTION', name);
+                    return ok(`Cast ${card.name}.`);
+                }
+                case 'cast_commander': {
+                    const card = state.commandZone.find(c => c.id === input.cardId);
+                    if (!card) return fail('That commander is not in your command zone.');
+                    const prevCasts = aiCommanderCasts.current[card.id] || 0;
+                    const base = parseManaCost(card.manaCost || '');
+                    const taxed = { symbols: [...base.symbols, { type: 'generic', count: prevCasts * 2 } as any], cmc: base.cmc + prevCasts * 2, hasX: base.hasX };
+                    const rot = aiSeatRotation(seatId);
+                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+                    const res = autoTapForCost(taxed as any, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
+                    if (!res.success) return fail(`Not enough mana for ${card.name} + ${prevCasts * 2} tax. Available: ${poolStr(manaInfo.pool)}.`);
+                    aiTapSources(seatId, res.tappedIds);
+                    state.commandZone = state.commandZone.filter(c => c.id !== card.id);
+                    aiSpawnCard(seatId, card);
+                    aiCommanderCasts.current[card.id] = prevCasts + 1;
+                    addLog(`cast commander ${card.name}${prevCasts ? ` (tax ${prevCasts * 2})` : ''}`, 'ACTION', name);
+                    return ok(`Cast commander ${card.name}.`);
+                }
+                case 'activate_mana':
+                case 'tap_permanent': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const rot = aiSeatRotation(seatId);
+                    if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: Math.min(obj.quantity, (obj.tappedQuantity || 0) + 1) });
+                    else updateBoardObject(obj.id, { rotation: (rot + 90) % 360 });
+                    addLog(`${call.name === 'activate_mana' ? 'tapped for mana' : 'tapped'} ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'untap_permanent': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const rot = aiSeatRotation(seatId);
+                    if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: 0 });
+                    else updateBoardObject(obj.id, { rotation: rot });
+                    addLog(`untapped ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'create_token': {
+                    const opp = localOpponents.find(o => (o.id || '') === seatId);
+                    const tokens = opp?.tokens || [];
+                    const q = String(input.name || '').toLowerCase();
+                    const tmpl = tokens.find(t => t.name.toLowerCase() === q) || tokens.find(t => t.name.toLowerCase().includes(q));
+                    if (!tmpl) return fail(`No token named "${input.name}" in your token list.`);
+                    const qty = Math.max(1, Math.min(20, Number(input.quantity) || 1));
+                    for (let i = 0; i < qty; i++) aiSpawnCard(seatId, { ...tmpl, id: crypto.randomUUID(), isToken: true });
+                    addLog(`created ${qty} ${tmpl.name} token${qty > 1 ? 's' : ''}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'add_counter': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const cur = obj.counters?.[input.counterType] || 0;
+                    const next = Math.max(0, cur + (Number(input.delta) || 0));
+                    const counters = { ...obj.counters, [input.counterType]: next };
+                    if (next === 0) delete counters[input.counterType];
+                    updateBoardObject(obj.id, { counters });
+                    addLog(`${(Number(input.delta) || 0) >= 0 ? 'added' : 'removed'} ${Math.abs(Number(input.delta) || 0)} ${input.counterType} on ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'move_card': {
+                    const from = input.from, to = input.to;
+                    let card: CardData | undefined;
+                    if (from === 'battlefield') {
+                        const obj = boardObjectsRef.current.find(o => o.id === input.cardId && o.controllerId === seatId);
+                        if (!obj) return fail('That permanent is not on your battlefield.');
+                        card = obj.cardData;
+                        setBoardObjects(prev => prev.filter(o => o.id !== obj.id));
+                        emitAction('REMOVE_OBJECT', { id: obj.id });
+                    } else {
+                        const zone = (from === 'graveyard' ? state.graveyard : from === 'exile' ? state.exile : from === 'hand' ? state.hand : from === 'library' ? state.library : null);
+                        if (!zone) return fail('Unknown source zone.');
+                        const idx = zone.findIndex(c => c.id === input.cardId);
+                        if (idx < 0) return fail(`That card is not in your ${from}.`);
+                        card = zone[idx];
+                        const filtered = zone.filter(c => c.id !== card!.id);
+                        if (from === 'graveyard') state.graveyard = filtered;
+                        else if (from === 'exile') state.exile = filtered;
+                        else if (from === 'hand') state.hand = filtered;
+                        else state.library = filtered;
+                    }
+                    if (!card) return fail('Card not found.');
+                    if (to === 'battlefield') aiSpawnCard(seatId, card);
+                    else if (to === 'graveyard') state.graveyard = [...state.graveyard, card];
+                    else if (to === 'exile') state.exile = [...state.exile, card];
+                    else if (to === 'hand') state.hand = [...state.hand, card];
+                    else if (to === 'library-top') state.library = [card, ...state.library];
+                    else if (to === 'library-bottom') state.library = [...state.library, card];
+                    else return fail('Unknown destination zone.');
+                    addLog(`moved ${card.name} to ${String(to).replace('-', ' ')}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'declare_attackers': {
+                    const attacks = Array.isArray(input.attacks) ? input.attacks : [];
+                    if (!attacks.length) return fail('No attackers specified.');
+                    const rot = aiSeatRotation(seatId);
+                    const names: string[] = [];
+                    for (const a of attacks) {
+                        const obj = boardObjectsRef.current.find(o => o.id === a.objectId && o.controllerId === seatId);
+                        if (!obj) continue;
+                        if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: Math.min(obj.quantity, (obj.tappedQuantity || 0) + 1) });
+                        else updateBoardObject(obj.id, { rotation: (rot + 90) % 360 });
+                        const defName = playersList.find(p => p.id === a.defenderSeatId)?.name || 'a player';
+                        names.push(`${obj.cardData.name} → ${defName}`);
+                    }
+                    if (!names.length) return fail('None of those creatures are on your battlefield.');
+                    addLog(`attacks with ${names.join(', ')}`, 'ACTION', name);
+                    return ok(`Declared ${names.length} attacker(s). Defenders should assign blocks and take damage.`);
+                }
+                case 'adjust_life': {
+                    const target = input.seatId || seatId;
+                    const d = Number(input.delta) || 0;
+                    const ts = localPlayerStates.current[target];
+                    if (ts) ts.life = (ts.life || 40) + d;
+                    if (playersList[mySeatIndex]?.id === target) setLife(prev => prev + d);
+                    else setOpponentsLife(prev => ({ ...prev, [target]: ts ? ts.life : (prev[target] ?? 40) + d }));
+                    const tName = playersList.find(p => p.id === target)?.name || 'a player';
+                    const reason = input.reason ? ` (${input.reason})` : '';
+                    addLog(`${d >= 0 ? 'gained' : 'lost'} ${Math.abs(d)} life for ${tName}${reason}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'announce': {
+                    if (!input.message) return fail('No message provided.');
+                    addLog(String(input.message), 'ACTION', name);
+                    return ok();
+                }
+                case 'end_turn': {
+                    return ok('Turn ended.');
+                }
+                default:
+                    return fail(`Unknown tool: ${call.name}`);
+            }
+        } catch (e: any) {
+            return fail(`Error applying ${call.name}: ${e?.message || e}`);
+        }
+    };
+
+    const buildAiView = (seatId: string) => {
+        const state = localPlayerStates.current[seatId];
+        const rot = aiSeatRotation(seatId);
+        const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+        const opponents = playersList.filter(p => p.id !== seatId).map(p => {
+            const s = localPlayerStates.current[p.id];
+            return {
+                seatId: p.id,
+                name: p.name,
+                life: s?.life ?? opponentsLife[p.id] ?? 40,
+                poison: s?.counters?.['poison'] ?? 0,
+                commanders: (s?.commandZone ?? []).map(c => c.name),
+                handCount: (s?.hand ?? []).filter(c => !c.isToken).length,
+                commanderDamageTakenFromAi: 0,
+            };
+        });
+        const defaultRotations: Record<string, number> = {};
+        playersList.forEach((p, i) => { defaultRotations[p.id] = layout[i]?.rot ?? 0; });
+        const recentLog = logsRef.current.slice(0, 15).reverse().map(l => `${l.playerName}: ${l.message}`);
+        return buildGameStateView({
+            turn: turnRef.current,
+            aiSeatId: seatId,
+            aiSeatName: aiSeatName(seatId),
+            hand: state.hand,
+            libraryCount: state.library.length,
+            graveyard: state.graveyard,
+            exileCount: state.exile.length,
+            commandZone: state.commandZone,
+            life: state.life,
+            commanderTax: (aiCommanderCasts.current[state.commandZone[0]?.id] || 0) * 2,
+            landsPlayedThisTurn: aiLandsPlayed.current[seatId] || 0,
+            manaAvailable: manaInfo.pool,
+            boardObjects: boardObjectsRef.current,
+            opponents,
+            defaultRotations,
+            recentLog,
+        });
+    };
+
+    const aiUntapAndDraw = (seatId: string) => {
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        aiLandsPlayed.current[seatId] = 0;
+        const rot = aiSeatRotation(seatId);
+        boardObjectsRef.current
+            .filter(o => o.controllerId === seatId && (o.rotation !== rot || o.tappedQuantity > 0))
+            .forEach(o => updateBoardObject(o.id, { rotation: rot, tappedQuantity: 0 }));
+        if (state.library.length > 0) {
+            const drawn = state.library[0];
+            state.library = state.library.slice(1);
+            state.hand = [...state.hand, drawn];
+            addLog('draws for the turn', 'ACTION', aiSeatName(seatId));
+        }
+    };
+
+    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty }) => {
+        const state = localPlayerStates.current[seatId];
+        if (!state) { nextTurn(); return; }
+        const name = opp.name;
+        setAiThinkingSeat(seatId);
+        try {
+            // Watch from the primary seat so the AI's hand stays hidden from the human.
+            if (mySeatIndex !== 0 && playersList[0]) {
+                const viewed = playersList[mySeatIndex]?.id;
+                if (viewed) saveLocalPlayerState(viewed);
+                setMySeatIndex(0);
+                loadLocalPlayerState(playersList[0].id);
+            }
+
+            aiUntapAndDraw(seatId);
+            await delay(600);
+
+            const persona = (opp.persona || 'balanced') as AiPersonaId;
+            const difficulty = (opp.difficulty || 'casual') as AiDifficulty;
+            const deck = deckToSummaryCards(opp.deck || []);
+
+            let resp;
+            try {
+                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId) });
+            } catch (e: any) {
+                addLog(`could not take its turn (${e?.message || 'AI error'}); passing`, 'SYSTEM', name);
+                nextTurn();
+                return;
+            }
+            accumulateUsage(resp.usage);
+            if (resp.text) addLog(resp.text, 'ACTION', name);
+
+            let rounds = 0;
+            while (true) {
+                let ended = false;
+                const results: AiToolResult[] = [];
+                for (const call of resp.toolCalls) {
+                    if (call.name === 'end_turn') {
+                        if (call.input?.summary) addLog(`ends turn — ${call.input.summary}`, 'SYSTEM', name);
+                        else addLog('ends its turn', 'SYSTEM', name);
+                        ended = true;
+                        results.push({ id: call.id, ok: true });
+                        continue;
+                    }
+                    results.push(aiApplyToolCall(seatId, call));
+                    await delay(750);
+                }
+                if (ended || resp.done) break;
+                if (++rounds > 14) { addLog('turn ran long; ending', 'SYSTEM', name); break; }
+                try {
+                    resp = await continueTurn(resp.conversationId, results);
+                } catch (e: any) {
+                    addLog(`turn interrupted (${e?.message || 'AI error'})`, 'SYSTEM', name);
+                    break;
+                }
+                accumulateUsage(resp.usage);
+                if (resp.text) addLog(resp.text, 'ACTION', name);
+            }
+
+            await delay(500);
+            nextTurn();
+        } finally {
+            setAiThinkingSeat(null);
+        }
+    };
+
+    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty }) => {
+        const seatId = opp.id;
+        if (!seatId) return;
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        setAiThinkingSeat(seatId);
+        try {
+            const persona = (opp.persona || 'balanced') as AiPersonaId;
+            const difficulty = (opp.difficulty || 'casual') as AiDifficulty;
+            const deckSummary = deckStrategySummary(opp.deck || []);
+            for (let attempt = 0; attempt < 4 && !state.hasKeptHand; attempt++) {
+                const hand = state.hand.filter(c => !c.isToken).map(c => ({ id: c.id, name: c.name, manaCost: c.manaCost, typeLine: c.typeLine }));
+                let dec;
+                try {
+                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand });
+                } catch {
+                    state.hasKeptHand = true;
+                    addLog('keeps its hand', 'ACTION', opp.name);
+                    break;
+                }
+                accumulateUsage(dec.usage);
+                if (dec.keep) {
+                    if (Array.isArray(dec.bottomCards) && dec.bottomCards.length) {
+                        const toBottom: CardData[] = [];
+                        for (const cardName of dec.bottomCards) {
+                            const found = state.hand.find(c => !c.isToken && c.name.toLowerCase() === String(cardName).toLowerCase() && !toBottom.includes(c));
+                            if (found) toBottom.push(found);
+                        }
+                        if (toBottom.length) {
+                            state.hand = state.hand.filter(c => !toBottom.includes(c));
+                            state.library = [...state.library, ...toBottom];
+                        }
+                    }
+                    state.hasKeptHand = true;
+                    addLog(`keeps its hand${dec.comment ? ` — "${dec.comment}"` : ''}`, 'ACTION', opp.name);
+                } else {
+                    const nonToken = state.hand.filter(c => !c.isToken);
+                    const tokens = state.hand.filter(c => c.isToken);
+                    const shuffled = [...nonToken, ...state.library].sort(() => Math.random() - 0.5);
+                    state.hand = [...shuffled.slice(0, 7), ...tokens];
+                    state.library = shuffled.slice(7);
+                    state.mulliganCount = (state.mulliganCount || 0) + 1;
+                    addLog(`mulligans${dec.comment ? ` — "${dec.comment}"` : ''}`, 'ACTION', opp.name);
+                }
+            }
+            if (!state.hasKeptHand) state.hasKeptHand = true; // safety after cap
+        } finally {
+            setAiThinkingSeat(null);
+        }
+    };
+
+    // Detect whether the server has AI enabled (falls back to hot-seat otherwise).
+    useEffect(() => {
+        if (!isLocal) return;
+        let mounted = true;
+        aiStatus().then(s => { if (mounted) setAiAvailable(!!s.enabled); }).catch(() => { });
+        return () => { mounted = false; };
+    }, [isLocal]);
+
+    // Drive AI seats' turns.
+    useEffect(() => {
+        if (!isLocal || !aiAvailable) return;
+        if (gamePhase !== 'PLAYING') return;
+        const seatId = currentTurnPlayerId;
+        if (!seatId) return;
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || opp.type !== 'ai') return;
+        if (aiTurnActive.current) return;
+        aiTurnActive.current = true;
+        runAiTurn(seatId, opp)
+            .catch(e => { console.error('AI turn failed', e); nextTurn(); })
+            .finally(() => { aiTurnActive.current = false; });
+    }, [currentTurnPlayerId, gamePhase, isLocal, aiAvailable]);
+
+    // Resolve AI seats' mulligan decisions during the MULLIGAN phase.
+    useEffect(() => {
+        if (!isLocal || !aiAvailable) return;
+        if (gamePhase !== 'MULLIGAN') return;
+        if (aiMulliganRunning.current) return;
+        const pending = localOpponents.filter(o => o.type === 'ai' && o.id && localPlayerStates.current[o.id] && !localPlayerStates.current[o.id].hasKeptHand);
+        if (!pending.length) return;
+        aiMulliganRunning.current = true;
+        (async () => {
+            for (const opp of pending) await runAiMulligan(opp);
+            aiMulliganRunning.current = false;
+            if (allSeatsKept()) setGamePhase('PLAYING');
+        })();
+    }, [gamePhase, isLocal, aiAvailable, localOpponents]);
 
 
     const confirmKeepHand = () => {
@@ -5057,6 +5509,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[9000] pointer-events-none animate-in fade-in slide-in-from-top-4">
                     <div className="bg-black/70 backdrop-blur text-white px-4 py-1 rounded-full text-sm font-medium border border-white/10 shadow-xl">
                         {statusMessage}
+                    </div>
+                </div>
+            )}
+
+            {/* AI "thinking" badge */}
+            {aiThinkingSeat && (
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[9500] pointer-events-none animate-in fade-in slide-in-from-top-2">
+                    <div className="bg-purple-900/80 backdrop-blur text-purple-100 px-4 py-1.5 rounded-full text-sm font-bold border border-purple-500/40 shadow-xl flex items-center gap-2">
+                        <Loader size={14} className="animate-spin" />
+                        🤖 {aiSeatName(aiThinkingSeat)} is thinking…
                     </div>
                 </div>
             )}

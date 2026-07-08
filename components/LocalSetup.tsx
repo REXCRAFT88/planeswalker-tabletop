@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CardData } from '../types';
 import { parseDeckList, fetchBatch } from '../services/scryfall';
-import { Plus, Trash2, Play, Loader2, User, ArrowLeft, Crown, Check } from 'lucide-react';
+import { Plus, Trash2, Play, Loader2, User, ArrowLeft, Crown, Check, Bot } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { SavedDeck } from '../App';
+import { aiStatus } from '../services/ai';
+import { suggestPersonaForDeck } from '../services/aiState';
+import { AI_PERSONA_LABELS, type AiPersonaId, type AiDifficulty } from '../services/aiTypes';
 
 interface LocalOpponent {
     id: string;
@@ -12,7 +15,8 @@ interface LocalOpponent {
     tokens: CardData[];
     color: string;
     type: 'ai' | 'human_local' | 'open_slot';
-
+    persona?: AiPersonaId;
+    difficulty?: AiDifficulty;
 }
 
 interface LocalSetupProps {
@@ -34,6 +38,26 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     // Staging state for commander selection
     const [stagedOpponent, setStagedOpponent] = useState<{ name: string, deck: CardData[], tokens: CardData[] } | null>(null);
     const [showLibrary, setShowLibrary] = useState(false);
+
+    // How the staged opponent is controlled.
+    const [stagedType, setStagedType] = useState<'ai' | 'human_local'>('ai');
+    const [stagedDifficulty, setStagedDifficulty] = useState<AiDifficulty>('casual');
+    const [stagedPersona, setStagedPersona] = useState<AiPersonaId>('balanced');
+
+    // Whether the server has an ANTHROPIC_API_KEY (AI opponents require it).
+    const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+    useEffect(() => {
+        aiStatus().then(s => setAiAvailable(!!s.enabled)).catch(() => setAiAvailable(false));
+    }, []);
+
+    // When a deck is staged, default the persona to a sensible suggestion and the
+    // control type to AI (falling back to hot-seat when AI is unavailable).
+    useEffect(() => {
+        if (stagedOpponent) {
+            setStagedPersona(suggestPersonaForDeck(stagedOpponent.deck));
+            setStagedType(aiAvailable === false ? 'human_local' : 'ai');
+        }
+    }, [stagedOpponent, aiAvailable]);
 
     const handleSelectFromLibrary = (saved: SavedDeck) => {
         setStagedOpponent({
@@ -106,13 +130,15 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
 
     const confirmOpponent = () => {
         if (!stagedOpponent) return;
+        const isAi = stagedType === 'ai' && aiAvailable !== false;
         const newOpponent: LocalOpponent = {
             id: `local-opponent-${Date.now()}`,
             name: stagedOpponent.name,
             deck: stagedOpponent.deck,
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
-            type: 'ai' // Default to AI for now, could add Human/AI toggle later if needed for non-local-table
+            type: isAi ? 'ai' : 'human_local',
+            ...(isAi ? { persona: stagedPersona, difficulty: stagedDifficulty } : {}),
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
@@ -252,6 +278,56 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                     ))}
                                 </div>
                             </div>
+                            {/* Control type + AI options */}
+                            <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-3 mb-3 space-y-3">
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Controlled by</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            onClick={() => setStagedType('ai')}
+                                            disabled={aiAvailable === false}
+                                            className={`py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 border transition-colors ${stagedType === 'ai' && aiAvailable !== false ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                                        >
+                                            <Bot size={15} /> AI
+                                        </button>
+                                        <button
+                                            onClick={() => setStagedType('human_local')}
+                                            className={`py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 border transition-colors ${stagedType === 'human_local' || aiAvailable === false ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300'}`}
+                                        >
+                                            <User size={15} /> Hot-seat
+                                        </button>
+                                    </div>
+                                    {aiAvailable === false && (
+                                        <p className="text-[10px] text-amber-400/80 mt-1">AI is unavailable (server has no API key). Opponent will be played hot-seat.</p>
+                                    )}
+                                </div>
+
+                                {stagedType === 'ai' && aiAvailable !== false && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Difficulty</label>
+                                            <div className="grid grid-cols-2 gap-1">
+                                                {(['casual', 'competitive'] as AiDifficulty[]).map(d => (
+                                                    <button key={d} onClick={() => setStagedDifficulty(d)}
+                                                        className={`py-1.5 rounded text-xs font-bold border capitalize ${stagedDifficulty === d ? 'bg-green-600 border-green-500 text-white' : 'bg-gray-800 border-gray-600 text-gray-300'}`}>
+                                                        {d}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Personality</label>
+                                            <select value={stagedPersona} onChange={e => setStagedPersona(e.target.value as AiPersonaId)}
+                                                className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-purple-500">
+                                                {(Object.keys(AI_PERSONA_LABELS) as AiPersonaId[]).map(p => (
+                                                    <option key={p} value={p}>{AI_PERSONA_LABELS[p]}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="flex gap-2">
                                 <button onClick={() => setStagedOpponent(null)} className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-bold">Cancel</button>
                                 <button onClick={confirmOpponent} className="flex-1 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold flex items-center justify-center gap-2"><Check size={16} /> Confirm</button>
@@ -282,6 +358,11 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                                 <span className="text-indigo-400 font-bold animate-pulse">Waiting for player...</span>
                                             ) : (
                                                 <>
+                                                    {opp.type === 'ai' ? (
+                                                        <span className="text-purple-400 font-bold flex items-center gap-0.5"><Bot size={11} /> AI · {opp.difficulty || 'casual'}</span>
+                                                    ) : (
+                                                        <span className="text-blue-400 font-bold flex items-center gap-0.5"><User size={11} /> Hot-seat</span>
+                                                    )}
                                                     <span>{opp.deck.length} cards</span>
                                                     {opp.deck.some(c => c.isCommander) && <span className="text-amber-500 flex items-center gap-0.5"><Crown size={10} /> Commander</span>}
                                                 </>

@@ -15,6 +15,24 @@ const app = express();
 // Security headers (CSP disabled — requires careful tuning for CDN scripts)
 app.use(helmet({ contentSecurityPolicy: false }));
 
+// In dev the client (Vite on :3000) and this API server (:3001) are different
+// origins, so the HTTP API routes need CORS headers (Socket.IO's CORS config does
+// not cover Express routes). In production the client is served from this same
+// origin, so no CORS is needed.
+if (process.env.NODE_ENV !== 'production') {
+    const DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:3000'];
+    app.use('/api', (req, res, next) => {
+        const origin = req.headers.origin;
+        if (origin && DEV_ORIGINS.includes(origin)) {
+            res.header('Access-Control-Allow-Origin', origin);
+            res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Content-Type');
+        }
+        if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+        next();
+    });
+}
+
 // AI opponent endpoints (Claude API proxy). Mounted before the production
 // catch-all so /api/ai/* isn't swallowed by the SPA fallback.
 app.use('/api/ai', createAiRouter());
