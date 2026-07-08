@@ -258,7 +258,30 @@ io.on('connection', (socket) => {
     socket.on('update_player_order', ({ room, players }) => {
         if (room) room = room.trim().toUpperCase();
         if (!rooms[room] || !isHost(socket.id, room)) return; // Host-only
-        rooms[room] = players;
+        if (!Array.isArray(players)) return;
+
+        // Treat the payload as an ORDERING only. Reorder the existing roster by the
+        // supplied ids and keep the server-side player objects authoritative — never
+        // trust client-supplied fields (userId, color, disconnected) or inject
+        // players that aren't already in the room.
+        const current = rooms[room];
+        const seen = new Set<string>();
+        const ordered: Player[] = [];
+        for (const p of players) {
+            const id = p && typeof p.id === 'string' ? p.id : null;
+            if (!id || seen.has(id)) continue;
+            const existing = current.find(cp => cp.id === id);
+            if (existing) {
+                ordered.push(existing);
+                seen.add(id);
+            }
+        }
+        // Append any existing players the client omitted, preserving them.
+        for (const cp of current) {
+            if (!seen.has(cp.id)) ordered.push(cp);
+        }
+
+        rooms[room] = ordered;
         io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
     });
 
@@ -495,14 +518,13 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
+                io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
                 io.to(room).emit('notification', { message: `${player.name} disconnected. They have 5 minutes to reconnect.` });
 
-                if (rooms[room].every(p => p.disconnected)) {
-                    delete rooms[room];
-                    delete roomMeta[room];
-                    delete roomStates[room];
-                }
+                // Keep the room and its saved state alive so disconnected players can
+                // reconnect. The 5-minute per-player timeout above removes stragglers,
+                // and the periodic cleanup interval collects fully-disconnected rooms
+                // after 10 minutes. Deleting immediately here would defeat both.
                 break;
             }
         }

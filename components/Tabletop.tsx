@@ -1225,18 +1225,42 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (data.logs) setLogs(data.logs);
             hasLoadedState.current = true;
 
-            // Fix Board Object Controllers (Map old ID to new Socket ID)
+            // Map backup player ids -> currently-connected socket ids. Match each
+            // backup player to a present player by userId (preferred) or name, so a
+            // restore keeps the full multiplayer roster/turn order instead of
+            // collapsing everyone into the restoring client.
             const myNewId = socket.id;
-            const myOldPlayer = data.playersList?.find((p: any) => p.name === playerName);
+            const backupPlayers: any[] = data.playersList || [];
+            const currentPlayers = playersListRef.current;
+            const myOldPlayer = backupPlayers.find((p: any) => p.name === playerName);
             const myOldId = myOldPlayer?.id;
 
-            const restoredObjects = (data.boardObjects || []).map((obj: BoardObject) => {
-                // If single player or matching name, take control
-                if (myOldId && obj.controllerId === myOldId) {
-                    return { ...obj, controllerId: myNewId };
-                }
-                return obj;
-            });
+            const idRemap: Record<string, string> = {};
+            for (const bp of backupPlayers) {
+                const match = currentPlayers.find(cp =>
+                    (bp.userId && cp.userId && cp.userId === bp.userId) || cp.name === bp.name
+                );
+                if (match) idRemap[bp.id] = match.id;
+            }
+            if (myOldId && myNewId) idRemap[myOldId] = myNewId;
+            const remapId = (id: string) => idRemap[id] || id;
+
+            const restoredObjects = (data.boardObjects || []).map((obj: BoardObject) => ({
+                ...obj,
+                controllerId: remapId(obj.controllerId),
+            }));
+
+            // Single-player backups collapse to just this client; multiplayer backups
+            // preserve the (remapped) turn order and active player.
+            const isSinglePlayer = backupPlayers.length <= 1;
+            const restoredTurnOrder = isSinglePlayer
+                ? [myNewId]
+                : (Array.isArray(data.turnOrder) && data.turnOrder.length
+                    ? data.turnOrder.map(remapId)
+                    : currentPlayers.map(p => p.id));
+            const restoredCurrentTurn = isSinglePlayer
+                ? myNewId
+                : remapId(data.currentTurnPlayerId || myOldId || myNewId);
 
             setBoardObjects(restoredObjects);
             setGamePhase(data.gamePhase);
@@ -1244,18 +1268,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setRound(data.round || 1);
             setTurnStartTime(data.turnStartTime || Date.now());
             setCommanderDamage(data.commanderDamage || {});
+            setTurnOrder(restoredTurnOrder);
+            setCurrentTurnPlayerId(restoredCurrentTurn);
+            setPlayersList(prev => sortPlayers(prev, restoredTurnOrder));
 
-            // Sync to Server
+            // Sync to Server (broadcast to the other clients, who apply it via GAME_STATE_SYNC)
             socket.emit('game_action', {
                 room: roomId, action: 'GAME_STATE_SYNC', data: {
                     phase: data.gamePhase,
                     boardObjects: restoredObjects,
                     turn: data.turn,
                     round: data.round,
-                    currentTurnPlayerId: myNewId,
+                    currentTurnPlayerId: restoredCurrentTurn,
                     turnStartTime: data.turnStartTime,
                     commanderDamage: data.commanderDamage,
-                    turnOrder: [myNewId],
+                    turnOrder: restoredTurnOrder,
                     logs: data.logs
                 }
             });
@@ -1616,7 +1643,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [mySeatIndex, gamePhase, isLocal, roomId]);
 
     // Stats Helper
-    const getMyId = () => isLocal ? playersList[mySeatIndex].id : socket.id;
+    const getMyId = () => isLocal ? (playersList[mySeatIndex]?.id ?? playersList[0]?.id ?? 'player-0') : (socket.id ?? 'local-player');
 
     const updateMyStats = (updates: Partial<PlayerStats>) => {
         setGameStats(prev => {
@@ -1695,7 +1722,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const addLog = (message: string, type: 'ACTION' | 'SYSTEM' = 'ACTION', overrideName?: string) => {
         console.log(`Adding log: ${message} (${type})`); // Debug
-        const actingPlayerName = overrideName || (isLocal ? playersList[mySeatIndex].name : playerName);
+        const actingPlayerName = overrideName || (isLocal ? (playersList[mySeatIndex]?.name ?? playerName) : playerName);
         const entry: LogEntry = {
             id: crypto.randomUUID(),
             timestamp: Date.now(),
@@ -2088,9 +2115,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
             else if (action === 'TRACK_HEALING_GIVEN') {
                 if (data.sourceId === socket.id) {
-                    // We use updateMyStats helper logic pattern here manually to avoid closure staleness issues if we used the helper directly inside the socket callback
-                    // But actually, we can just update local state and emit.
-                    updateMyStats({ healingGiven: (gameStats[getMyId()]?.healingGiven || 0) + data.amount });
+                    // Compute the increment inside the functional updater so we never
+                    // read the stale `gameStats` captured by this socket effect.
+                    setGameStats(prev => {
+                        const current = prev[socket.id] || emptyStats;
+                        const newStats = { ...current, healingGiven: current.healingGiven + data.amount };
+                        socket.emit('game_action', { room: roomId, action: 'UPDATE_STATS', data: { playerId: socket.id, stats: newStats } });
+                        return { ...prev, [socket.id]: newStats };
+                    });
                 }
             }
             else if (action === 'ADD_OBJECT') {
@@ -2529,8 +2561,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const getControllerId = () => {
-        return isLocal ? playersList[mySeatIndex].id : (socket.id || playersList[mySeatIndex]?.id || 'local-player');
+        return isLocal ? (playersList[mySeatIndex]?.id ?? playersList[0]?.id ?? 'local-player') : (socket.id || playersList[mySeatIndex]?.id || 'local-player');
     };
+
+    // A seat still owes a mulligan decision only if it is actually being played —
+    // i.e. it has a real (non-token) hand to keep. Unclaimed open slots (and any
+    // seat with no deck) start with an empty hand and are treated as auto-kept, so
+    // the game can leave the MULLIGAN phase without every empty seat being cycled.
+    const allSeatsKept = () => playersList.every(p => {
+        const state = localPlayerStates.current[p.id];
+        if (!state) return true;
+        if (state.hasKeptHand) return true;
+        return state.hand.filter(c => !c.isToken).length === 0;
+    });
 
     const handleMulliganChoice = (keep: boolean) => {
         if (keep) {
@@ -2549,7 +2592,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     addLog(`${currentPlayer.name} kept hand`);
 
                     // Check if all kept
-                    const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                    const allKept = allSeatsKept();
                     if (allKept) {
                         setGamePhase('PLAYING');
                         // Switch back to P1 view if needed, or stay. Usually P1 starts.
@@ -2646,7 +2689,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             sendHandUpdate(playerId, state.hand, 'PLAYING', state.mulliganCount); // Optimistic update of phase?
 
             // Check if everyone has kept
-            const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+            const allKept = allSeatsKept();
             if (allKept) {
                 setGamePhase('PLAYING');
                 addLog("All players have kept their hands. Game Start!", 'SYSTEM');
@@ -2763,7 +2806,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const currentPlayer = playersList[mySeatIndex];
             localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
             addLog(`${currentPlayer.name} kept hand`);
-            const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+            const allKept = allSeatsKept();
             if (allKept) setGamePhase('PLAYING');
             else nextTurn();
         } else {
@@ -2778,7 +2821,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!isLocal || index === mySeatIndex) return;
 
         // Save state of currently viewed player
-        const currentPlayerId = playersList[mySeatIndex].id;
+        const currentPlayerId = playersList[mySeatIndex]?.id;
+        if (!currentPlayerId) return;
         saveLocalPlayerState(currentPlayerId);
 
         // Switch view
@@ -2816,12 +2860,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             healingReceivedThisTurn.current = 0;
 
             // Save currently viewed player's state
-            const viewedPlayerId = playersList[mySeatIndex].id;
-            saveLocalPlayerState(viewedPlayerId);
+            const viewedPlayerId = playersList[mySeatIndex]?.id;
+            if (viewedPlayerId) saveLocalPlayerState(viewedPlayerId);
 
             const currentIndex = playersList.findIndex(p => p.id === currentTurnPlayerId);
             const nextIndex = (currentIndex + 1) % playersList.length;
             const nextPlayer = playersList[nextIndex];
+            if (!nextPlayer) return;
 
             setCurrentTurnPlayerId(nextPlayer.id);
             if (gamePhase === 'PLAYING') setTurn(turn + 1);
@@ -2847,11 +2892,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
 
         if (currentTurnPlayerId === socket.id) {
+            // Add the turn duration exactly once and broadcast the new stats. (This
+            // previously added durationMs twice — once here and once via updateMyStats,
+            // which also read a stale gameStats snapshot.)
             setGameStats(prev => {
                 const current = prev[socket.id] || emptyStats;
-                return { ...prev, [socket.id]: { ...current, totalTurnTime: current.totalTurnTime + durationMs } };
+                const newStats = { ...current, totalTurnTime: current.totalTurnTime + durationMs };
+                socket.emit('game_action', { room: roomId, action: 'UPDATE_STATS', data: { playerId: socket.id, stats: newStats } });
+                return { ...prev, [socket.id]: newStats };
             });
-            updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
         }
 
         // Optimistic update
@@ -4346,7 +4395,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         {mulliganSelectionMode ? 'Select Cards to Bottom' : 'Opening Hand'}
                     </h2>
                     <p className="text-gray-400 mb-8 text-center max-w-lg flex flex-col gap-1">
-                        {isLocal && <span className="text-blue-400 font-bold uppercase tracking-widest">{playersList[mySeatIndex].name}</span>}
+                        {isLocal && <span className="text-blue-400 font-bold uppercase tracking-widest">{playersList[mySeatIndex]?.name}</span>}
                         {mulliganSelectionMode
                             ? `Select ${freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount} cards to put on the bottom of your library.`
                             : `You have drawn 7 cards. ${mulliganCount > 0 ? `(Mulligan #${mulliganCount}${freeMulligan && mulliganCount === 1 ? ' - Free' : ''})` : ''}`

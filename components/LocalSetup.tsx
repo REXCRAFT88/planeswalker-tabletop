@@ -146,9 +146,6 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                 <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2">
                     <ArrowLeft size={20} /> Back
                 </button>
-                <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2">
-                    <ArrowLeft size={20} /> Back
-                </button>
             </div>
 
             {/* Local Table Toggle */}
