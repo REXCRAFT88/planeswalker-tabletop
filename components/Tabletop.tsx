@@ -16,6 +16,7 @@ import {
 import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
 import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
 import { getVoiceBackend, voiceInputSupported, requestVoiceReply } from '../services/voice';
+import { RealtimeVoiceSession, requestConsult } from '../services/voiceRealtime';
 import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId, VoiceChatTurn, VoiceBackendId } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
@@ -1137,6 +1138,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [voicePartial, setVoicePartial] = useState('');
     const [voiceTextInput, setVoiceTextInput] = useState('');
     const [voiceBackendId, setVoiceBackendId] = useState<VoiceBackendId>('web-speech');
+    const [voiceRealtimeAvailable, setVoiceRealtimeAvailable] = useState(false);
+    const [rtConnecting, setRtConnecting] = useState(false);
+    const rtSession = useRef<RealtimeVoiceSession | null>(null);
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -3228,7 +3232,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => {
         if (!isLocal) return;
         let mounted = true;
-        aiStatus().then(s => { if (mounted) setAiAvailable(!!s.enabled); }).catch(() => { });
+        aiStatus().then(s => { if (mounted) { setAiAvailable(!!s.enabled); setVoiceRealtimeAvailable(!!s.realtimeVoice); } }).catch(() => { });
         return () => { mounted = false; };
     }, [isLocal]);
 
@@ -3303,7 +3307,61 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
+    // Establish (or tear down) an OpenAI Realtime session for the target AI seat.
+    const connectRealtime = async (seatId: string) => {
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || !localPlayerStates.current[seatId]) return;
+        rtSession.current?.disconnect();
+        rtSession.current = null;
+        setRtConnecting(true);
+        const persona = (opp.persona || 'balanced') as AiPersonaId;
+        const session = new RealtimeVoiceSession({
+            onUserTranscript: (t) => setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'user', text: t }] })),
+            onAiTranscript: (t) => setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: t }] })),
+            onDeal: (summary) => {
+                if (!summary) return;
+                aiDeals.current[seatId] = [...(aiDeals.current[seatId] || []), summary];
+                addLog(`agreed with you: ${summary}`, 'SYSTEM', opp.name);
+            },
+            onState: (s) => {
+                if (s.listening !== undefined) setVoiceListening(s.listening);
+                if (s.speaking !== undefined) setVoiceSpeaking(s.speaking);
+            },
+            onError: (m) => addLog(`voice error: ${m}`, 'SYSTEM', opp.name),
+            consult: (question) => requestConsult({
+                question, seatName: opp.name, persona, provider: opp.provider,
+                view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [],
+            }),
+        });
+        try {
+            await session.connect({ seatName: opp.name, persona, provider: opp.provider, view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [] });
+            rtSession.current = session;
+        } catch (e: any) {
+            addLog(`could not start realtime voice: ${e?.message || 'error'}. Falling back to browser voice.`, 'SYSTEM', opp.name);
+            session.disconnect();
+            setVoiceBackendId('web-speech');
+        } finally {
+            setRtConnecting(false);
+        }
+    };
+
+    // Connect/disconnect the realtime session as the backend/target/panel changes.
+    useEffect(() => {
+        const useRt = voiceOpen && voiceBackendId === 'openai-realtime' && !!voiceTargetSeat;
+        if (useRt) {
+            connectRealtime(voiceTargetSeat!);
+        } else if (rtSession.current) {
+            rtSession.current.disconnect();
+            rtSession.current = null;
+        }
+        return () => { rtSession.current?.disconnect(); rtSession.current = null; };
+    }, [voiceOpen, voiceBackendId, voiceTargetSeat]);
+
     const startTalk = () => {
+        if (voiceBackendId === 'openai-realtime') {
+            rtSession.current?.startTalk();
+            return;
+        }
         if (!voiceTargetSeat || voiceBusy) return;
         getVoiceBackend(voiceBackendId).cancelSpeech();
         setVoicePartial('');
@@ -3311,6 +3369,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         getVoiceBackend(voiceBackendId).startListening(setVoicePartial);
     };
     const endTalk = async () => {
+        if (voiceBackendId === 'openai-realtime') {
+            rtSession.current?.endTalk();
+            return;
+        }
         if (!voiceListening) return;
         setVoiceListening(false);
         const said = await getVoiceBackend(voiceBackendId).stopListening();
@@ -3321,6 +3383,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const t = voiceTextInput.trim();
         if (!t || !voiceTargetSeat) return;
         setVoiceTextInput('');
+        if (voiceBackendId === 'openai-realtime') {
+            setVoiceHistory(prev => ({ ...prev, [voiceTargetSeat]: [...(prev[voiceTargetSeat] || []), { role: 'user', text: t }] }));
+            rtSession.current?.sendText(t);
+            return;
+        }
         handleVoiceSend(voiceTargetSeat, t);
     };
 
@@ -5630,7 +5697,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </div>
                     </div>
 
-                    {/* Who to talk to */}
+                    {/* Who to talk to + voice backend */}
                     <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-800">
                         <span className="text-[10px] text-gray-400 uppercase font-bold">Talking to</span>
                         <select
@@ -5639,6 +5706,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none"
                         >
                             {voiceAiSeats().map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <select
+                            value={voiceBackendId}
+                            onChange={e => setVoiceBackendId(e.target.value as VoiceBackendId)}
+                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none"
+                            title="Voice engine"
+                        >
+                            <option value="web-speech">Browser voice (free)</option>
+                            {voiceRealtimeAvailable && <option value="openai-realtime">OpenAI Realtime</option>}
                         </select>
                     </div>
 
@@ -5657,7 +5733,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </div>
                         ))}
                         {voiceBusy && <div className="text-purple-300 text-xs flex items-center gap-1"><Loader size={12} className="animate-spin" /> thinking…</div>}
-                        {voiceListening && <div className="text-green-400 text-xs italic">🎙 {voicePartial || 'listening…'}</div>}
+                        {rtConnecting && <div className="text-purple-300 text-xs flex items-center gap-1"><Loader size={12} className="animate-spin" /> connecting realtime voice…</div>}
+                        {voiceSpeaking && <div className="text-purple-300 text-xs italic flex items-center gap-1"><Volume2 size={12} /> speaking…</div>}
+                        {voiceListening && <div className="text-green-400 text-xs italic">🎙 {voiceBackendId === 'openai-realtime' ? 'listening…' : (voicePartial || 'listening…')}</div>}
                     </div>
 
                     {/* Deals struck */}
@@ -5669,11 +5747,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                     {/* Controls */}
                     <div className="p-3 border-t border-gray-800 flex items-center gap-2">
-                        {voiceInputSupported() ? (
+                        {(voiceBackendId === 'openai-realtime' || voiceInputSupported()) ? (
                             <button
                                 onMouseDown={startTalk} onMouseUp={endTalk} onMouseLeave={() => voiceListening && endTalk()}
                                 onTouchStart={(e) => { e.preventDefault(); startTalk(); }} onTouchEnd={(e) => { e.preventDefault(); endTalk(); }}
-                                disabled={voiceBusy}
+                                disabled={voiceBusy || rtConnecting || (voiceBackendId === 'openai-realtime' && !rtSession.current)}
                                 className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border transition-colors ${voiceListening ? 'bg-green-600 border-green-400 animate-pulse' : 'bg-purple-700 hover:bg-purple-600 border-purple-400/40'} disabled:opacity-40`}
                                 title="Hold to talk"
                             >
@@ -5684,7 +5762,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             value={voiceTextInput}
                             onChange={e => setVoiceTextInput(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') sendTypedVoice(); }}
-                            placeholder={voiceInputSupported() ? 'hold mic or type…' : 'type your message…'}
+                            placeholder={(voiceBackendId === 'openai-realtime' || voiceInputSupported()) ? 'hold mic or type…' : 'type your message…'}
                             disabled={voiceBusy}
                             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
                         />

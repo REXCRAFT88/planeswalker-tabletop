@@ -12,6 +12,7 @@ export interface AiStatus {
     enabled: boolean;
     providers: { id: AiProviderId; label: string }[];
     defaultProvider: AiProviderId | null;
+    realtimeVoice: boolean; // OpenAI Realtime voice backend available
 }
 
 async function post<T>(path: string, body: any): Promise<T> {
@@ -34,13 +35,13 @@ let cachedEnabled: boolean | null = null;
 export async function aiStatus(): Promise<AiStatus> {
     try {
         const resp = await fetch(`${API_BASE}/api/ai/status`);
-        if (!resp.ok) return { enabled: false, providers: [], defaultProvider: null };
+        if (!resp.ok) return { enabled: false, providers: [], defaultProvider: null, realtimeVoice: false };
         const data = await resp.json();
         cachedEnabled = !!data.enabled;
-        return { enabled: !!data.enabled, providers: data.providers || [], defaultProvider: data.defaultProvider ?? null };
+        return { enabled: !!data.enabled, providers: data.providers || [], defaultProvider: data.defaultProvider ?? null, realtimeVoice: !!data.realtimeVoice };
     } catch {
         cachedEnabled = false;
-        return { enabled: false, providers: [], defaultProvider: null };
+        return { enabled: false, providers: [], defaultProvider: null, realtimeVoice: false };
     }
 }
 

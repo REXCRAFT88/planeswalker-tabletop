@@ -43,7 +43,7 @@ const STRATEGIST_TOOL = {
     }, ['guidance']),
 };
 
-function voiceSystemPrompt(personaId: AiPersonaId, seatName: string, publicState: string, dealLog: string[]): string {
+export function voiceSystemPrompt(personaId: AiPersonaId, seatName: string, publicState: string, dealLog: string[]): string {
     const persona = PERSONAS[personaId] || PERSONAS.balanced;
     const deals = dealLog.length ? `\nAgreements currently in effect:\n${dealLog.map(d => `- ${d}`).join('\n')}` : '';
     return `You are the voice and table-talk personality of an AI Magic: The Gathering Commander player named "${seatName}". Persona: ${persona.name}. ${persona.blurb}
@@ -76,7 +76,7 @@ Opponents:
 ${opps}`;
 }
 
-async function consultStrategist(
+export async function consultStrategist(
     question: string,
     view: GameStateView,
     personaId: AiPersonaId,
@@ -168,3 +168,30 @@ export async function runVoiceReply(input: VoiceReplyInput): Promise<VoiceReplyO
     // Ran out of rounds without a final say — stay quiet rather than blurt.
     return { speak: false, text: '', deal, consulted, usage, provider };
 }
+
+// --- OpenAI Realtime support ---
+// When the voice model runs on OpenAI Realtime (in the browser), the same firewall
+// applies: Realtime is the negotiator and only receives the PUBLIC state in its
+// instructions; to learn hidden info or strike a deal it must call these function
+// tools, which the client relays to /api/ai/consult (brain) — hidden state never
+// enters the Realtime session.
+export function buildVoiceInstructions(personaId: AiPersonaId, seatName: string, view: GameStateView, dealLog: string[]): string {
+    return voiceSystemPrompt(personaId, seatName, formatPublicForVoice(view), dealLog)
+        + `\n\nYou are speaking over live voice. Keep replies to a sentence or two. When you need to know something about your own side or want to make a deal, call consult_strategist (and commit_deal to lock in an agreement) — never guess at your hidden cards.`;
+}
+
+// Realtime uses a flat function-tool shape (type/name/description/parameters).
+export const REALTIME_TOOLS = [
+    {
+        type: 'function',
+        name: 'consult_strategist',
+        description: 'Privately ask your strategist (who knows your hand and plan) what you may reveal, whether to accept a deal, or what you want. Only the strategist sees your hidden cards; you only get back what it decides to tell you.',
+        parameters: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] },
+    },
+    {
+        type: 'function',
+        name: 'commit_deal',
+        description: 'Record a binding agreement with an opponent (e.g. "no attacks between us next turn"). Only after consulting your strategist. Keep it short.',
+        parameters: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+    },
+];

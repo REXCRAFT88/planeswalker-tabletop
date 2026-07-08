@@ -91,10 +91,20 @@ or type. This uses a deliberately two-model design:
 - Deals it commits to are recorded and fed into the brain's future turns, so agreements
   are honored. Both models share the goal of **winning**.
 
-Voice tech is pluggable (`services/voice.ts`). The default is the browser's built-in
-**Web Speech API** — free, no extra keys, works in Chrome/Edge. If speech isn't available
-you can type instead. OpenAI Realtime and a cloud STT+TTS pipeline are scaffolded as
-additional backends for higher quality later.
+Voice tech is pluggable and selectable per-conversation in the Negotiate panel:
+
+- **Browser voice (free, default)** — the built-in Web Speech API (`services/voice.ts`).
+  No keys, works in Chrome/Edge; type instead if speech isn't available. Here the firewall
+  runs entirely server-side inside `/api/ai/voice`.
+- **OpenAI Realtime** — enabled automatically when `OPENAI_API_KEY` is set
+  (`services/voiceRealtime.ts`). Low-latency speech-to-speech over WebRTC: the browser
+  gets a short-lived ephemeral token (the real key stays on the server), and the Realtime
+  model *is* the negotiator. The firewall is preserved — its session instructions contain
+  only public state, and to learn anything hidden or make a deal it calls
+  `consult_strategist`, which the client relays to `/api/ai/consult` where the brain
+  (holding the hand) decides what to reveal. Optional env: `OPENAI_REALTIME_MODEL`,
+  `OPENAI_REALTIME_VOICE`, `OPENAI_REALTIME_URL`.
+- **Cloud STT + TTS pipeline** — scaffolded as a future backend.
 
 ### How it works
 

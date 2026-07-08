@@ -3,10 +3,14 @@ import { aiEnabled, callLLM, availableProviders, defaultProvider } from './clien
 import type { NormMessage } from './client';
 import { TURN_TOOLS, MULLIGAN_TOOL } from './tools';
 import { buildTurnSystemPrompt, buildMulliganSystemPrompt, formatStateView } from './prompts';
-import { runVoiceReply } from './voice';
+import { runVoiceReply, consultStrategist, buildVoiceInstructions, REALTIME_TOOLS } from './voice';
 import type {
     AiDeckCard, GameStateView, AiToolResult, AiPersonaId, AiUsage, AiProviderId, VoiceChatTurn,
 } from '../../services/aiTypes';
+
+const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
+const REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'alloy';
+const REALTIME_CALLS_URL = process.env.OPENAI_REALTIME_URL || 'https://api.openai.com/v1/realtime/calls';
 
 const MAX_ROUNDS = parseInt(process.env.AI_MAX_ROUNDS || '12', 10);
 const CONVO_TTL_MS = 90 * 1000;
@@ -45,13 +49,14 @@ export function createAiRouter(): express.Router {
     const router = express.Router();
     router.use(express.json({ limit: MAX_BODY }));
 
-    // Lets the client hide/disable AI features and pick a provider.
+    // Lets the client hide/disable AI features and pick a provider / voice backend.
     router.get('/status', (_req, res) => {
         const providers = availableProviders();
         res.json({
             enabled: aiEnabled(),
             providers,
             defaultProvider: defaultProvider(),
+            realtimeVoice: !!process.env.OPENAI_API_KEY, // OpenAI Realtime voice backend
         });
     });
 
@@ -149,6 +154,67 @@ export function createAiRouter(): express.Router {
         } catch (e: any) {
             console.error('[AI] continue error', e?.message || e);
             res.status(502).json({ error: 'AI continue failed', detail: e?.message, done: true });
+        }
+    });
+
+    // OpenAI Realtime: mint a short-lived client token bound to a session configured
+    // with the negotiator instructions (PUBLIC state only) + the consult/deal tools.
+    // The real OpenAI key never leaves the server; the browser gets only the ephemeral
+    // token. Hidden state is not placed in the instructions — the Realtime model must
+    // call consult_strategist (relayed to /consult) to learn anything about its hand.
+    router.post('/realtime/token', async (req, res) => {
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(503).json({ error: 'OpenAI Realtime voice requires OPENAI_API_KEY on the server.' });
+        }
+        try {
+            const { seatName, persona, view, dealLog } = req.body || {};
+            if (!view || !view.you) return res.status(400).json({ error: 'view required' });
+            const instructions = buildVoiceInstructions((persona as AiPersonaId) || 'balanced', seatName || 'AI', view as GameStateView, Array.isArray(dealLog) ? dealLog : []);
+            const session = {
+                type: 'realtime',
+                model: REALTIME_MODEL,
+                instructions,
+                audio: {
+                    input: { transcription: { model: 'whisper-1' }, turn_detection: null },
+                    output: { voice: REALTIME_VOICE },
+                },
+                tools: REALTIME_TOOLS,
+                tool_choice: 'auto',
+            };
+            const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session }),
+            });
+            const data: any = await r.json().catch(() => ({}));
+            if (!r.ok) return res.status(502).json({ error: 'realtime token failed', detail: data?.error?.message || `HTTP ${r.status}` });
+            const token = data?.value || data?.client_secret?.value;
+            if (!token) return res.status(502).json({ error: 'realtime token missing in response' });
+            res.json({ token, model: REALTIME_MODEL, voice: REALTIME_VOICE, callsUrl: REALTIME_CALLS_URL });
+        } catch (e: any) {
+            console.error('[AI] realtime token error', e?.message || e);
+            res.status(502).json({ error: 'realtime token failed', detail: e?.message });
+        }
+    });
+
+    // Firewall bridge for the Realtime negotiator: it calls consult_strategist, the
+    // client relays the question here, and the brain (which sees the hand) answers.
+    router.post('/consult', async (req, res) => {
+        try {
+            const { question, view, persona, seatName, dealLog, provider } = req.body || {};
+            if (!view || !view.you) return res.status(400).json({ error: 'view required' });
+            const guidance = await consultStrategist(
+                String(question || ''),
+                view as GameStateView,
+                (persona as AiPersonaId) || 'balanced',
+                seatName || 'AI',
+                Array.isArray(dealLog) ? dealLog : [],
+                provider as AiProviderId,
+            );
+            res.json({ guidance });
+        } catch (e: any) {
+            console.error('[AI] consult error', e?.message || e);
+            res.status(502).json({ error: 'consult failed', detail: e?.message, guidance: 'Stay vague and reveal nothing specific.' });
         }
     });
 
