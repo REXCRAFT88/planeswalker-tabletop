@@ -105,6 +105,25 @@ async function main() {
   ok(cReplay.length >= 1, `reconnected C received missed actions after seq 2 (${cReplay.map(a=>a.seq).join(',')})`);
   ok(C2.meta?.currentTurnPlayerId === A.id, 'reconnected C sees correct current turn (A)');
 
+  console.log('\n[7b] Late joiner is added to the authoritative turn order');
+  const E = mkClient('E'); E.userId = 'uid-E';
+  await new Promise(res => { E.s.emit('join_room', { room: ROOM, name: 'E', color: '#eab308', userId: 'uid-E' }); E.s.once('join_success', res); });
+  await wait(200);
+  ok(A.meta && A.meta.turnOrder.includes('uid-E'), `late joiner E is in the turn order (${JSON.stringify(A.meta?.turnOrder)})`);
+
+  console.log('\n[7c] PASS_TURN names the player who actually ended their turn');
+  // Drive the pointer to a known seat, then pass and check prevPlayerName.
+  A.actions = [];
+  // Whoever is current passes; find them and pass from the right client.
+  const curId = A.meta.currentTurnPlayerId;
+  const passer = [A, C2, D, E].find(c => c.id === curId) || A;
+  const beforeUser = A.meta.currentTurnUserId;
+  passer.s.emit('game_action', { room: ROOM, action: 'PASS_TURN', data: {} });
+  await wait(200);
+  const pt3 = lastOf(A, 'PASS_TURN');
+  const expectedName = beforeUser ? beforeUser.replace('uid-', '') : '?';
+  ok(pt3 && pt3.data.prevPlayerName === expectedName, `PASS_TURN prevPlayerName = "${expectedName}" (got "${pt3?.data.prevPlayerName}")`);
+
   console.log('\n[8] Clean leave: departing player triggers board cleanup + reflow');
   A.actions = [];
   B.s.emit('leave_room', { room: ROOM });

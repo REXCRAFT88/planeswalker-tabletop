@@ -64,6 +64,7 @@ export interface CardData {
   power?: string;
   toughness?: string;
   isCommander?: boolean;
+  isCompanion?: boolean;
   isManaSource?: boolean;
   producedMana?: string[]; // e.g. ['G'], ['C','C'], ['W','U','B','R','G']
   manaAbilityType?: 'tap' | 'activated' | 'multi' | 'complex'; // How this card produces mana

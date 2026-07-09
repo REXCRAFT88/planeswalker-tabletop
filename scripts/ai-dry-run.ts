@@ -55,6 +55,7 @@ function offlineChecks(): boolean {
         ['system prompt includes persona', sys.includes('Timmy')],
         ['system prompt includes oracle text', sys.includes('Add {C}{C}')],
         ['system prompt includes rules of engagement', sys.includes('one land drop')],
+        ['system prompt includes commander rules digest', sys.includes('COMMANDER RULES DIGEST') && sys.includes('21 or more combat damage')],
         ['state shows available mana', state.includes('G:3')],
         ['state shows hand card ids', state.includes('[c1] Grizzly Bears')],
         ['state shows opponents', state.includes('Human [p0]: 38 life')],

@@ -1,6 +1,7 @@
 import type { AiDeckCard, GameStateView } from '../../services/aiTypes';
 import { PERSONAS } from './personas';
 import type { AiPersonaId } from '../../services/aiTypes';
+import { RULES_DIGEST } from './rules';
 
 const RULES_OF_ENGAGEMENT = `You are playing Magic: The Gathering Commander on a shared, honor-system virtual tabletop against human players. The app does NOT enforce the rules — players move cards by hand and trust each other, and you play at the same level.
 
@@ -31,6 +32,8 @@ export function buildTurnSystemPrompt(
     return `You are "${seatName}", an AI Commander player. Persona: ${persona.name}. ${persona.blurb}
 
 ${RULES_OF_ENGAGEMENT}
+
+${RULES_DIGEST}
 
 Your decklist (with oracle text) for reference — you do not need this repeated each turn:
 ${deckList}`;

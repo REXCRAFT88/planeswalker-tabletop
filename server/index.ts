@@ -202,6 +202,18 @@ const serverBroadcast = (room: string, action: string, data: any) => {
     return entry;
 };
 
+// Append a player to the authoritative seat order if they aren't already in it.
+// Used when someone joins a game that's already started, so the turn rotation
+// includes them instead of skipping their seat forever.
+const ensureInTurnOrder = (room: string, userId: string) => {
+    const meta = roomMeta[room];
+    if (!meta || !meta.started) return;
+    if (!meta.turnOrder.includes(userId)) {
+        meta.turnOrder.push(userId);
+        emitMeta(room);
+    }
+};
+
 // Advance the turn to the next CONNECTED player in seat order, skipping
 // disconnected seats. Server-authoritative: emits a sequenced PASS_TURN so every
 // client (including the passer) converges on the same pointer.
@@ -222,12 +234,18 @@ const advanceTurnServer = (room: string, prevDuration?: string) => {
     if (!nextUserId) nextUserId = meta.currentTurnUserId ?? order.find(connected);
     if (!nextUserId) return;
 
+    // Capture who is ending their turn BEFORE we reassign, so the log names the
+    // right player on every client (server actions have no sender to infer from).
+    const prevUserId = meta.currentTurnUserId;
+    const prevPlayer = prevUserId ? rooms[room]?.find(p => p.userId === prevUserId) : undefined;
+
     meta.currentTurnUserId = nextUserId;
     meta.turnNumber += 1;
 
     serverBroadcast(room, 'PASS_TURN', {
         nextPlayerSocketId: socketIdForUser(room, nextUserId),
         nextPlayerUserId: nextUserId,
+        prevPlayerName: prevPlayer?.name,
         turnNumber: meta.turnNumber,
         prevDuration,
     });
@@ -349,6 +367,9 @@ io.on('connection', (socket) => {
         }
 
         rooms[room].push(newPlayer);
+        // If this room's game is already running (e.g. host was gone so approval was
+        // skipped), add the newcomer to the turn rotation.
+        ensureInTurnOrder(room, newUserId);
 
         console.log(`${name} joined room ${room}`);
 
@@ -401,6 +422,8 @@ io.on('connection', (socket) => {
                 gameType: roomMeta[room]?.gameType
             });
 
+            // A player approved into an in-progress game joins the turn rotation.
+            ensureInTurnOrder(room, newUserId);
             applicantSocket.to(room).emit('player_joined', newPlayer);
         } else {
             applicantSocket.emit('join_error', { message: 'Host denied your request to join.' });

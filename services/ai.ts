@@ -13,14 +13,55 @@ export interface AiStatus {
     providers: { id: AiProviderId; label: string }[];
     defaultProvider: AiProviderId | null;
     realtimeVoice: boolean; // OpenAI Realtime voice backend available
+    configured?: { anthropic: boolean; openai: boolean; gemini: boolean };
 }
 
-async function post<T>(path: string, body: any): Promise<T> {
-    const resp = await fetch(`${API_BASE}/api/ai${path}`, {
+export interface AiConfigUpdate {
+    anthropicKey?: string;
+    openaiKey?: string;
+    geminiKey?: string;
+    defaultProvider?: AiProviderId | '';
+    adminPin?: string;
+}
+
+// Push provider keys to the server (held in server memory only, never returned).
+export async function saveAiConfig(update: AiConfigUpdate): Promise<AiStatus> {
+    const { adminPin, ...body } = update;
+    const resp = await fetch(`${API_BASE}/api/ai/config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(adminPin ? { 'x-admin-pin': adminPin } : {}) },
         body: JSON.stringify(body),
     });
+    if (!resp.ok) {
+        let detail = '';
+        try { detail = (await resp.json())?.error || ''; } catch { /* ignore */ }
+        throw new Error(detail || `Failed to save AI settings (${resp.status})`);
+    }
+    return resp.json();
+}
+
+// fetch() has no default timeout, so a stalled network request would hang an AI
+// turn forever. Bound each call (a little above the server's own 75s ceiling so
+// the server's structured error wins the race when it can) and abort otherwise.
+const CLIENT_TIMEOUT_MS = 90_000;
+
+async function post<T>(path: string, body: any): Promise<T> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
+    let resp: Response;
+    try {
+        resp = await fetch(`${API_BASE}/api/ai${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+        });
+    } catch (e: any) {
+        if (e?.name === 'AbortError') throw new Error('AI request timed out');
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
     if (!resp.ok) {
         let detail = '';
         try { detail = (await resp.json())?.error || ''; } catch { /* ignore */ }
