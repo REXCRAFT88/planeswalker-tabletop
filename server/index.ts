@@ -73,14 +73,47 @@ interface Player {
     disconnectedAt?: number;
 }
 
+interface RoomMeta {
+    started: boolean;
+    hostId?: string;
+    gameType?: 'standard' | 'local_table';
+    // --- Server-authoritative game meta (Phase 0 sync) ---
+    seq: number;                 // monotonic action sequence for this room
+    turnNumber: number;          // authoritative turn counter
+    currentTurnUserId?: string;  // whose turn it is, by stable userId (survives reconnect)
+    turnOrder: string[];         // seat order, by stable userId
+}
+
+interface LoggedAction {
+    seq: number;
+    action: string;
+    data: any;
+    playerId: string | null; // socket.id of origin, or null for server-generated actions
+}
+
 // Store room state in memory for now
 const rooms: Record<string, Player[]> = {};
-const roomMeta: Record<string, { started: boolean, hostId?: string, gameType?: 'standard' | 'local_table' }> = {};
+const roomMeta: Record<string, RoomMeta> = {};
 const roomStates: Record<string, Record<number, any>> = {}; // room -> seatIndex -> state
+const roomActionLog: Record<string, LoggedAction[]> = {}; // room -> ring buffer of recent actions
 const pendingJoins: Record<string, { room: string, name: string, color: string, userId?: string }> = {};
 
 // --- Security Helpers ---
 const MAX_STATE_SIZE = 1 * 1024 * 1024; // 1MB max for state backups
+const ACTION_LOG_LIMIT = 500; // how many recent actions we retain for gap replay
+
+// Actions that are broadcast peer-to-peer and applied optimistically by their
+// origin. Everything the server sequences flows through the same channel, but
+// these are the client-originated ones; server-generated actions use playerId=null.
+const newMeta = (hostSocketId: string, gameType: 'standard' | 'local_table'): RoomMeta => ({
+    started: false,
+    hostId: hostSocketId,
+    gameType,
+    seq: 0,
+    turnNumber: 1,
+    currentTurnUserId: undefined,
+    turnOrder: [],
+});
 
 const isInRoom = (socketId: string, room: string): boolean => {
     return rooms[room]?.some(p => p.id === socketId) ?? false;
@@ -116,6 +149,109 @@ const getSafeColor = (roomPlayers: Player[], requestedColor: string) => {
     return '#' + Math.floor(Math.random() * 16777215).toString(16);
 };
 
+// --- Server-authoritative sync helpers (Phase 0) ---
+
+const socketIdForUser = (room: string, userId?: string): string | undefined => {
+    if (!userId) return undefined;
+    return rooms[room]?.find(p => p.userId === userId && !p.disconnected)?.id;
+};
+
+const userIdForSocket = (room: string, socketId: string): string | undefined => {
+    return rooms[room]?.find(p => p.id === socketId)?.userId;
+};
+
+// Snapshot of the authoritative turn/order meta, translated to live socket ids so
+// existing socket-id-keyed client code keeps working. currentTurnPlayerId is the
+// live socket id of whoever's turn it is; currentTurnUserId is the stable id.
+const buildMeta = (room: string) => {
+    const meta = roomMeta[room];
+    if (!meta) return null;
+    return {
+        seq: meta.seq,
+        turnNumber: meta.turnNumber,
+        currentTurnUserId: meta.currentTurnUserId,
+        currentTurnPlayerId: socketIdForUser(room, meta.currentTurnUserId),
+        turnOrder: meta.turnOrder,
+        started: meta.started,
+        hostId: meta.hostId,
+    };
+};
+
+const emitMeta = (room: string) => {
+    const payload = buildMeta(room);
+    if (payload) io.to(room).emit('game_meta', payload);
+};
+
+// Append an action to the room's ordered log and return the sequenced entry.
+const pushAction = (room: string, action: string, data: any, playerId: string | null): LoggedAction => {
+    const meta = roomMeta[room];
+    const seq = meta ? ++meta.seq : 0;
+    const entry: LoggedAction = { seq, action, data, playerId };
+    if (!roomActionLog[room]) roomActionLog[room] = [];
+    const log = roomActionLog[room];
+    log.push(entry);
+    if (log.length > ACTION_LOG_LIMIT) log.splice(0, log.length - ACTION_LOG_LIMIT);
+    return entry;
+};
+
+// Broadcast a server-generated (authoritative) action to the whole room. Unlike
+// peer actions, these carry playerId=null so every client applies them.
+const serverBroadcast = (room: string, action: string, data: any) => {
+    const entry = pushAction(room, action, data, null);
+    io.to(room).emit('game_action', entry);
+    return entry;
+};
+
+// Advance the turn to the next CONNECTED player in seat order, skipping
+// disconnected seats. Server-authoritative: emits a sequenced PASS_TURN so every
+// client (including the passer) converges on the same pointer.
+const advanceTurnServer = (room: string, prevDuration?: string) => {
+    const meta = roomMeta[room];
+    if (!meta || meta.turnOrder.length === 0) return;
+
+    const order = meta.turnOrder;
+    const connected = (uid: string) => rooms[room]?.some(p => p.userId === uid && !p.disconnected);
+    const currentIdx = meta.currentTurnUserId ? order.indexOf(meta.currentTurnUserId) : -1;
+
+    let nextUserId: string | undefined;
+    for (let step = 1; step <= order.length; step++) {
+        const cand = order[(currentIdx + step) % order.length];
+        if (connected(cand)) { nextUserId = cand; break; }
+    }
+    // Everyone else is disconnected — keep the turn where it is (or leave undefined).
+    if (!nextUserId) nextUserId = meta.currentTurnUserId ?? order.find(connected);
+    if (!nextUserId) return;
+
+    meta.currentTurnUserId = nextUserId;
+    meta.turnNumber += 1;
+
+    serverBroadcast(room, 'PASS_TURN', {
+        nextPlayerSocketId: socketIdForUser(room, nextUserId),
+        nextPlayerUserId: nextUserId,
+        turnNumber: meta.turnNumber,
+        prevDuration,
+    });
+    emitMeta(room);
+};
+
+// Remove a player's objects from the shared board for everyone, and if it was
+// their turn, hand it to the next connected seat. Used on leave/kick/timeout.
+const cleanupDepartedPlayer = (room: string, player: Player) => {
+    const meta = roomMeta[room];
+    if (!meta) return;
+    serverBroadcast(room, 'REMOVE_PLAYER_OBJECTS', { playerId: player.id, userId: player.userId });
+    const wasTheirTurn = meta.currentTurnUserId === player.userId;
+    meta.turnOrder = meta.turnOrder.filter(uid => uid !== player.userId);
+    if (wasTheirTurn && meta.turnOrder.length > 0) {
+        // Point at the seat before the removed one so advanceTurnServer lands on the
+        // intended next player after the removal.
+        meta.currentTurnUserId = undefined;
+        advanceTurnServer(room);
+    } else {
+        emitMeta(room);
+    }
+};
+
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
@@ -145,6 +281,9 @@ io.on('connection', (socket) => {
 
                 // Notify everyone about the reconnection (includes the old userId so clients can map)
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
+                // Re-broadcast authoritative meta: the reconnected player's live socket
+                // id changed, so the turn pointer needs re-deriving from their userId.
+                emitMeta(room);
                 // Tell the room this is a reconnection, not a new player
                 socket.to(room).emit('player_reconnected', {
                     newSocketId: socket.id,
@@ -206,11 +345,7 @@ io.on('connection', (socket) => {
         };
 
         if (rooms[room].length === 0) {
-            roomMeta[room] = {
-                started: false,
-                hostId: socket.id,
-                gameType: isTable ? 'local_table' : 'standard'
-            };
+            roomMeta[room] = newMeta(socket.id, isTable ? 'local_table' : 'standard');
         }
 
         rooms[room].push(newPlayer);
@@ -307,7 +442,12 @@ io.on('connection', (socket) => {
         }
 
         rooms[room] = ordered;
+        // Keep the authoritative seat order (by stable userId) aligned with the roster.
+        if (roomMeta[room]) {
+            roomMeta[room].turnOrder = ordered.map(p => p.userId);
+        }
         io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
+        emitMeta(room);
     });
 
     socket.on('update_player_color', ({ room, color }) => {
@@ -336,9 +476,13 @@ io.on('connection', (socket) => {
 
             const index = rooms[room].findIndex(p => p.id === targetId);
             if (index !== -1) {
+                const kicked = rooms[room][index];
                 rooms[room].splice(index, 1);
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
                 io.to(room).emit('notification', { message: `Player has been kicked.` });
+                // Remove their board objects for everyone and reflow the turn.
+                if (roomMeta[room]?.started) cleanupDepartedPlayer(room, kicked);
+                else emitMeta(room);
             }
         }
     });
@@ -359,6 +503,11 @@ io.on('connection', (socket) => {
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
                 io.to(room).emit('notification', { message: `${player.name} left the room.` });
                 console.log(`${player.name} left room ${room}`);
+
+                // Explicit leave is permanent: strip their board objects and reflow the
+                // turn so the rest of the table stays consistent.
+                if (rooms[room] && roomMeta[room]?.started) cleanupDepartedPlayer(room, player);
+                else if (rooms[room]) emitMeta(room);
 
                 if (rooms[room].every(p => p.disconnected)) {
                     delete rooms[room];
@@ -399,12 +548,99 @@ io.on('connection', (socket) => {
     socket.on('game_action', ({ room, action, data }) => {
         if (room) room = room.trim().toUpperCase();
         if (!isInRoom(socket.id, room)) return; // Must be in the room
+        const meta = roomMeta[room];
+
         if (action === 'START_GAME') {
             if (!isHost(socket.id, room)) return; // Only host can start
-            if (roomMeta[room]) roomMeta[room].started = true;
+            if (meta) {
+                meta.started = true;
+                // Seed authoritative turn order + pointer from the host's start payload.
+                // playerOrder / firstPlayerId arrive as live socket ids; translate to
+                // stable userIds so the meta survives reconnects.
+                if (Array.isArray(data?.playerOrder)) {
+                    meta.turnOrder = data.playerOrder
+                        .map((sid: string) => userIdForSocket(room, sid))
+                        .filter((uid: string | undefined): uid is string => !!uid);
+                }
+                if (data?.firstPlayerId) {
+                    meta.currentTurnUserId = userIdForSocket(room, data.firstPlayerId) ?? meta.turnOrder[0];
+                }
+                meta.turnNumber = 1;
+            }
         }
-        // Broadcast the action to everyone else in the room
-        socket.to(room).emit('game_action', { action, data, playerId: socket.id });
+
+        // START_GAME establishes the authoritative turn pointer — broadcast the fresh
+        // meta so late queries / reconnects see it immediately (the action is still
+        // sequenced below for the primary path).
+        if (action === 'START_GAME') {
+            const entry = pushAction(room, action, data, socket.id);
+            io.to(room).emit('game_action', entry);
+            emitMeta(room);
+            return;
+        }
+
+        // PASS_TURN is server-authoritative: the client asks to end its turn and the
+        // server decides the next connected seat. Ignore any client-computed target.
+        if (action === 'PASS_TURN') {
+            if (meta && meta.currentTurnUserId && meta.currentTurnUserId !== userIdForSocket(room, socket.id)) {
+                // Only the current-turn player may pass — unless the host is stepping in,
+                // or the current-turn seat is disconnected and stalling the table.
+                const currentDisconnected = !socketIdForUser(room, meta.currentTurnUserId);
+                if (!isHost(socket.id, room) && !currentDisconnected) return;
+            }
+            advanceTurnServer(room, data?.prevDuration);
+            return;
+        }
+
+        // Sequence the peer action and echo it to EVERYONE (including the sender) so
+        // all clients — the origin included — can track the ordered stream and detect
+        // gaps. The origin recognises its own actions by playerId and skips re-applying.
+        const entry = pushAction(room, action, data, socket.id);
+        io.to(room).emit('game_action', entry);
+    });
+
+    // Gap recovery: a client that detects a missed sequence number asks for
+    // everything after `sinceSeq`. If we still hold it in the ring buffer, replay
+    // in order; otherwise the gap is too old and the client needs a full snapshot.
+    socket.on('request_sync', ({ room, sinceSeq }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
+        const meta = roomMeta[room];
+        const log = roomActionLog[room] || [];
+        const since = typeof sinceSeq === 'number' ? sinceSeq : 0;
+
+        const oldestSeq = log.length ? log[0].seq : (meta?.seq ?? 0) + 1;
+        if (since + 1 < oldestSeq && (meta?.seq ?? 0) > since) {
+            // We've evicted the actions this client is missing — fall back to a
+            // full snapshot from the host.
+            const host = rooms[room]?.find(p => p.id === meta?.hostId && !p.disconnected)
+                ?? rooms[room]?.find(p => !p.disconnected);
+            if (host) io.to(host.id).emit('provide_snapshot', { requesterId: socket.id });
+            else socket.emit('sync_replay', { actions: [], upToSeq: meta?.seq ?? 0 });
+            return;
+        }
+
+        const missed = log.filter(a => a.seq > since);
+        socket.emit('sync_replay', { actions: missed, upToSeq: meta?.seq ?? since });
+    });
+
+    // The host answers a snapshot request with the full public game state, which the
+    // server forwards to the requester tagged with the current sequence number.
+    socket.on('submit_snapshot', ({ room, requesterId, state }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return; // Only the host is the snapshot source
+        const stateStr = JSON.stringify(state ?? {});
+        if (stateStr.length > MAX_STATE_SIZE) return;
+        const seq = roomMeta[room]?.seq ?? 0;
+        io.to(requesterId).emit('full_sync', { state, seq, meta: buildMeta(room) });
+    });
+
+    // Explicit request for the current authoritative meta (turn/order pointer).
+    socket.on('request_meta', ({ room }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
+        const payload = buildMeta(room);
+        if (payload) socket.emit('game_meta', payload);
     });
 
     // --- Local Table Slot Logic ---
@@ -520,9 +756,13 @@ io.on('connection', (socket) => {
                         delete rooms[room];
                         delete roomMeta[room];
                         delete roomStates[room];
+                        delete roomActionLog[room];
                     } else {
                         io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
                         io.to(room).emit('notification', { message: `${player.name} left the room.` });
+                        // Their reconnect window expired — treat as a permanent departure.
+                        if (roomMeta[room]?.started) cleanupDepartedPlayer(room, player);
+                        else emitMeta(room);
                     }
                 }
             }
@@ -545,6 +785,10 @@ io.on('connection', (socket) => {
 
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
                 io.to(room).emit('notification', { message: `${player.name} disconnected. They have 5 minutes to reconnect.` });
+                // Refresh presence-aware meta (their live socket id is gone now). If it
+                // was their turn, other seats / the host can pass past them; the turn is
+                // deliberately NOT auto-skipped here so a quick reconnect keeps its place.
+                emitMeta(room);
 
                 // Keep the room and its saved state alive so disconnected players can
                 // reconnect. The 5-minute per-player timeout above removes stragglers,

@@ -1183,6 +1183,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const prevPlayersListForLayout = useRef(playersList);
     const hasLoadedState = useRef(false);
     const reconnectedPlayerMap = useRef<Record<string, string>>({}); // oldSocketId -> newSocketId
+    const opponentsLifeRef = useRef(opponentsLife);
+    const opponentsCountsRef = useRef(opponentsCounts);
+    const opponentsCommandersRef = useRef(opponentsCommanders);
+
+    // --- Sequenced sync (Phase 0) ---
+    // lastSeq: highest server sequence number we've applied. resyncing: true while
+    // we're recovering a gap (incoming actions are buffered by seq until the gap
+    // is filled). pendingActions: out-of-order actions held during a gap/resync.
+    const lastSeqRef = useRef(0);
+    const resyncingRef = useRef(false);
+    const pendingActions = useRef<Map<number, { action: string; data: any; playerId: string | null }>>(new Map());
 
     const [isMobile, setIsMobile] = useState(false);
     const [mobileActionCardId, setMobileActionCardId] = useState<string | null>(null);
@@ -1207,6 +1218,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { lifeRef.current = life; }, [life]);
     useEffect(() => { logsRef.current = logs; }, [logs]);
     useEffect(() => { trackDamageRef.current = trackDamage; }, [trackDamage]);
+    useEffect(() => { opponentsLifeRef.current = opponentsLife; }, [opponentsLife]);
+    useEffect(() => { opponentsCountsRef.current = opponentsCounts; }, [opponentsCounts]);
+    useEffect(() => { opponentsCommandersRef.current = opponentsCommanders; }, [opponentsCommanders]);
 
     // --- Persistence & Auto-Restore ---
     useEffect(() => {
@@ -1582,6 +1596,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             console.log("Socket reconnected, re-joining room...");
             const userId = getUserIdForRoom(roomId);
             socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId });
+            // Pull anything we missed while offline: the server replays buffered actions
+            // after our last applied sequence, or falls back to a full snapshot if the
+            // gap is too old.
+            socket.emit('request_meta', { room: roomId });
+            socket.emit('request_sync', { room: roomId, sinceSeq: lastSeqRef.current });
         };
 
         socket.on('connect', handleReconnection);
@@ -2031,10 +2050,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             addLog(`${name} reconnected`, "SYSTEM");
         };
 
-        const handleAction = ({ action, data, playerId }: { action: string, data: { [key: string]: any }, playerId: string }) => {
-            console.log(`Game Action Received: ${action} from ${playerId}`, data);
+        const applyAction = ({ action, data, playerId }: { action: string, data: { [key: string]: any }, playerId: string | null }) => {
+            console.log(`Game Action Applied: ${action} from ${playerId}`, data);
             const currentPlayers = playersListRef.current;
-            const sender = currentPlayers.find(p => p.id === playerId);
+            const sender = playerId ? currentPlayers.find(p => p.id === playerId) : undefined;
 
             if (gamePhaseRef.current === 'SETUP' && !startingGameRef.current &&
                 ['ADD_OBJECT', 'UPDATE_LIFE', 'PASS_TURN', 'UPDATE_COUNTS', 'UPDATE_COMMANDER_DAMAGE'].includes(action)) {
@@ -2181,6 +2200,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     }
                     return o;
                 }));
+            } else if (action === 'REMOVE_PLAYER_OBJECTS') {
+                // A player left/was kicked: drop everything they controlled so the
+                // board stays consistent for everyone (server-authoritative cleanup).
+                setBoardObjects(prev => prev.filter(o => o.controllerId !== data.playerId));
             }
             else if (action === 'RESTART_GAME') {
                 setGamePhase('SETUP');
@@ -2259,8 +2282,128 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
         };
 
+        // --- Sequenced dispatch (Phase 0) ---
+        // Dispatch a single message: our own echoed actions were already applied
+        // optimistically, so skip re-applying them (server actions have playerId=null
+        // and are always applied).
+        const dispatch = (msg: { action: string; data: any; playerId: string | null }) => {
+            if (msg.playerId && socket.id && msg.playerId === socket.id) return;
+            applyAction(msg);
+        };
+
+        // Ask the server to replay everything after our last applied sequence number.
+        const requestSync = () => {
+            if (resyncingRef.current) return;
+            resyncingRef.current = true;
+            console.log(`[SYNC] gap detected, requesting replay since seq ${lastSeqRef.current}`);
+            socket.emit('request_sync', { room: roomId, sinceSeq: lastSeqRef.current });
+        };
+
+        // Apply any buffered actions that are now contiguous with lastSeq.
+        const drainPending = () => {
+            let next = pendingActions.current.get(lastSeqRef.current + 1);
+            while (next) {
+                pendingActions.current.delete(lastSeqRef.current + 1);
+                lastSeqRef.current += 1;
+                dispatch(next);
+                next = pendingActions.current.get(lastSeqRef.current + 1);
+            }
+            if (pendingActions.current.size === 0) resyncingRef.current = false;
+        };
+
+        // Seq-aware entry point for live actions.
+        const handleAction = (msg: { seq?: number; action: string; data: any; playerId: string | null }) => {
+            if (typeof msg.seq !== 'number') { dispatch(msg); return; } // legacy/unsequenced
+            const seq = msg.seq;
+            if (seq <= lastSeqRef.current) return;                       // duplicate/old
+            if (seq === lastSeqRef.current + 1) {
+                lastSeqRef.current = seq;
+                dispatch(msg);
+                drainPending();
+                return;
+            }
+            // Gap: hold this action and pull the missing ones.
+            pendingActions.current.set(seq, msg);
+            requestSync();
+        };
+
+        // Server replayed the actions we missed (contiguous, oldest first).
+        const handleSyncReplay = ({ actions, upToSeq }: { actions: any[]; upToSeq: number }) => {
+            for (const a of actions || []) {
+                if (typeof a.seq !== 'number') continue;
+                if (a.seq <= lastSeqRef.current) continue;
+                if (a.seq === lastSeqRef.current + 1) {
+                    lastSeqRef.current = a.seq;
+                    dispatch(a);
+                } else {
+                    pendingActions.current.set(a.seq, a);
+                }
+            }
+            drainPending();
+            if (typeof upToSeq === 'number' && upToSeq > lastSeqRef.current && pendingActions.current.size === 0) {
+                // Still behind and nothing buffered to bridge it — escalate to a snapshot.
+                resyncingRef.current = false;
+                requestSync();
+            }
+        };
+
+        // Full snapshot from the host (used when the gap is older than the buffer, or
+        // on a fresh rejoin). Replaces public state wholesale and resets our seq.
+        const handleFullSync = ({ state, seq, meta }: { state: any; seq: number; meta: any }) => {
+            if (state) applyAction({ action: 'GAME_STATE_SYNC', data: state, playerId: null });
+            if (meta) handleGameMeta(meta);
+            if (typeof seq === 'number') lastSeqRef.current = seq;
+            // Drop stale buffered actions, then apply anything newer than the snapshot.
+            for (const key of Array.from(pendingActions.current.keys())) {
+                if (key <= lastSeqRef.current) pendingActions.current.delete(key);
+            }
+            drainPending();
+            resyncingRef.current = false;
+        };
+
+        // Host answers a snapshot request with the full public board state.
+        const handleProvideSnapshot = ({ requesterId }: { requesterId: string }) => {
+            if (!playersListRef.current.some(p => p.id === socket.id)) return;
+            const snapshot = {
+                phase: gamePhaseRef.current,
+                boardObjects: boardObjectsRef.current,
+                turn: turnRef.current,
+                round: roundRef.current,
+                currentTurnPlayerId: currentTurnPlayerIdRef.current,
+                turnStartTime: turnStartTimeRef.current,
+                commanderDamage: commanderDamageRef.current,
+                turnOrder: turnOrderRef.current,
+                logs: logsRef.current.slice(0, 50),
+                allPlayerLife: { ...opponentsLifeRef.current, [socket.id!]: lifeRef.current },
+                allPlayerCounts: { ...opponentsCountsRef.current },
+                allPlayerCommanders: { ...opponentsCommandersRef.current },
+            };
+            socket.emit('submit_snapshot', { room: roomId, requesterId, state: snapshot });
+        };
+
+        // Authoritative turn/order meta. Applied on top of whatever peer actions said.
+        const handleGameMeta = (meta: { turnNumber?: number; currentTurnPlayerId?: string; turnOrder?: string[] }) => {
+            if (typeof meta.turnNumber === 'number') setTurn(meta.turnNumber);
+            if (meta.currentTurnPlayerId) setCurrentTurnPlayerId(meta.currentTurnPlayerId);
+            // meta.turnOrder is stable userIds; map to live socket ids for the roster.
+            if (Array.isArray(meta.turnOrder) && meta.turnOrder.length > 0) {
+                const roster = playersListRef.current;
+                const socketOrder = meta.turnOrder
+                    .map(uid => roster.find(p => p.userId === uid)?.id)
+                    .filter((id): id is string => !!id);
+                if (socketOrder.length > 0) {
+                    setTurnOrder(socketOrder);
+                    setPlayersList(prev => sortPlayers(prev, socketOrder));
+                }
+            }
+        };
+
         socket.on('room_players_update', handleRoomUpdate);
         socket.on('game_action', handleAction);
+        socket.on('game_meta', handleGameMeta);
+        socket.on('sync_replay', handleSyncReplay);
+        socket.on('full_sync', handleFullSync);
+        socket.on('provide_snapshot', handleProvideSnapshot);
         socket.on('host_approval_request', handleHostApprovalRequest);
         socket.on('load_state', handleLoadState);
         socket.on('player_reconnected', handlePlayerReconnected);
@@ -2268,10 +2411,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         socket.on('player_kicked', () => { alert("You have been kicked from the game."); handleExit(); });
 
         socket.emit('get_players', { room: roomId });
+        socket.emit('request_meta', { room: roomId });
+        // Pull a snapshot/replay in case we're joining a game already in progress.
+        socket.emit('request_sync', { room: roomId, sinceSeq: lastSeqRef.current });
 
         return () => {
             socket.off('room_players_update', handleRoomUpdate);
             socket.off('game_action', handleAction);
+            socket.off('game_meta', handleGameMeta);
+            socket.off('sync_replay', handleSyncReplay);
+            socket.off('full_sync', handleFullSync);
+            socket.off('provide_snapshot', handleProvideSnapshot);
             socket.off('host_approval_request', handleHostApprovalRequest);
             socket.off('load_state', handleLoadState);
             socket.off('player_reconnected', handlePlayerReconnected);
@@ -3484,22 +3634,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
 
         if (playersList.length <= 1) return;
-        const myIndex = playersList.findIndex(p => p.id === socket.id);
-        const nextPlayer = playersList[(myIndex + 1) % playersList.length];
-        const nextTurnNum = turn + 1;
         const duration = formatTime(Date.now() - turnStartTime);
         const durationMs = Date.now() - turnStartTime;
 
-        emitAction('PASS_TURN', {
-            nextPlayerSocketId: nextPlayer.id,
-            turnNumber: nextTurnNum,
-            prevDuration: duration
-        });
+        // Ask the server to advance the turn. It authoritatively picks the next
+        // CONNECTED seat (skipping disconnected players) and broadcasts a sequenced
+        // PASS_TURN to everyone — including us — so all clients converge. We do NOT
+        // optimistically move the pointer here; the authoritative echo drives it.
+        emitAction('PASS_TURN', { prevDuration: duration });
 
         if (currentTurnPlayerId === socket.id) {
-            // Add the turn duration exactly once and broadcast the new stats. (This
-            // previously added durationMs twice — once here and once via updateMyStats,
-            // which also read a stale gameStats snapshot.)
+            // Record our turn duration once and broadcast the updated stats.
             setGameStats(prev => {
                 const current = prev[socket.id] || emptyStats;
                 const newStats = { ...current, totalTurnTime: current.totalTurnTime + durationMs };
@@ -3507,11 +3652,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 return { ...prev, [socket.id]: newStats };
             });
         }
-
-        // Optimistic update
-        setCurrentTurnPlayerId(nextPlayer.id);
-        setTurn(nextTurnNum);
-        setTurnStartTime(Date.now());
 
         checkDamageTracking();
         damageTakenThisTurn.current = 0;
