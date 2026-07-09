@@ -46,7 +46,13 @@ export const anthropicProvider: LLMProvider = {
         };
         if (req.toolChoice) body.tool_choice = { type: 'tool', name: req.toolChoice };
 
-        const resp: any = await getClient().messages.create(body);
+        // Stream rather than block. Adaptive-thinking Opus turns can run for tens of
+        // seconds; a non-streaming request holds the HTTP connection idle and gets
+        // killed by hosting proxies (Render etc.) with a 502 before it finishes.
+        // Streaming keeps bytes flowing so the connection stays alive, and we collect
+        // the final message once complete.
+        const stream = getClient().messages.stream(body);
+        const resp: any = await stream.finalMessage();
         const content: any[] = resp.content || [];
         const toolCalls: AiToolCall[] = content
             .filter(b => b.type === 'tool_use')

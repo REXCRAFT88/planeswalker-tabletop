@@ -35,11 +35,52 @@ function pickProvider(requested?: AiProviderId): LLMProvider | null {
     return def ? PROVIDERS[def] : null;
 }
 
+// Hard ceiling on a single provider call. Kept under typical hosting proxy limits
+// (~100s) so we surface a clean error instead of letting the platform 502 us.
+const LLM_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || '75000', 10);
+
+class TimeoutError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const t = setTimeout(() => reject(new TimeoutError(`${label} timed out after ${ms}ms`)), ms);
+        promise.then(
+            v => { clearTimeout(t); resolve(v); },
+            e => { clearTimeout(t); reject(e); },
+        );
+    });
+}
+
+// Transient failures (5xx, overload, timeouts, network) are worth one retry;
+// 4xx (bad key, bad request) are not.
+function isRetryable(e: any): boolean {
+    if (e instanceof TimeoutError) return true;
+    const status = e?.status ?? e?.statusCode;
+    if (typeof status === 'number') return status >= 500 || status === 429;
+    // No HTTP status → network/stream error; retry once.
+    return true;
+}
+
 export async function callLLM(req: LLMRequest, provider?: AiProviderId): Promise<LLMResult & { provider: AiProviderId }> {
     const p = pickProvider(provider);
     if (!p) throw new Error('No AI provider is configured (set an API key).');
-    const result = await p.generate(req);
-    return { ...result, provider: p.id };
+
+    const started = Date.now();
+    let lastErr: any;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const result = await withTimeout(p.generate(req), LLM_TIMEOUT_MS, `${p.id} generate`);
+            console.log(`[AI] ${p.id} ok in ${Date.now() - started}ms (attempt ${attempt + 1})`);
+            return { ...result, provider: p.id };
+        } catch (e: any) {
+            lastErr = e;
+            const status = e?.status ?? e?.statusCode ?? '—';
+            console.error(`[AI] ${p.id} attempt ${attempt + 1} failed after ${Date.now() - started}ms: status=${status} ${e?.message || e}`);
+            if (attempt === 0 && isRetryable(e)) continue;
+            break;
+        }
+    }
+    throw lastErr;
 }
 
 export type { LLMRequest, LLMResult, NormMessage, NormTool } from './types';

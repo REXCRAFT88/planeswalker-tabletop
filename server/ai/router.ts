@@ -45,6 +45,17 @@ function effortFor(difficulty: string | undefined): 'low' | 'medium' | 'high' {
     return difficulty === 'competitive' ? 'high' : 'medium';
 }
 
+// Turn a provider error into a structured response so the client never has to
+// parse prose or hang. Timeouts map to 504 and are flagged retryable.
+function errorResponse(res: express.Response, e: any, label: string, extra: Record<string, any> = {}) {
+    const msg = String(e?.message || e || 'unknown error');
+    const isTimeout = /timed out/i.test(msg);
+    const status = e?.status ?? e?.statusCode;
+    const retryable = isTimeout || (typeof status === 'number' && (status >= 500 || status === 429)) || status === undefined;
+    console.error(`[AI] ${label} error (status=${status ?? '—'} retryable=${retryable}):`, msg);
+    res.status(isTimeout ? 504 : 502).json({ error: `AI ${label} failed`, detail: msg, retryable, ...extra });
+}
+
 export function createAiRouter(): express.Router {
     const router = express.Router();
     router.use(express.json({ limit: MAX_BODY }));
@@ -93,8 +104,7 @@ export function createAiRouter(): express.Router {
                 provider: result.provider,
             });
         } catch (e: any) {
-            console.error('[AI] mulligan error', e?.message || e);
-            res.status(502).json({ error: 'AI mulligan failed', detail: e?.message });
+            errorResponse(res, e, 'mulligan');
         }
     });
 
@@ -123,8 +133,7 @@ export function createAiRouter(): express.Router {
                 provider: result.provider,
             });
         } catch (e: any) {
-            console.error('[AI] turn error', e?.message || e);
-            res.status(502).json({ error: 'AI turn failed', detail: e?.message });
+            errorResponse(res, e, 'turn');
         }
     });
 
@@ -152,8 +161,7 @@ export function createAiRouter(): express.Router {
 
             res.json({ conversationId, toolCalls: result.toolCalls, text: result.text, done, usage: result.usage, provider: result.provider });
         } catch (e: any) {
-            console.error('[AI] continue error', e?.message || e);
-            res.status(502).json({ error: 'AI continue failed', detail: e?.message, done: true });
+            errorResponse(res, e, 'continue', { done: true });
         }
     });
 
