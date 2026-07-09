@@ -9,10 +9,10 @@ const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 // Rebuild the client when the key changes (e.g. set via the settings page).
 let client: OpenAI | null = null;
 let clientKey: string | undefined;
-const getClient = () => {
-    const key = getEnv('OPENAI_API_KEY');
+const getClient = (req?: LLMRequest) => {
+    const key = req?.apiKeys?.openai || getEnv('OPENAI_API_KEY');
     if (!client || clientKey !== key) { client = new OpenAI({ apiKey: key }); clientKey = key; }
-    return client;
+    return client!;
 };
 
 // Reasoning models (o-series, gpt-5) take reasoning_effort + max_completion_tokens
@@ -47,15 +47,15 @@ export const openaiProvider: LLMProvider = {
     label: 'ChatGPT',
     enabled: () => isConfigured('OPENAI_API_KEY'),
     async generate(req: LLMRequest): Promise<LLMResult> {
-        const model = DEFAULT_MODEL;
+        const isReasoning = isReasoningModel(req.model || DEFAULT_MODEL);
         const body: any = {
-            model,
+            model: req.model || DEFAULT_MODEL,
             messages: toOpenAIMessages(req.system, req.messages),
             tools: req.tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
         };
         if (req.toolChoice) body.tool_choice = { type: 'function', function: { name: req.toolChoice } };
 
-        if (isReasoningModel(model)) {
+        if (isReasoning) {
             body.max_completion_tokens = req.maxTokens ?? 8192;
             body.reasoning_effort = req.effort ?? 'medium';
         } else {
@@ -63,7 +63,7 @@ export const openaiProvider: LLMProvider = {
             body.temperature = req.effort === 'high' ? 0.4 : req.effort === 'low' ? 1.0 : 0.8;
         }
 
-        const resp: any = await getClient().chat.completions.create(body);
+        const resp: any = await getClient(req).chat.completions.create(body);
         const choice = resp.choices?.[0];
         const msg = choice?.message || {};
         const toolCalls: AiToolCall[] = (msg.tool_calls || [])

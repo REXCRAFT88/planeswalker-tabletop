@@ -39,7 +39,7 @@ interface TabletopProps {
     initialGameStarted?: boolean;
     isLocal?: boolean;
     isLocalTableHost?: boolean;
-    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId }[];
+    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId, model?: string }[];
     manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
@@ -3297,7 +3297,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             let resp;
             try {
-                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId), provider: opp.provider });
+                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId), provider: opp.provider, model: opp.model });
             } catch (e: any) {
                 addLog(`could not take its turn (${e?.message || 'AI error'}); passing`, 'SYSTEM', name);
                 nextTurn();
@@ -3354,7 +3354,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 const hand = state.hand.filter(c => !c.isToken).map(c => ({ id: c.id, name: c.name, manaCost: c.manaCost, typeLine: c.typeLine }));
                 let dec;
                 try {
-                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand, provider: opp.provider });
+                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand, provider: opp.provider, model: opp.model });
                 } catch {
                     state.hasKeptHand = true;
                     addLog('keeps its hand', 'ACTION', opp.name);
@@ -3451,6 +3451,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 dealLog: aiDeals.current[seatId] || [],
                 history,
                 userText: text,
+                model: opp.model,
             });
             accumulateUsage(reply.usage);
             const spoken = reply.speak && reply.text ? reply.text : '(stays quiet)';
@@ -3497,7 +3498,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }),
         });
         try {
-            await session.connect({ seatName: opp.name, persona, provider: opp.provider, view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [] });
+            await session.connect({ seatName: opp.name, persona, provider: opp.provider, model: opp.model, view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [] });
             rtSession.current = session;
         } catch (e: any) {
             addLog(`could not start realtime voice: ${e?.message || 'error'}. Falling back to browser voice.`, 'SYSTEM', opp.name);

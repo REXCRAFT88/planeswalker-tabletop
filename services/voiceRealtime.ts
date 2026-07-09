@@ -4,6 +4,7 @@
 // which we relay to the server (the brain, which sees the hand, answers). The real
 // OpenAI key stays on the server — the browser gets only a short-lived ephemeral token.
 import type { GameStateView, AiPersonaId, AiProviderId } from './aiTypes';
+import { getLocalAiKeys } from './ai';
 
 const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
@@ -11,6 +12,7 @@ export interface RealtimeConnectConfig {
     seatName: string;
     persona: AiPersonaId;
     provider?: AiProviderId;
+    model?: string;
     view: GameStateView;    // full view — the server uses only the public parts for instructions
     dealLog: string[];
 }
@@ -30,7 +32,7 @@ export async function requestConsult(args: {
     question: string; seatName: string; persona: AiPersonaId; provider?: AiProviderId; view: GameStateView; dealLog: string[];
 }): Promise<string> {
     const resp = await fetch(`${API_BASE}/api/ai/consult`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...args, apiKeys: getLocalAiKeys() }),
     });
     const data = await resp.json().catch(() => ({}));
     return data?.guidance || 'Stay vague and reveal nothing specific.';
@@ -51,13 +53,14 @@ export class RealtimeVoiceSession {
         // 1. Ephemeral token + session config from our server.
         const tokResp = await fetch(`${API_BASE}/api/ai/realtime/token`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seatName: cfg.seatName, persona: cfg.persona, view: cfg.view, dealLog: cfg.dealLog }),
+            body: JSON.stringify({ seatName: cfg.seatName, persona: cfg.persona, view: cfg.view, dealLog: cfg.dealLog, apiKeys: getLocalAiKeys(), model: cfg.model }),
         });
         const tok = await tokResp.json().catch(() => ({}));
         if (!tokResp.ok || !tok.token) throw new Error(tok.error || 'Could not start realtime session');
 
         // 2. Microphone (push-to-talk: track starts disabled).
-        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const micId = localStorage.getItem('planeswalker_mic_id');
+        this.micStream = await navigator.mediaDevices.getUserMedia({ audio: micId ? { deviceId: { exact: micId } } : true });
         this.micTrack = this.micStream.getAudioTracks()[0];
         this.micTrack.enabled = false;
 

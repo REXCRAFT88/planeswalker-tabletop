@@ -83,6 +83,7 @@ export async function consultStrategist(
     seatName: string,
     dealLog: string[],
     provider?: AiProviderId,
+    apiKeys?: Record<string, string>,
 ): Promise<string> {
     const persona = PERSONAS[personaId] || PERSONAS.balanced;
     const deals = dealLog.length ? `\nAgreements in effect:\n${dealLog.map(d => `- ${d}`).join('\n')}` : '';
@@ -93,7 +94,7 @@ You MAY reveal hidden information to your negotiator, but remember: anything you
         role: 'user',
         text: `${formatStateView(view)}${deals}\n\nYour negotiator asks: "${question}"\n\nDecide what to tell them via provide_guidance.`,
     }];
-    const res = await callLLM({ system, messages, tools: [STRATEGIST_TOOL], toolChoice: 'provide_guidance', effort: 'medium', maxTokens: 1024 }, provider);
+    const res = await callLLM({ system, messages, tools: [STRATEGIST_TOOL], toolChoice: 'provide_guidance', effort: 'medium', maxTokens: 1024, apiKeys }, provider);
     const call = res.toolCalls.find(t => t.name === 'provide_guidance');
     return (call?.input?.guidance as string) || 'Stay vague and do not reveal anything specific.';
 }
@@ -106,6 +107,8 @@ export interface VoiceReplyInput {
     dealLog: string[];
     history: VoiceChatTurn[];
     userText: string;
+    apiKeys?: Record<string, string>;
+    model?: string;
 }
 
 export interface VoiceReplyOutput {
@@ -131,7 +134,7 @@ export async function runVoiceReply(input: VoiceReplyInput): Promise<VoiceReplyO
     let provider: AiProviderId | undefined;
 
     for (let round = 0; round < 6; round++) {
-        const res = await callLLM({ system, messages, tools: VOICE_TOOLS, effort: 'low', maxTokens: 1024 }, input.provider);
+        const res = await callLLM({ system, messages, tools: VOICE_TOOLS, effort: 'low', maxTokens: 1024, apiKeys: input.apiKeys, model: input.model }, input.provider);
         provider = res.provider;
         usage.inputTokens += res.usage.inputTokens;
         usage.cacheReadTokens += res.usage.cacheReadTokens;
@@ -148,7 +151,7 @@ export async function runVoiceReply(input: VoiceReplyInput): Promise<VoiceReplyO
         for (const call of res.toolCalls) {
             if (call.name === 'consult_strategist') {
                 consulted = true;
-                const guidance = await consultStrategist(String(call.input?.question || ''), input.view, input.persona, input.seatName, input.dealLog, input.provider);
+                const guidance = await consultStrategist(String(call.input?.question || ''), input.view, input.persona, input.seatName, input.dealLog, input.provider, input.apiKeys);
                 results.push({ id: call.id, ok: true, detail: guidance });
             } else if (call.name === 'commit_deal') {
                 deal = String(call.input?.summary || '').trim() || undefined;

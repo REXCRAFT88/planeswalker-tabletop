@@ -24,6 +24,8 @@ export interface LLMRequest {
     effort?: 'low' | 'medium' | 'high';
     toolChoice?: string; // force a specific tool by name (used for mulligan)
     maxTokens?: number;
+    apiKeys?: Record<string, string>;
+    model?: string;
 }
 
 export interface LLMResult {

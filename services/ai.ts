@@ -24,9 +24,27 @@ export interface AiConfigUpdate {
     adminPin?: string;
 }
 
+export function getLocalAiKeys(): Record<string, string> {
+    try {
+        const stored = localStorage.getItem('planeswalker_ai_keys');
+        return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+}
+
+export function saveLocalAiKeys(keys: Record<string, string>) {
+    localStorage.setItem('planeswalker_ai_keys', JSON.stringify(keys));
+}
+
 // Push provider keys to the server (held in server memory only, never returned).
 export async function saveAiConfig(update: AiConfigUpdate): Promise<AiStatus> {
     const { adminPin, ...body } = update;
+
+    const localKeys = getLocalAiKeys();
+    if (body.anthropicKey !== undefined) localKeys.anthropic = body.anthropicKey;
+    if (body.openaiKey !== undefined) localKeys.openai = body.openaiKey;
+    if (body.geminiKey !== undefined) localKeys.gemini = body.geminiKey;
+    saveLocalAiKeys(localKeys);
+
     const resp = await fetch(`${API_BASE}/api/ai/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(adminPin ? { 'x-admin-pin': adminPin } : {}) },
@@ -50,10 +68,11 @@ async function post<T>(path: string, body: any): Promise<T> {
     const timer = setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
     let resp: Response;
     try {
+        const fullBody = { ...body, apiKeys: getLocalAiKeys() };
         resp = await fetch(`${API_BASE}/api/ai${path}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify(fullBody),
             signal: ctrl.signal,
         });
     } catch (e: any) {
@@ -78,8 +97,22 @@ export async function aiStatus(): Promise<AiStatus> {
         const resp = await fetch(`${API_BASE}/api/ai/status`);
         if (!resp.ok) return { enabled: false, providers: [], defaultProvider: null, realtimeVoice: false };
         const data = await resp.json();
-        cachedEnabled = !!data.enabled;
-        return { enabled: !!data.enabled, providers: data.providers || [], defaultProvider: data.defaultProvider ?? null, realtimeVoice: !!data.realtimeVoice };
+        
+        const localKeys = getLocalAiKeys();
+        const localEnabled = !!localKeys.anthropic || !!localKeys.openai || !!localKeys.gemini;
+        cachedEnabled = !!data.enabled || localEnabled;
+        
+        const providers = [...(data.providers || [])];
+        if (localKeys.anthropic && !providers.find(p => p.id === 'anthropic')) providers.push({ id: 'anthropic', label: 'Claude' });
+        if (localKeys.openai && !providers.find(p => p.id === 'openai')) providers.push({ id: 'openai', label: 'ChatGPT' });
+        if (localKeys.gemini && !providers.find(p => p.id === 'gemini')) providers.push({ id: 'gemini', label: 'Gemini' });
+
+        return { 
+            enabled: cachedEnabled, 
+            providers, 
+            defaultProvider: data.defaultProvider ?? null, 
+            realtimeVoice: !!data.realtimeVoice || !!localKeys.openai 
+        };
     } catch {
         cachedEnabled = false;
         return { enabled: false, providers: [], defaultProvider: null, realtimeVoice: false };
@@ -97,6 +130,8 @@ export interface MulliganArgs {
     deckSummary: string;
     hand: AiCardRef[];
     provider?: AiProviderId;
+    model?: string;
+    apiKeys?: Record<string, string>;
 }
 
 export function requestMulligan(args: MulliganArgs): Promise<AiMulliganResponse> {
@@ -110,6 +145,8 @@ export interface TurnArgs {
     deck: AiDeckCard[];
     stateView: GameStateView;
     provider?: AiProviderId;
+    model?: string;
+    apiKeys?: Record<string, string>;
 }
 
 export function requestTurn(args: TurnArgs): Promise<AiTurnResponse> {

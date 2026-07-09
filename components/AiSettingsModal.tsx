@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, Check, Loader, Bot, Eye, EyeOff } from 'lucide-react';
-import { aiStatus, saveAiConfig, type AiStatus } from '../services/ai';
+import { aiStatus, saveAiConfig, getLocalAiKeys, type AiStatus } from '../services/ai';
 import { AI_PROVIDER_LABELS, type AiProviderId } from '../services/aiTypes';
 
 interface Props {
@@ -21,13 +21,27 @@ export const AiSettingsModal: React.FC<Props> = ({ onClose }) => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [saved, setSaved] = useState(false);
+    
+    const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+    const [selectedMic, setSelectedMic] = useState(localStorage.getItem('planeswalker_mic_id') || '');
 
     const refresh = () => aiStatus().then(s => {
-        setStatus(s);
+        const localKeys = getLocalAiKeys();
+        const configured = {
+            anthropic: !!localKeys.anthropic || s.configured?.anthropic || false,
+            openai: !!localKeys.openai || s.configured?.openai || false,
+            gemini: !!localKeys.gemini || s.configured?.gemini || false,
+        };
+        setStatus({ ...s, configured });
         setDefaultProvider(s.defaultProvider ?? '');
     }).catch(() => setStatus(null));
 
-    useEffect(() => { refresh(); }, []);
+    useEffect(() => { 
+        refresh(); 
+        navigator.mediaDevices?.enumerateDevices().then(devices => {
+            setMics(devices.filter(d => d.kind === 'audioinput'));
+        }).catch(() => {});
+    }, []);
 
     const configured = status?.configured || { anthropic: false, openai: false, gemini: false };
 
@@ -51,6 +65,7 @@ export const AiSettingsModal: React.FC<Props> = ({ onClose }) => {
             setStatus(s);
             setDefaultProvider(s.defaultProvider ?? '');
             setAnthropicKey(''); setOpenaiKey(''); setGeminiKey('');
+            localStorage.setItem('planeswalker_mic_id', selectedMic);
             setSaved(true);
             setTimeout(() => setSaved(false), 2500);
         } catch (e: any) {
@@ -117,6 +132,22 @@ export const AiSettingsModal: React.FC<Props> = ({ onClose }) => {
                             ))}
                         </select>
                     </div>
+
+                    {mics.length > 0 && (
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">Microphone</label>
+                            <select
+                                value={selectedMic}
+                                onChange={e => setSelectedMic(e.target.value)}
+                                className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2 px-3 text-white text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none"
+                            >
+                                <option value="">System Default</option>
+                                {mics.map(m => (
+                                    <option key={m.deviceId} value={m.deviceId}>{m.label || `Microphone ${m.deviceId.slice(0, 5)}`}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">Admin PIN <span className="text-gray-500 normal-case">(only if the server requires one)</span></label>

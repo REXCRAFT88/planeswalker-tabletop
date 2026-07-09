@@ -23,6 +23,8 @@ interface Conversation {
     messages: NormMessage[];
     effort: 'low' | 'medium' | 'high';
     provider?: AiProviderId;
+    apiKeys?: Record<string, string>;
+    model?: string;
     rounds: number;
     lastUsed: number;
 }
@@ -110,15 +112,18 @@ export function createAiRouter(): express.Router {
 
     router.use((req, res, next) => {
         if (req.path === '/status') return next();
-        if (!aiEnabled()) {
-            return res.status(503).json({ error: 'AI is unavailable: the server has no API key configured for any provider.' });
+        
+        const userProvidedKey = req.body?.apiKeys && (req.body.apiKeys.anthropic || req.body.apiKeys.openai || req.body.apiKeys.gemini);
+        
+        if (!aiEnabled() && !userProvidedKey) {
+            return res.status(503).json({ error: 'AI is unavailable: no API key configured for any provider.' });
         }
         next();
     });
 
     router.post('/mulligan', async (req, res) => {
         try {
-            const { seatName, persona, difficulty, deckSummary, hand, provider } = req.body || {};
+            const { seatName, persona, difficulty, deckSummary, hand, provider, apiKeys, model } = req.body || {};
             if (!Array.isArray(hand)) return res.status(400).json({ error: 'hand[] required' });
 
             const system = buildMulliganSystemPrompt((persona as AiPersonaId) || 'balanced', seatName || 'AI', deckSummary || '');
@@ -130,6 +135,8 @@ export function createAiRouter(): express.Router {
                 toolChoice: 'mulligan_decision',
                 effort: effortFor(difficulty),
                 maxTokens: 2048,
+                apiKeys,
+                model,
             }, provider as AiProviderId);
             const call = result.toolCalls.find(t => t.name === 'mulligan_decision');
             const input = call?.input || {};
@@ -147,18 +154,18 @@ export function createAiRouter(): express.Router {
 
     router.post('/turn', async (req, res) => {
         try {
-            const { seatName, persona, difficulty, deck, stateView, provider } = req.body || {};
+            const { seatName, persona, difficulty, deck, stateView, provider, apiKeys, model } = req.body || {};
             if (!stateView || !stateView.you) return res.status(400).json({ error: 'stateView required' });
 
             const system = buildTurnSystemPrompt((persona as AiPersonaId) || 'balanced', seatName || 'AI', (deck as AiDeckCard[]) || []);
             const effort = effortFor(difficulty);
             const messages: NormMessage[] = [{ role: 'user', text: formatStateView(stateView as GameStateView) }];
 
-            const result = await callLLM({ system, messages, tools: TURN_TOOLS, effort }, provider as AiProviderId);
+            const result = await callLLM({ system, messages, tools: TURN_TOOLS, effort, apiKeys, model }, provider as AiProviderId);
             messages.push({ role: 'assistant', text: result.text, toolCalls: result.toolCalls });
 
             const id = newId();
-            conversations.set(id, { system, tools: TURN_TOOLS, messages, effort, provider: result.provider, rounds: 1, lastUsed: Date.now() });
+            conversations.set(id, { system, tools: TURN_TOOLS, messages, effort, provider: result.provider, apiKeys, model, rounds: 1, lastUsed: Date.now() });
 
             const endTurn = result.toolCalls.some(t => t.name === 'end_turn');
             res.json({
@@ -187,7 +194,7 @@ export function createAiRouter(): express.Router {
             }
 
             convo.messages.push({ role: 'tool_results', results: toolResults as AiToolResult[] });
-            const result = await callLLM({ system: convo.system, messages: convo.messages, tools: convo.tools, effort: convo.effort }, convo.provider);
+            const result = await callLLM({ system: convo.system, messages: convo.messages, tools: convo.tools, effort: convo.effort, apiKeys: convo.apiKeys, model: convo.model }, convo.provider);
             convo.messages.push({ role: 'assistant', text: result.text, toolCalls: result.toolCalls });
             convo.rounds += 1;
             convo.lastUsed = Date.now();
@@ -208,12 +215,12 @@ export function createAiRouter(): express.Router {
     // token. Hidden state is not placed in the instructions — the Realtime model must
     // call consult_strategist (relayed to /consult) to learn anything about its hand.
     router.post('/realtime/token', async (req, res) => {
-        const openaiKey = getEnv('OPENAI_API_KEY');
+        const { seatName, persona, view, dealLog, apiKeys } = req.body || {};
+        const openaiKey = apiKeys?.openai || getEnv('OPENAI_API_KEY');
         if (!openaiKey) {
-            return res.status(503).json({ error: 'OpenAI Realtime voice requires an OpenAI API key on the server.' });
+            return res.status(503).json({ error: 'OpenAI Realtime voice requires an OpenAI API key.' });
         }
         try {
-            const { seatName, persona, view, dealLog } = req.body || {};
             if (!view || !view.you) return res.status(400).json({ error: 'view required' });
             const instructions = buildVoiceInstructions((persona as AiPersonaId) || 'balanced', seatName || 'AI', view as GameStateView, Array.isArray(dealLog) ? dealLog : []);
             const session = {
@@ -247,7 +254,7 @@ export function createAiRouter(): express.Router {
     // client relays the question here, and the brain (which sees the hand) answers.
     router.post('/consult', async (req, res) => {
         try {
-            const { question, view, persona, seatName, dealLog, provider } = req.body || {};
+            const { question, view, persona, seatName, dealLog, provider, apiKeys } = req.body || {};
             if (!view || !view.you) return res.status(400).json({ error: 'view required' });
             const guidance = await consultStrategist(
                 String(question || ''),
@@ -256,6 +263,7 @@ export function createAiRouter(): express.Router {
                 seatName || 'AI',
                 Array.isArray(dealLog) ? dealLog : [],
                 provider as AiProviderId,
+                apiKeys,
             );
             res.json({ guidance });
         } catch (e: any) {
@@ -268,7 +276,7 @@ export function createAiRouter(): express.Router {
     // firewalled from hidden info and consults the strategist (brain) as needed.
     router.post('/voice', async (req, res) => {
         try {
-            const { seatName, persona, provider, view, dealLog, history, userText } = req.body || {};
+            const { seatName, persona, provider, view, dealLog, history, userText, apiKeys, model } = req.body || {};
             if (!view || !view.you) return res.status(400).json({ error: 'view required' });
             if (typeof userText !== 'string' || !userText.trim()) return res.status(400).json({ error: 'userText required' });
 
@@ -280,6 +288,8 @@ export function createAiRouter(): express.Router {
                 dealLog: Array.isArray(dealLog) ? dealLog : [],
                 history: (Array.isArray(history) ? history : []) as VoiceChatTurn[],
                 userText: userText.slice(0, 2000),
+                apiKeys,
+                model,
             });
             res.json(result);
         } catch (e: any) {

@@ -18,6 +18,7 @@ interface LocalOpponent {
     persona?: AiPersonaId;
     difficulty?: AiDifficulty;
     provider?: AiProviderId;
+    model?: string;
 }
 
 interface LocalSetupProps {
@@ -45,6 +46,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
     const [stagedDifficulty, setStagedDifficulty] = useState<AiDifficulty>('casual');
     const [stagedPersona, setStagedPersona] = useState<AiPersonaId>('balanced');
     const [stagedProvider, setStagedProvider] = useState<AiProviderId | undefined>(undefined);
+    const [stagedModel, setStagedModel] = useState<string>('');
 
     // Which providers the server has keys for (AI opponents require at least one).
     const [aiProviders, setAiProviders] = useState<{ id: AiProviderId; label: string }[]>([]);
@@ -145,7 +147,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
             tokens: stagedOpponent.tokens,
             color: PLAYER_COLORS[(opponents.length + 1) % PLAYER_COLORS.length],
             type: isAi ? 'ai' : 'human_local',
-            ...(isAi ? { persona: stagedPersona, difficulty: stagedDifficulty, provider: stagedProvider } : {}),
+            ...(isAi ? { persona: stagedPersona, difficulty: stagedDifficulty, provider: stagedProvider, model: stagedModel || undefined } : {}),
         };
         setOpponents([...opponents, newOpponent]);
         setStagedOpponent(null);
@@ -311,7 +313,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
 
                                 {stagedType === 'ai' && aiAvailable !== false && aiProviders.length > 1 && (
                                     <div>
-                                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Model</label>
+                                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Provider</label>
                                         <div className="flex gap-1 flex-wrap">
                                             {aiProviders.map(p => (
                                                 <button key={p.id} onClick={() => setStagedProvider(p.id)}
@@ -320,6 +322,19 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                                 </button>
                                             ))}
                                         </div>
+                                    </div>
+                                )}
+
+                                {stagedType === 'ai' && aiAvailable !== false && (
+                                    <div>
+                                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Model (optional override)</label>
+                                        <input
+                                            type="text"
+                                            value={stagedModel}
+                                            onChange={e => setStagedModel(e.target.value)}
+                                            placeholder="e.g. gpt-4o, claude-3-5-sonnet-20241022"
+                                            className="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-purple-500"
+                                        />
                                     </div>
                                 )}
 
@@ -380,7 +395,7 @@ export const LocalSetup: React.FC<LocalSetupProps> = ({ onStartGame, onBack, sav
                                             ) : (
                                                 <>
                                                     {opp.type === 'ai' ? (
-                                                        <span className="text-purple-400 font-bold flex items-center gap-0.5"><Bot size={11} /> AI · {opp.difficulty || 'casual'}{opp.provider ? ` · ${AI_PROVIDER_LABELS[opp.provider]}` : ''}</span>
+                                                        <span className="text-purple-400 font-bold flex items-center gap-0.5"><Bot size={11} /> AI · {opp.difficulty || 'casual'}{opp.provider ? ` · ${AI_PROVIDER_LABELS[opp.provider]}` : ''}{opp.model ? ` (${opp.model})` : ''}</span>
                                                     ) : (
                                                         <span className="text-blue-400 font-bold flex items-center gap-0.5"><User size={11} /> Hot-seat</span>
                                                     )}

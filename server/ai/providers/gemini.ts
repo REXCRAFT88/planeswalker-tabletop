@@ -5,7 +5,7 @@ import type { AiToolCall } from '../../../services/aiTypes';
 import { getEnv } from '../runtimeConfig';
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-const getKey = () => getEnv('GEMINI_API_KEY') || getEnv('GOOGLE_API_KEY') || '';
+const getKey = (req?: LLMRequest) => req?.apiKeys?.gemini || getEnv('GEMINI_API_KEY') || getEnv('GOOGLE_API_KEY') || '';
 
 // Gemini function calls carry no ids. We encode the function name into the synthetic
 // tool-call id ("name##index") so we can supply it back on the functionResponse.
@@ -39,7 +39,7 @@ export const geminiProvider: LLMProvider = {
     label: 'Gemini',
     enabled: () => !!getKey(),
     async generate(req: LLMRequest): Promise<LLMResult> {
-        const genAI = new GoogleGenerativeAI(getKey());
+        const genAI = new GoogleGenerativeAI(getKey(req));
         const tools = [{
             functionDeclarations: req.tools.map(t => ({
                 name: t.name,
@@ -51,11 +51,12 @@ export const geminiProvider: LLMProvider = {
             ? { functionCallingConfig: { mode: 'ANY' as const, allowedFunctionNames: [req.toolChoice] } }
             : { functionCallingConfig: { mode: 'AUTO' as const } };
 
+        const isReasoning = (req.model || DEFAULT_MODEL).includes('thinking');
         const model = genAI.getGenerativeModel({
-            model: DEFAULT_MODEL,
+            model: req.model || DEFAULT_MODEL,
             systemInstruction: req.system,
-            tools: tools as any,
-            toolConfig: toolConfig as any,
+            tools: isReasoning ? [] : tools as any,
+            toolConfig: isReasoning ? undefined : toolConfig as any,
         });
 
         const result = await model.generateContent({ contents: toGeminiContents(req.messages) });

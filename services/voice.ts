@@ -5,6 +5,7 @@
 import type {
     GameStateView, VoiceChatTurn, VoiceReplyResponse, AiPersonaId, AiProviderId, VoiceBackendId,
 } from './aiTypes';
+import { getLocalAiKeys } from './ai';
 
 const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
@@ -118,13 +119,14 @@ export interface VoiceReplyArgs {
     dealLog: string[];
     history: VoiceChatTurn[];
     userText: string;
+    model?: string;
 }
 
 export async function requestVoiceReply(args: VoiceReplyArgs): Promise<VoiceReplyResponse> {
     const resp = await fetch(`${API_BASE}/api/ai/voice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(args),
+        body: JSON.stringify({ ...args, apiKeys: getLocalAiKeys() }),
     });
     if (!resp.ok) {
         let detail = '';

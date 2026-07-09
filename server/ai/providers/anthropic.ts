@@ -4,15 +4,15 @@ import { emptyUsage } from './types';
 import type { AiToolCall } from '../../../services/aiTypes';
 import { getEnv, isConfigured } from '../runtimeConfig';
 
-const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || process.env.AI_MODEL || 'claude-opus-4-8';
+const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || process.env.AI_MODEL || 'claude-3-5-sonnet-20241022';
 
 // Rebuild the client when the key changes (e.g. set via the settings page).
 let client: Anthropic | null = null;
 let clientKey: string | undefined;
-const getClient = () => {
-    const key = getEnv('ANTHROPIC_API_KEY');
+const getClient = (req?: LLMRequest) => {
+    const key = req?.apiKeys?.anthropic || getEnv('ANTHROPIC_API_KEY');
     if (!client || clientKey !== key) { client = new Anthropic({ apiKey: key }); clientKey = key; }
-    return client;
+    return client!;
 };
 
 export function toAnthropicMessages(msgs: NormMessage[]): any[] {
@@ -42,7 +42,7 @@ export const anthropicProvider: LLMProvider = {
     enabled: () => isConfigured('ANTHROPIC_API_KEY'),
     async generate(req: LLMRequest): Promise<LLMResult> {
         const body: any = {
-            model: DEFAULT_MODEL,
+            model: req.model || DEFAULT_MODEL,
             max_tokens: req.maxTokens ?? 8192,
             thinking: { type: 'adaptive' },
             output_config: { effort: req.effort ?? 'medium' },
@@ -58,7 +58,7 @@ export const anthropicProvider: LLMProvider = {
         // killed by hosting proxies (Render etc.) with a 502 before it finishes.
         // Streaming keeps bytes flowing so the connection stays alive, and we collect
         // the final message once complete.
-        const stream = getClient().messages.stream(body);
+        const stream = getClient(req).messages.stream(body);
         const resp: any = await stream.finalMessage();
         const content: any[] = resp.content || [];
         const toolCalls: AiToolCall[] = content
