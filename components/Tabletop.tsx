@@ -24,6 +24,12 @@ import {
     Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2
 } from 'lucide-react';
 
+// Cards that start in the command-zone area rather than the library: commanders
+// and companions. Keeping companions in the same commandZone array means every
+// existing sync path (backup/restore, snapshots, opponent visibility) carries
+// them for free; the render splits them into a separate labeled slot.
+const isCmdZoneCard = (c: CardData) => !!c.isCommander || !!c.isCompanion;
+
 interface TabletopProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
@@ -542,35 +548,43 @@ const Playmat: React.FC<PlaymatProps> = ({
                 <div className="absolute -top-6 w-full text-center text-xs text-gray-500 font-bold uppercase">Exile</div>
             </div>
 
-            {/* Command Zone */}
-            <div
-                className="absolute flex flex-col gap-2"
-                style={{ left: zones.command.x, top: zones.command.y }}
-            >
-                {commanders.map(cmd => (
+            {/* Command Zone (commanders) + Companion Zone. commanders[] carries both;
+                split by isCompanion so each slot only shows when the player has it.
+                Multiple commanders (partner/background) stack vertically. */}
+            {(() => {
+                const cmdrs = commanders.filter(c => !c.isCompanion);
+                const comps = commanders.filter(c => c.isCompanion);
+                const slot = (cmd: CardData, kind: 'commander' | 'companion') => (
                     <div
                         key={cmd.id}
-                        className="relative bg-gray-800 border border-amber-500/30 cursor-pointer hover:scale-105 transition-transform"
+                        className={`relative bg-gray-800 border cursor-pointer hover:scale-105 transition-transform ${kind === 'companion' ? 'border-indigo-400/40' : 'border-amber-500/30'}`}
                         style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
                         onClick={(e) => isMobile ? handleCommanderTouch(cmd, e as any) : (isControlled ? onPlayCommander(cmd) : onInspectCommander(cmd))}
-                        title={isControlled ? "Click to Cast Commander" : "Click to Inspect"}
+                        title={isControlled ? (kind === 'companion' ? 'Click to play your Companion' : 'Click to Cast Commander') : 'Click to Inspect'}
                     >
                         <img src={cmd.imageUrl} className="w-full h-full object-cover rounded opacity-90" alt={cmd.name} />
                         {isControlled && !isMobile && <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-bold px-1.5 rounded border border-white/20 pointer-events-none z-20 shadow-sm">C</div>}
-                        <div className="absolute -top-2 -right-2 bg-amber-600 text-black p-1 rounded-full shadow-lg">
-                            <Crown size={16} />
+                        <div className={`absolute -top-2 -right-2 p-1 rounded-full shadow-lg ${kind === 'companion' ? 'bg-indigo-500 text-white' : 'bg-amber-600 text-black'}`}>
+                            {kind === 'companion' ? <Shield size={16} /> : <Crown size={16} />}
                         </div>
                     </div>
-                ))}
-                {commanders.length === 0 && (
-                    <div
-                        className="rounded border-2 border-dashed border-white/10 flex items-center justify-center text-center p-2 text-white/20 text-xs"
-                        style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
-                    >
-                        Command Zone Empty
-                    </div>
-                )}
-            </div>
+                );
+                return (
+                    <>
+                        {cmdrs.length > 0 && (
+                            <div className="absolute flex flex-col gap-2" style={{ left: zones.command.x, top: zones.command.y }}>
+                                {cmdrs.map(c => slot(c, 'commander'))}
+                            </div>
+                        )}
+                        {comps.length > 0 && (
+                            <div className="absolute flex flex-col gap-2" style={{ left: zones.command.x, top: zones.command.y + (cmdrs.length * (CARD_HEIGHT + 8)) + (cmdrs.length ? 22 : 0) }}>
+                                <div className="text-[10px] text-indigo-300 font-bold uppercase text-center tracking-wide">Companion</div>
+                                {comps.map(c => slot(c, 'companion'))}
+                            </div>
+                        )}
+                    </>
+                );
+            })()}
 
             {/* Hand Visualization */}
             {counts.hand > 0 && !isControlled && (
@@ -968,17 +982,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setOpponentsCounts(prev => ({
                     ...prev,
                     [applicantId]: {
-                        library: deck.filter(c => !c.isCommander).length,
+                        library: deck.filter(c => !isCmdZoneCard(c)).length,
                         graveyard: 0,
                         exile: 0,
                         hand: 0, // Hand is hidden on table, but we track count
-                        command: deck.filter(c => c.isCommander).length
+                        command: deck.filter(isCmdZoneCard).length
                     }
                 }));
 
                 setOpponentsCommanders(prev => ({
                     ...prev,
-                    [applicantId]: deck.filter(c => c.isCommander)
+                    [applicantId]: deck.filter(isCmdZoneCard)
                 }));
 
                 setOpponentsLife(prev => ({
@@ -991,10 +1005,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 localPlayerStates.current[applicantId] = {
                     id: applicantId,
                     hand: [], // Hand is on mobile
-                    library: deck.filter(c => !c.isCommander),
+                    library: deck.filter(c => !isCmdZoneCard(c)),
                     graveyard: [],
                     exile: [],
-                    commandZone: deck.filter(c => c.isCommander),
+                    commandZone: deck.filter(isCmdZoneCard),
                     life: 40,
                     counters: {},
                     commanderDamage: {},
@@ -1058,23 +1072,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             localOpponents.forEach(opp => {
                 const id = opp.id || `opponent-unknown`;
                 newCounts[id] = {
-                    library: opp.deck ? opp.deck.filter(c => !c.isCommander).length : 0,
+                    library: opp.deck ? opp.deck.filter(c => !isCmdZoneCard(c)).length : 0,
                     hand: 7, // Assume starting hand
                     graveyard: 0,
                     exile: 0,
-                    command: opp.deck ? opp.deck.filter(c => c.isCommander).length : 0
+                    command: opp.deck ? opp.deck.filter(isCmdZoneCard).length : 0
                 };
                 newLife[id] = 40;
-                newCommanders[id] = opp.deck ? opp.deck.filter(c => c.isCommander) : [];
+                newCommanders[id] = opp.deck ? opp.deck.filter(isCmdZoneCard) : [];
 
                 // Initialize ref state
                 localPlayerStates.current[id] = {
                     id: id,
                     hand: [], // We don't know their hand yet if they are remote
-                    library: opp.deck ? opp.deck.filter(c => !c.isCommander) : [],
+                    library: opp.deck ? opp.deck.filter(c => !isCmdZoneCard(c)) : [],
                     graveyard: [],
                     exile: [],
-                    commandZone: opp.deck ? opp.deck.filter(c => c.isCommander) : [],
+                    commandZone: opp.deck ? opp.deck.filter(isCmdZoneCard) : [],
                     life: 40,
                     counters: {},
                     commanderDamage: {},
@@ -1713,8 +1727,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Helper to create initial state
     const createInitialState = (id: string, deck: CardData[], tokens: CardData[]): LocalPlayerState => {
-        const commanders = deck.filter(c => c.isCommander);
-        const library = deck.filter(c => !c.isCommander).sort(() => Math.random() - 0.5);
+        const commanders = deck.filter(isCmdZoneCard);
+        const library = deck.filter(c => !isCmdZoneCard(c)).sort(() => Math.random() - 0.5);
         return {
             id,
             hand: tokens, // Initially just tokens, draw 7 later
@@ -2220,8 +2234,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setRound(1);
                 setGameStats({});
 
-                const commanders = initialDeck.filter(c => c.isCommander);
-                const deck = initialDeck.filter(c => !c.isCommander);
+                const commanders = initialDeck.filter(isCmdZoneCard);
+                const deck = initialDeck.filter(c => !isCmdZoneCard(c));
                 const shuffled = [...deck].sort(() => Math.random() - 0.5);
                 setLibrary(shuffled);
                 setCommandZone(commanders);
@@ -2432,8 +2446,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // --- Initialization ---
     useEffect(() => {
         if (!isLocal && !initialGameStarted) {
-            const commanders = initialDeck.filter(c => c.isCommander);
-            const deck = initialDeck.filter(c => !c.isCommander);
+            const commanders = initialDeck.filter(isCmdZoneCard);
+            const deck = initialDeck.filter(c => !isCmdZoneCard(c));
             const shuffled = [...deck].sort(() => Math.random() - 0.5);
 
             setLibrary(shuffled);
@@ -2670,8 +2684,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setTurnOrder([]);
         setGameStats({});
 
-        const commanders = initialDeck.filter(c => c.isCommander);
-        const deck = initialDeck.filter(c => !c.isCommander);
+        const commanders = initialDeck.filter(isCmdZoneCard);
+        const deck = initialDeck.filter(c => !isCmdZoneCard(c));
         const shuffled = [...deck].sort(() => Math.random() - 0.5);
         setLibrary(shuffled);
         setCommandZone(commanders);

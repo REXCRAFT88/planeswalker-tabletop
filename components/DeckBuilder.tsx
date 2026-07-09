@@ -3,7 +3,7 @@ import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from 
 import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { ManaRulesModal } from './ManaRulesModal';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter } from 'lucide-react';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
@@ -145,7 +145,21 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         if (!stagedDeck) return;
         const updated = stagedDeck.map(c => ({
             ...c,
-            isCommander: c.id === id ? !c.isCommander : c.isCommander // Toggle or set
+            // Toggle commander; a card can't be both commander and companion.
+            isCommander: c.id === id ? !c.isCommander : c.isCommander,
+            isCompanion: c.id === id ? false : c.isCompanion,
+        }));
+        setStagedDeck(updated);
+    };
+
+    // Companion: sits outside the deck in its own zone. Mutually exclusive with
+    // commander. Only one companion per deck.
+    const setCompanion = (id: string) => {
+        if (!stagedDeck) return;
+        const updated = stagedDeck.map(c => ({
+            ...c,
+            isCompanion: c.id === id ? !c.isCompanion : false,
+            isCommander: c.id === id ? false : c.isCommander,
         }));
         setStagedDeck(updated);
     };
@@ -365,7 +379,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 <div className="flex-1 flex flex-col bg-gray-800 rounded-xl border border-gray-700 overflow-hidden min-h-0">
                     <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4 shrink-0">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-2">
-                            <span className="text-gray-300 text-xs md:text-base">Click a card to designate it as Commander.</span>
+                            <span className="text-gray-300 text-xs md:text-base">Click a card to set it as Commander (click again for partners). Use the <Shield size={11} className="inline text-indigo-300" /> button to set a Companion.</span>
                             <div className="flex gap-2">
                                 <button
                                     onClick={clearDeck}
@@ -409,7 +423,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                     onClick={() => setCommander(card.id)}
                                     onMouseEnter={() => setHoveredCardId(card.id)}
                                     onMouseLeave={() => setHoveredCardId(null)}
-                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
+                                    className={`relative aspect-[2.5/3.5] rounded-lg cursor-pointer transition-all border-4 ${card.isCommander ? 'border-amber-500 scale-105 shadow-amber-500/50 shadow-lg' : card.isCompanion ? 'border-indigo-400 scale-105 shadow-indigo-400/50 shadow-lg' : 'border-transparent hover:border-gray-500'}`}
                                 >
                                     <img src={card.imageUrl} className="w-full h-full object-cover rounded-md" />
                                     {card.isCommander && (
@@ -417,6 +431,19 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                             <Crown size={20} fill="black" />
                                         </div>
                                     )}
+                                    {card.isCompanion && (
+                                        <div className="absolute top-2 right-2 bg-indigo-500 text-white p-1 rounded-full shadow-lg">
+                                            <Shield size={20} />
+                                        </div>
+                                    )}
+                                    {/* Companion toggle (separate from the click-to-set-commander) */}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setCompanion(card.id); }}
+                                        title={card.isCompanion ? 'Remove companion' : 'Set as companion'}
+                                        className={`absolute bottom-1 right-1 p-1 rounded-full shadow-lg border transition-colors ${card.isCompanion ? 'bg-indigo-500 text-white border-white/30' : 'bg-black/60 text-indigo-300 border-white/10 hover:bg-indigo-500/70 hover:text-white'}`}
+                                    >
+                                        <Shield size={12} />
+                                    </button>
                                     {/* Count badge */}
                                     {count > 1 && (
                                         <div className="absolute bottom-8 left-1 bg-gray-900/90 text-white text-[11px] font-bold px-1.5 py-0.5 rounded shadow-lg border border-gray-600">
