@@ -24,8 +24,7 @@ export function buildTurnSystemPrompt(
         .map(c => {
             const cost = c.manaCost ? ` ${c.manaCost}` : '';
             const type = c.typeLine ? ` — ${c.typeLine}` : '';
-            const text = c.oracleText ? `\n    ${c.oracleText.replace(/\n/g, ' ')}` : '';
-            return `- ${c.name}${cost}${type}${text}`;
+            return `- ${c.name}${cost}${type}`;
         })
         .join('\n');
 
@@ -35,7 +34,7 @@ ${RULES_OF_ENGAGEMENT}
 
 ${RULES_DIGEST}
 
-Your decklist (with oracle text) for reference — you do not need this repeated each turn:
+Your decklist for reference (you will see card oracle text when cards are drawn or in play):
 ${deckList}`;
 }
 
@@ -63,7 +62,7 @@ export function formatStateView(view: GameStateView): string {
         .join(' ');
 
     const hand = you.hand.length
-        ? you.hand.map(c => `  [${c.id}] ${c.name}${c.manaCost ? ' ' + c.manaCost : ''}${c.typeLine ? ' — ' + c.typeLine : ''}`).join('\n')
+        ? you.hand.map(c => `  [${c.id}] ${c.name}${c.manaCost ? ' ' + c.manaCost : ''}${c.typeLine ? ' — ' + c.typeLine : ''}${c.oracleText ? '\n      (Text: ' + c.oracleText.replace(/\n/g, ' ') + ')' : ''}`).join('\n')
         : '  (empty)';
 
     const battlefield = you.battlefield.length
@@ -73,12 +72,12 @@ export function formatStateView(view: GameStateView): string {
             const counters = b.counters && Object.keys(b.counters).length
                 ? ' {' + Object.entries(b.counters).map(([k, v]) => `${k}:${v}`).join(',') + '}'
                 : '';
-            return `  [${b.id}] ${b.name}${q}${tapped}${counters}${b.typeLine ? ' — ' + b.typeLine : ''}`;
+            return `  [${b.id}] ${b.name}${q}${tapped}${counters}${b.typeLine ? ' — ' + b.typeLine : ''}${b.oracleText ? '\n      (Text: ' + b.oracleText.replace(/\n/g, ' ') + ')' : ''}`;
         }).join('\n')
         : '  (empty)';
 
     const command = you.commandZone.length
-        ? you.commandZone.map(c => `  [${c.id}] ${c.name}${c.manaCost ? ' ' + c.manaCost : ''}`).join('\n')
+        ? you.commandZone.map(c => `  [${c.id}] ${c.name}${c.manaCost ? ' ' + c.manaCost : ''}${c.oracleText ? '\n      (Text: ' + c.oracleText.replace(/\n/g, ' ') + ')' : ''}`).join('\n')
         : '  (empty)';
 
     const opps = view.opponents.map(o => {

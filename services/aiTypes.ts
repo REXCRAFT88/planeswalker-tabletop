@@ -25,6 +25,7 @@ export interface AiCardRef {
     name: string;
     manaCost?: string;
     typeLine?: string;
+    oracleText?: string;
 }
 
 export interface AiBoardRef {
@@ -35,6 +36,7 @@ export interface AiBoardRef {
     quantity: number;
     counters?: Record<string, number>;
     typeLine?: string;
+    oracleText?: string;
 }
 
 export interface AiManaPool {

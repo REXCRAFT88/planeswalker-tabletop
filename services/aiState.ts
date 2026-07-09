@@ -12,7 +12,7 @@ const toManaPool = (p: ManaPool): AiManaPool => ({
 });
 
 const cardRef = (c: CardData): AiCardRef => ({
-    id: c.id, name: c.name, manaCost: c.manaCost || undefined, typeLine: c.typeLine || undefined,
+    id: c.id, name: c.name, manaCost: c.manaCost || undefined, typeLine: c.typeLine || undefined, oracleText: c.oracleText || undefined
 });
 
 // A board object is "tapped" if a single copy is rotated off its owner's default
@@ -30,6 +30,7 @@ const boardRef = (obj: BoardObject, defaultRotation: number): AiBoardRef => ({
     quantity: obj.quantity,
     counters: obj.counters && Object.keys(obj.counters).length ? obj.counters : undefined,
     typeLine: obj.cardData.typeLine || undefined,
+    oracleText: obj.cardData.oracleText || undefined,
 });
 
 export interface BuildViewInput {
