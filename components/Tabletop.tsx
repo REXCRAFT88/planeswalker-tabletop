@@ -2090,8 +2090,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     setCurrentTurnPlayerId(data.nextPlayerSocketId);
                     setTurn(data.turnNumber);
                     const prevDuration = data.prevDuration;
-                    if (prevDuration && sender) {
-                        addLog(`${sender.name} ended their turn (Duration: ${prevDuration})`, 'SYSTEM');
+                    // PASS_TURN is a server action (no sender), so the ending player's
+                    // name comes from the payload — not from `sender`, which would be
+                    // undefined here and previously showed the wrong name.
+                    const prevName = data.prevPlayerName;
+                    if (prevName) {
+                        addLog(prevDuration ? `${prevName} ended their turn (Duration: ${prevDuration})` : `${prevName} ended their turn`, 'SYSTEM');
                     }
                     const nextPlayer = currentPlayers.find(p => p.id === data.nextPlayerSocketId);
                     if (nextPlayer) {
@@ -2381,21 +2385,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             socket.emit('submit_snapshot', { room: roomId, requesterId, state: snapshot });
         };
 
-        // Authoritative turn/order meta. Applied on top of whatever peer actions said.
+        // Authoritative turn POINTER only (whose turn it is + the turn number).
+        // We deliberately do NOT reorder the roster here: seat order is owned by
+        // room_players_update / UPDATE_PLAYER_ORDER / GAME_STATE_SYNC, which also
+        // keep mySeatIndex correct. Re-sorting the roster on every meta broadcast
+        // (which fires on connect, disconnect, and every pass) fought those updates
+        // and caused the reconnect flicker + "opponent's mat in front" bug. The
+        // server still uses meta.turnOrder internally to pick the next seat.
         const handleGameMeta = (meta: { turnNumber?: number; currentTurnPlayerId?: string; turnOrder?: string[] }) => {
             if (typeof meta.turnNumber === 'number') setTurn(meta.turnNumber);
             if (meta.currentTurnPlayerId) setCurrentTurnPlayerId(meta.currentTurnPlayerId);
-            // meta.turnOrder is stable userIds; map to live socket ids for the roster.
-            if (Array.isArray(meta.turnOrder) && meta.turnOrder.length > 0) {
-                const roster = playersListRef.current;
-                const socketOrder = meta.turnOrder
-                    .map(uid => roster.find(p => p.userId === uid)?.id)
-                    .filter((id): id is string => !!id);
-                if (socketOrder.length > 0) {
-                    setTurnOrder(socketOrder);
-                    setPlayersList(prev => sortPlayers(prev, socketOrder));
-                }
-            }
         };
 
         socket.on('room_players_update', handleRoomUpdate);
