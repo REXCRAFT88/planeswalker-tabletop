@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base page behavior (moved out of the CDN-era inline <style>). */
+html, body, #root {
+  height: 100%;
+}
+body {
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Avoid the iOS tap-highlight flash on the many touch targets. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+}
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* iOS safe-area padding helpers. */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+/* Push content below the notch/status bar (game top bar). */
+.safe-area-pt {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+/* Thin scrollbar for scroll regions that opt in. */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+/* Shuffle animation */
+@keyframes shuffle-shake {
+  0% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-5px) rotate(-5deg); }
+  50% { transform: translateX(5px) rotate(5deg); }
+  75% { transform: translateX(-5px) rotate(-5deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+.animate-shuffle {
+  animation: shuffle-shake 0.3s ease-in-out infinite;
+}

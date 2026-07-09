@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import helmet from 'helmet';
+import { createAiRouter } from './ai/router';
+import { aiEnabled } from './ai/client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,10 +15,38 @@ const app = express();
 // Security headers (CSP disabled — requires careful tuning for CDN scripts)
 app.use(helmet({ contentSecurityPolicy: false }));
 
+// In dev the client (Vite on :3000) and this API server (:3001) are different
+// origins, so the HTTP API routes need CORS headers (Socket.IO's CORS config does
+// not cover Express routes). In production the client is served from this same
+// origin, so no CORS is needed.
+if (process.env.NODE_ENV !== 'production') {
+    const DEV_ORIGINS = ['http://localhost:5173', 'http://localhost:3000'];
+    app.use('/api', (req, res, next) => {
+        const origin = req.headers.origin;
+        if (origin && DEV_ORIGINS.includes(origin)) {
+            res.header('Access-Control-Allow-Origin', origin);
+            res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Content-Type');
+        }
+        if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+        next();
+    });
+}
+
+// AI opponent endpoints (Claude API proxy). Mounted before the production
+// catch-all so /api/ai/* isn't swallowed by the SPA fallback.
+app.use('/api/ai', createAiRouter());
+console.log(`AI opponents: ${aiEnabled() ? 'ENABLED' : 'disabled (set ANTHROPIC_API_KEY to enable)'}`);
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: process.env.NODE_ENV === 'production' ? false : "http://localhost:5173", // Allow Vite dev server
+        // In production the client is served from the same origin, so CORS is disabled.
+        // In dev, allow the Vite dev server on either its default port (5173) or the
+        // port configured in vite.config.ts (3000).
+        origin: process.env.NODE_ENV === 'production'
+            ? false
+            : ["http://localhost:5173", "http://localhost:3000"],
         methods: ["GET", "POST"]
     }
 });
@@ -253,7 +283,30 @@ io.on('connection', (socket) => {
     socket.on('update_player_order', ({ room, players }) => {
         if (room) room = room.trim().toUpperCase();
         if (!rooms[room] || !isHost(socket.id, room)) return; // Host-only
-        rooms[room] = players;
+        if (!Array.isArray(players)) return;
+
+        // Treat the payload as an ORDERING only. Reorder the existing roster by the
+        // supplied ids and keep the server-side player objects authoritative — never
+        // trust client-supplied fields (userId, color, disconnected) or inject
+        // players that aren't already in the room.
+        const current = rooms[room];
+        const seen = new Set<string>();
+        const ordered: Player[] = [];
+        for (const p of players) {
+            const id = p && typeof p.id === 'string' ? p.id : null;
+            if (!id || seen.has(id)) continue;
+            const existing = current.find(cp => cp.id === id);
+            if (existing) {
+                ordered.push(existing);
+                seen.add(id);
+            }
+        }
+        // Append any existing players the client omitted, preserving them.
+        for (const cp of current) {
+            if (!seen.has(cp.id)) ordered.push(cp);
+        }
+
+        rooms[room] = ordered;
         io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
     });
 
@@ -355,6 +408,23 @@ io.on('connection', (socket) => {
     });
 
     // --- Local Table Slot Logic ---
+    // A mobile controller asks the table host for the list of available seats.
+    socket.on('get_slots', ({ room }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isInRoom(socket.id, room)) return;
+        const hostId = roomMeta[room]?.hostId;
+        if (hostId) io.to(hostId).emit('get_slots', { requesterId: socket.id });
+    });
+
+    // The table host answers with the seat list, targeting the requester (or
+    // broadcasting to the room when a claim changes availability for everyone).
+    socket.on('slots_update', ({ room, targetId, slots }) => {
+        if (room) room = room.trim().toUpperCase();
+        if (!isHost(socket.id, room)) return; // Only the host is the source of truth
+        if (targetId) io.to(targetId).emit('slots_update', slots);
+        else socket.to(room).emit('slots_update', slots);
+    });
+
     socket.on('request_claim_slot', ({ room, slotId, deck, tokens, playerName }) => {
         if (room) room = room.trim().toUpperCase();
         const hostId = roomMeta[room]?.hostId;
@@ -390,6 +460,14 @@ io.on('connection', (socket) => {
             if (!isInRoom(socket.id, r)) return;
         }
         io.to(targetId).emit('hand_update', { hand, phase, mulliganCount });
+    });
+
+    // Table host pushes life/poison/commander-damage down to a specific mobile controller.
+    socket.on('send_stats_update', ({ roomId, targetId, life, poison, commanderDamage }) => {
+        if (!roomId || !targetId) return;
+        const r = roomId.trim().toUpperCase();
+        if (!isInRoom(socket.id, r)) return;
+        io.to(targetId).emit('send_stats_update', { life, poison, commanderDamage });
     });
 
     socket.on('play_card', ({ room, cardId }) => {
@@ -465,14 +543,13 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room].hostId });
+                io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
                 io.to(room).emit('notification', { message: `${player.name} disconnected. They have 5 minutes to reconnect.` });
 
-                if (rooms[room].every(p => p.disconnected)) {
-                    delete rooms[room];
-                    delete roomMeta[room];
-                    delete roomStates[room];
-                }
+                // Keep the room and its saved state alive so disconnected players can
+                // reconnect. The 5-minute per-player timeout above removes stragglers,
+                // and the periodic cleanup interval collects fully-disconnected rooms
+                // after 10 minutes. Deleting immediately here would defeat both.
                 break;
             }
         }

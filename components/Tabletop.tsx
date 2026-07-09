@@ -13,10 +13,15 @@ import {
     poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
     type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
 } from '../services/mana';
+import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
+import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
+import { getVoiceBackend, voiceInputSupported, requestVoiceReply } from '../services/voice';
+import { RealtimeVoiceSession, requestConsult } from '../services/voiceRealtime';
+import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId, VoiceChatTurn, VoiceBackendId } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2
 } from 'lucide-react';
 
 interface TabletopProps {
@@ -28,7 +33,7 @@ interface TabletopProps {
     initialGameStarted?: boolean;
     isLocal?: boolean;
     isLocalTableHost?: boolean;
-    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[];
+    localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId }[];
     manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
@@ -918,28 +923,33 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // For now, let's join as the "Host" player.
             s.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId: 'host-table-' + Date.now(), isTable: true });
 
-            // Allow mobile players to join Open Slots
-            s.on('get_slots', () => {
-                const slots = localOpponents
-                    .filter(opp => opp.type === 'open_slot' || opp.type === 'human_local')
-                    .map(opp => ({
-                        id: opp.id,
-                        name: opp.name,
-                        isTaken: opp.type === 'human_local' && opp.id !== 'open-slot-placeholder' // Simplification
-                    }));
-
-                // For now, let's just send all "Open Slots"
-                const openSlots = localOpponents.map(opp => ({
+            // Build the seat list a mobile controller sees. A slot is "taken" when it
+            // is not an open_slot to begin with, or once a phone has claimed it.
+            const buildSlots = () => localOpponents.map(opp => {
+                const taken = opp.type !== 'open_slot' || !!claimedSlots.current[opp.id];
+                return {
                     id: opp.id,
-                    name: opp.type === 'open_slot' ? opp.name : `${opp.name} (Taken)`,
-                    isTaken: opp.type !== 'open_slot'
-                }));
-                s.emit('slots_update', openSlots);
+                    name: taken ? `${opp.name} (Taken)` : opp.name,
+                    isTaken: taken,
+                };
+            });
+
+            // Allow mobile players to join Open Slots. The server relays get_slots
+            // with the requesting phone's socket id so we can answer it directly.
+            s.on('get_slots', ({ requesterId }: { requesterId: string }) => {
+                s.emit('slots_update', { room: roomId, targetId: requesterId, slots: buildSlots() });
             });
 
             s.on('slot_claim_request', ({ applicantId, slotId, deck, tokens, playerName }) => {
+                // Reject if the slot is already taken by another phone.
+                if (claimedSlots.current[slotId]) {
+                    s.emit('confirm_slot_claim', { room: roomId, applicantId, slotId, approved: false });
+                    return;
+                }
+
                 // Emit success to the mobile client
                 s.emit('confirm_slot_claim', { room: roomId, applicantId, slotId, approved: true });
+                claimedSlots.current[slotId] = applicantId;
 
                 // Update local state to reflect the new player
                 setPlayersList(prev => prev.map(p => {
@@ -976,13 +986,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     [applicantId]: 40
                 }));
 
-                // Also update localOpponents reference if possible, or just rely on playersList?
-                // PlayersList is the source of truth for rendering the board.
-
-                // Trigger a re-broadcast of slots so other mobile clients see it's taken
-                // We can just emit slots_update again if needed, or let them poll.
-
-                // TODO: Store the full deck in a ref for resolving effects later
+                // PlayersList (updated above) is the source of truth for rendering the board.
+                // Store the seat's full private state, keyed by the phone's socket id.
                 localPlayerStates.current[applicantId] = {
                     id: applicantId,
                     hand: [], // Hand is on mobile
@@ -997,13 +1002,18 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     hasKeptHand: false
                 };
 
+                // Mark the seat (by its new socket id) as remote-controlled so the host
+                // hides local hand controls for it.
                 setMobileControllers(prev => {
                     const next = new Set(prev);
-                    next.add(slotId);
+                    next.add(applicantId);
                     return next;
                 });
 
-
+                // Re-broadcast the seat list so other phones see this slot is now taken,
+                // and push the seat's starting stats to the phone that just claimed it.
+                s.emit('slots_update', { room: roomId, slots: buildSlots() });
+                sendStatsToSeat(applicantId);
             });
 
             return () => {
@@ -1085,6 +1095,52 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
+
+    // Local Table: maps an original open-slot id -> the mobile socket id that claimed it,
+    // so the host can report seat availability and route stats to the right phone.
+    const claimedSlots = useRef<Record<string, string>>({});
+
+    // Push a mobile-controlled seat's life/poison/commander-damage down to its phone.
+    const sendStatsToSeat = (seatId: string) => {
+        if (!isLocalTableHost) return;
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        socket.emit('send_stats_update', {
+            roomId,
+            targetId: seatId,
+            life: state.life,
+            poison: state.counters['poison'] || 0,
+            commanderDamage: state.commanderDamage || {},
+        });
+    };
+
+    // --- AI Opponent State ---
+    // Whether the server has an ANTHROPIC_API_KEY (AI seats fall back to hot-seat if not).
+    const [aiAvailable, setAiAvailable] = useState(false);
+    // The seat id currently being driven by the AI (drives the "thinking" badge).
+    const [aiThinkingSeat, setAiThinkingSeat] = useState<string | null>(null);
+    const aiTurnActive = useRef(false);                       // re-entry guard for the turn loop
+    const aiLandsPlayed = useRef<Record<string, number>>({}); // seatId -> lands played this turn
+    const aiCommanderCasts = useRef<Record<string, number>>({}); // commander cardId -> times cast (tax)
+    const aiTokenCounter = useRef(0);
+    const aiMulliganRunning = useRef(false);
+    const aiUsageTotals = useRef({ input: 0, cacheRead: 0, output: 0 });
+    // Binding deals the player has struck with each AI seat (fed into the brain's turns).
+    const aiDeals = useRef<Record<string, string[]>>({});
+
+    // --- Voice / negotiation UI state ---
+    const [voiceOpen, setVoiceOpen] = useState(false);
+    const [voiceTargetSeat, setVoiceTargetSeat] = useState<string | null>(null);
+    const [voiceHistory, setVoiceHistory] = useState<Record<string, VoiceChatTurn[]>>({});
+    const [voiceListening, setVoiceListening] = useState(false);
+    const [voiceBusy, setVoiceBusy] = useState(false);
+    const [voiceSpeaking, setVoiceSpeaking] = useState(false);
+    const [voicePartial, setVoicePartial] = useState('');
+    const [voiceTextInput, setVoiceTextInput] = useState('');
+    const [voiceBackendId, setVoiceBackendId] = useState<VoiceBackendId>('web-speech');
+    const [voiceRealtimeAvailable, setVoiceRealtimeAvailable] = useState(false);
+    const [rtConnecting, setRtConnecting] = useState(false);
+    const rtSession = useRef<RealtimeVoiceSession | null>(null);
 
     // State Refs for Syncing
     const boardObjectsRef = useRef(boardObjects);
@@ -1202,18 +1258,42 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (data.logs) setLogs(data.logs);
             hasLoadedState.current = true;
 
-            // Fix Board Object Controllers (Map old ID to new Socket ID)
+            // Map backup player ids -> currently-connected socket ids. Match each
+            // backup player to a present player by userId (preferred) or name, so a
+            // restore keeps the full multiplayer roster/turn order instead of
+            // collapsing everyone into the restoring client.
             const myNewId = socket.id;
-            const myOldPlayer = data.playersList?.find((p: any) => p.name === playerName);
+            const backupPlayers: any[] = data.playersList || [];
+            const currentPlayers = playersListRef.current;
+            const myOldPlayer = backupPlayers.find((p: any) => p.name === playerName);
             const myOldId = myOldPlayer?.id;
 
-            const restoredObjects = (data.boardObjects || []).map((obj: BoardObject) => {
-                // If single player or matching name, take control
-                if (myOldId && obj.controllerId === myOldId) {
-                    return { ...obj, controllerId: myNewId };
-                }
-                return obj;
-            });
+            const idRemap: Record<string, string> = {};
+            for (const bp of backupPlayers) {
+                const match = currentPlayers.find(cp =>
+                    (bp.userId && cp.userId && cp.userId === bp.userId) || cp.name === bp.name
+                );
+                if (match) idRemap[bp.id] = match.id;
+            }
+            if (myOldId && myNewId) idRemap[myOldId] = myNewId;
+            const remapId = (id: string) => idRemap[id] || id;
+
+            const restoredObjects = (data.boardObjects || []).map((obj: BoardObject) => ({
+                ...obj,
+                controllerId: remapId(obj.controllerId),
+            }));
+
+            // Single-player backups collapse to just this client; multiplayer backups
+            // preserve the (remapped) turn order and active player.
+            const isSinglePlayer = backupPlayers.length <= 1;
+            const restoredTurnOrder = isSinglePlayer
+                ? [myNewId]
+                : (Array.isArray(data.turnOrder) && data.turnOrder.length
+                    ? data.turnOrder.map(remapId)
+                    : currentPlayers.map(p => p.id));
+            const restoredCurrentTurn = isSinglePlayer
+                ? myNewId
+                : remapId(data.currentTurnPlayerId || myOldId || myNewId);
 
             setBoardObjects(restoredObjects);
             setGamePhase(data.gamePhase);
@@ -1221,18 +1301,21 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             setRound(data.round || 1);
             setTurnStartTime(data.turnStartTime || Date.now());
             setCommanderDamage(data.commanderDamage || {});
+            setTurnOrder(restoredTurnOrder);
+            setCurrentTurnPlayerId(restoredCurrentTurn);
+            setPlayersList(prev => sortPlayers(prev, restoredTurnOrder));
 
-            // Sync to Server
+            // Sync to Server (broadcast to the other clients, who apply it via GAME_STATE_SYNC)
             socket.emit('game_action', {
                 room: roomId, action: 'GAME_STATE_SYNC', data: {
                     phase: data.gamePhase,
                     boardObjects: restoredObjects,
                     turn: data.turn,
                     round: data.round,
-                    currentTurnPlayerId: myNewId,
+                    currentTurnPlayerId: restoredCurrentTurn,
                     turnStartTime: data.turnStartTime,
                     commanderDamage: data.commanderDamage,
-                    turnOrder: [myNewId],
+                    turnOrder: restoredTurnOrder,
                     logs: data.logs
                 }
             });
@@ -1528,26 +1611,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     }, [life, gamePhase, roomId, isLocal]);
 
-    // Sync Stats to Mobile
+    // Sync stats to mobile controllers. Pushes each remote-controlled seat's current
+    // life/poison/commander-damage to its phone whenever host-side state that could
+    // affect those values changes. Mobile-originated changes also push imperatively
+    // from their handlers (which mutate the localPlayerStates ref without a re-render).
     useEffect(() => {
-        if (gamePhase === 'PLAYING' || gamePhase === 'MULLIGAN') {
-            const myId = playersList[mySeatIndex]?.id;
-            if (myId) {
-                let poison = 0;
-                let cmdDmg = {};
-
-                if (isLocal && localPlayerStates.current[myId]) {
-                    const s = localPlayerStates.current[myId];
-                    if (s) {
-                        poison = s.counters['poison'] || 0;
-                        cmdDmg = s.commanderDamage || {};
-                    }
-                }
-
-                socket.emit('send_stats_update', { roomId, targetId: myId, life, poison, commanderDamage: cmdDmg });
-            }
-        }
-    }, [life, gamePhase, roomId, playersList, mySeatIndex, isLocal]);
+        if (!isLocalTableHost) return;
+        if (gamePhase !== 'PLAYING' && gamePhase !== 'MULLIGAN') return;
+        mobileControllers.forEach(seatId => sendStatsToSeat(seatId));
+    }, [isLocalTableHost, gamePhase, mobileControllers, life, commanderDamage, opponentsLife]);
 
     // Emit Count Changes
     useEffect(() => {
@@ -1604,7 +1676,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [mySeatIndex, gamePhase, isLocal, roomId]);
 
     // Stats Helper
-    const getMyId = () => isLocal ? playersList[mySeatIndex].id : socket.id;
+    const getMyId = () => isLocal ? (playersList[mySeatIndex]?.id ?? playersList[0]?.id ?? 'player-0') : (socket.id ?? 'local-player');
 
     const updateMyStats = (updates: Partial<PlayerStats>) => {
         setGameStats(prev => {
@@ -1674,7 +1746,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             payload = { ...data, updates: { ...data.updates, controllerId: socket.id } };
         }
         socket.emit('game_action', { room: roomId, action, data: payload });
-        socket.emit('game_action', { room: roomId, action, data: payload });
     };
 
     const sendHandUpdate = (targetId: string, hand: CardData[], phase: string = gamePhase, mCount: number = mulliganCount) => {
@@ -1684,7 +1755,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const addLog = (message: string, type: 'ACTION' | 'SYSTEM' = 'ACTION', overrideName?: string) => {
         console.log(`Adding log: ${message} (${type})`); // Debug
-        const actingPlayerName = overrideName || (isLocal ? playersList[mySeatIndex].name : playerName);
+        const actingPlayerName = overrideName || (isLocal ? (playersList[mySeatIndex]?.name ?? playerName) : playerName);
         const entry: LogEntry = {
             id: crypto.randomUUID(),
             timestamp: Date.now(),
@@ -2077,9 +2148,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
             else if (action === 'TRACK_HEALING_GIVEN') {
                 if (data.sourceId === socket.id) {
-                    // We use updateMyStats helper logic pattern here manually to avoid closure staleness issues if we used the helper directly inside the socket callback
-                    // But actually, we can just update local state and emit.
-                    updateMyStats({ healingGiven: (gameStats[getMyId()]?.healingGiven || 0) + data.amount });
+                    // Compute the increment inside the functional updater so we never
+                    // read the stale `gameStats` captured by this socket effect.
+                    setGameStats(prev => {
+                        const current = prev[socket.id] || emptyStats;
+                        const newStats = { ...current, healingGiven: current.healingGiven + data.amount };
+                        socket.emit('game_action', { room: roomId, action: 'UPDATE_STATS', data: { playerId: socket.id, stats: newStats } });
+                        return { ...prev, [socket.id]: newStats };
+                    });
                 }
             }
             else if (action === 'ADD_OBJECT') {
@@ -2518,8 +2594,19 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     };
 
     const getControllerId = () => {
-        return isLocal ? playersList[mySeatIndex].id : (socket.id || playersList[mySeatIndex]?.id || 'local-player');
+        return isLocal ? (playersList[mySeatIndex]?.id ?? playersList[0]?.id ?? 'local-player') : (socket.id || playersList[mySeatIndex]?.id || 'local-player');
     };
+
+    // A seat still owes a mulligan decision only if it is actually being played —
+    // i.e. it has a real (non-token) hand to keep. Unclaimed open slots (and any
+    // seat with no deck) start with an empty hand and are treated as auto-kept, so
+    // the game can leave the MULLIGAN phase without every empty seat being cycled.
+    const allSeatsKept = () => playersList.every(p => {
+        const state = localPlayerStates.current[p.id];
+        if (!state) return true;
+        if (state.hasKeptHand) return true;
+        return state.hand.filter(c => !c.isToken).length === 0;
+    });
 
     const handleMulliganChoice = (keep: boolean) => {
         if (keep) {
@@ -2538,7 +2625,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     addLog(`${currentPlayer.name} kept hand`);
 
                     // Check if all kept
-                    const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+                    const allKept = allSeatsKept();
                     if (allKept) {
                         setGamePhase('PLAYING');
                         // Switch back to P1 view if needed, or stay. Usually P1 starts.
@@ -2635,7 +2722,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             sendHandUpdate(playerId, state.hand, 'PLAYING', state.mulliganCount); // Optimistic update of phase?
 
             // Check if everyone has kept
-            const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+            const allKept = allSeatsKept();
             if (allKept) {
                 setGamePhase('PLAYING');
                 addLog("All players have kept their hands. Game Start!", 'SYSTEM');
@@ -2674,12 +2761,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (playersList[mySeatIndex]?.id === playerId) {
             setLife(state.life);
         }
-        // Send stats update back to mobile to confirm
-        sendHandUpdate(playerId, state.hand, gamePhase, state.mulliganCount);
-        // Note: Life update is separate, handled by useEffect on [life] change, 
-        // BUT need to ensure it fires. 
-        // Since we called setLife(state.life), the useEffect [life] WILL fire.
-        // Correct.
+        // Confirm the updated stats back to the phone.
+        sendStatsToSeat(playerId);
     };
 
     const handleMobileUpdateCounter = ({ playerId, type, amount, targetId }: { playerId: string, type: string, amount: number, targetId?: string }) => {
@@ -2725,6 +2808,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         } else {
             state.counters[type] = (state.counters[type] || 0) + amount;
         }
+        // Confirm the updated stats back to the phone.
+        sendStatsToSeat(playerId);
     };
 
     useEffect(() => {
@@ -2743,6 +2828,578 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [isLocal, playersList, mySeatIndex, maxZ, gamePhase]);
 
 
+    // ============================================================================
+    // AI Opponent Driver (local games). The host browser drives AI seats: it
+    // serializes the seat's game state, asks the server (Claude API proxy) for a
+    // turn as a sequence of tool calls, validates and applies each one through the
+    // same board/emit path as human actions, and passes the turn when done. AI
+    // hidden information stays on the host; opponents only get public info.
+    // ============================================================================
+    const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+    const accumulateUsage = (u?: { inputTokens: number; cacheReadTokens: number; outputTokens: number }) => {
+        if (!u) return;
+        aiUsageTotals.current.input += u.inputTokens || 0;
+        aiUsageTotals.current.cacheRead += u.cacheReadTokens || 0;
+        aiUsageTotals.current.output += u.outputTokens || 0;
+    };
+
+    const aiSeatIndex = (seatId: string) => playersList.findIndex(p => p.id === seatId);
+    const aiSeatRotation = (seatId: string) => layout[aiSeatIndex(seatId)]?.rot ?? 0;
+    const aiSeatName = (seatId: string) => playersList.find(p => p.id === seatId)?.name || 'AI';
+
+    const aiSpawnCard = (seatId: string, card: CardData) => {
+        const idx = aiSeatIndex(seatId);
+        const pos = layout[idx] || { x: 0, y: 0, rot: 0 };
+        const z = maxZ + (++aiTokenCounter.current);
+        const obj: BoardObject = {
+            id: crypto.randomUUID(), type: 'CARD', cardData: card,
+            x: pos.x + MAT_W / 2 - CARD_WIDTH / 2 + (Math.random() * 40 - 20),
+            y: pos.y + MAT_H / 2 - CARD_HEIGHT / 2 + (Math.random() * 40 - 20),
+            z, rotation: pos.rot, isFaceDown: false, isTransformed: false,
+            counters: {}, commanderDamage: {}, controllerId: seatId, quantity: 1, tappedQuantity: 0,
+        };
+        setMaxZ(prev => Math.max(prev, z) + 1);
+        setBoardObjects(prev => [...prev, obj]);
+        emitAction('ADD_OBJECT', obj);
+        return obj;
+    };
+
+    const aiTapSources = (seatId: string, tappedIds: string[]) => {
+        const rot = aiSeatRotation(seatId);
+        const tappedRot = (rot + 90) % 360;
+        const counts: Record<string, number> = {};
+        tappedIds.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        Object.entries(counts).forEach(([id, count]) => {
+            const o = boardObjectsRef.current.find(x => x.id === id);
+            if (!o) return;
+            if (o.quantity > 1) updateBoardObject(id, { tappedQuantity: Math.min(o.quantity, (o.tappedQuantity || 0) + count) });
+            else updateBoardObject(id, { rotation: tappedRot });
+        });
+    };
+
+    const poolStr = (p: ManaPool) => ['W', 'U', 'B', 'R', 'G', 'C'].map(c => `${c}:${(p as any)[c] || 0}`).join(' ');
+
+    // Applies one AI tool call to the AI seat's state. Returns a result the model
+    // can react to (so an illegal move produces a correction rather than a crash).
+    const aiApplyToolCall = (seatId: string, call: AiToolCall): AiToolResult => {
+        const ok = (detail?: string): AiToolResult => ({ id: call.id, ok: true, detail });
+        const fail = (error: string): AiToolResult => ({ id: call.id, ok: false, error });
+        const state = localPlayerStates.current[seatId];
+        if (!state) return fail('Seat state missing.');
+        const name = aiSeatName(seatId);
+        const input = call.input || {};
+        try {
+            switch (call.name) {
+                case 'play_land': {
+                    const card = state.hand.find(c => c.id === input.cardId && c.isLand);
+                    if (!card) return fail('That land is not in your hand.');
+                    if ((aiLandsPlayed.current[seatId] || 0) >= 1) return fail('You have already played a land this turn.');
+                    state.hand = state.hand.filter(c => c.id !== card.id);
+                    aiSpawnCard(seatId, card);
+                    aiLandsPlayed.current[seatId] = (aiLandsPlayed.current[seatId] || 0) + 1;
+                    addLog(`played ${card.name}`, 'ACTION', name);
+                    return ok(`Played ${card.name}.`);
+                }
+                case 'cast_spell': {
+                    const card = state.hand.find(c => c.id === input.cardId);
+                    if (!card) return fail('That card is not in your hand.');
+                    if (card.isLand) return fail('Use play_land for lands.');
+                    const cost = parseManaCost(card.manaCost || '');
+                    const rot = aiSeatRotation(seatId);
+                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+                    const res = autoTapForCost(cost, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
+                    if (!res.success) return fail(`Not enough mana for ${card.name} (${card.manaCost || 'free'}). Available: ${poolStr(manaInfo.pool)}.`);
+                    aiTapSources(seatId, res.tappedIds);
+                    state.hand = state.hand.filter(c => c.id !== card.id);
+                    const type = (card.typeLine || '').toLowerCase();
+                    const isPermanent = /creature|artifact|enchantment|planeswalker|battle/.test(type) && !/instant|sorcery/.test(type);
+                    if (isPermanent) aiSpawnCard(seatId, card);
+                    else state.graveyard = [...state.graveyard, card];
+                    const tgt = input.targetsDescription ? ` (${input.targetsDescription})` : '';
+                    addLog(`cast ${card.name}${tgt}`, 'ACTION', name);
+                    return ok(`Cast ${card.name}.`);
+                }
+                case 'cast_commander': {
+                    const card = state.commandZone.find(c => c.id === input.cardId);
+                    if (!card) return fail('That commander is not in your command zone.');
+                    const prevCasts = aiCommanderCasts.current[card.id] || 0;
+                    const base = parseManaCost(card.manaCost || '');
+                    const taxed = { symbols: [...base.symbols, { type: 'generic', count: prevCasts * 2 } as any], cmc: base.cmc + prevCasts * 2, hasX: base.hasX };
+                    const rot = aiSeatRotation(seatId);
+                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+                    const res = autoTapForCost(taxed as any, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
+                    if (!res.success) return fail(`Not enough mana for ${card.name} + ${prevCasts * 2} tax. Available: ${poolStr(manaInfo.pool)}.`);
+                    aiTapSources(seatId, res.tappedIds);
+                    state.commandZone = state.commandZone.filter(c => c.id !== card.id);
+                    aiSpawnCard(seatId, card);
+                    aiCommanderCasts.current[card.id] = prevCasts + 1;
+                    addLog(`cast commander ${card.name}${prevCasts ? ` (tax ${prevCasts * 2})` : ''}`, 'ACTION', name);
+                    return ok(`Cast commander ${card.name}.`);
+                }
+                case 'activate_mana':
+                case 'tap_permanent': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const rot = aiSeatRotation(seatId);
+                    if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: Math.min(obj.quantity, (obj.tappedQuantity || 0) + 1) });
+                    else updateBoardObject(obj.id, { rotation: (rot + 90) % 360 });
+                    addLog(`${call.name === 'activate_mana' ? 'tapped for mana' : 'tapped'} ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'untap_permanent': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const rot = aiSeatRotation(seatId);
+                    if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: 0 });
+                    else updateBoardObject(obj.id, { rotation: rot });
+                    addLog(`untapped ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'create_token': {
+                    const opp = localOpponents.find(o => (o.id || '') === seatId);
+                    const tokens = opp?.tokens || [];
+                    const q = String(input.name || '').toLowerCase();
+                    const tmpl = tokens.find(t => t.name.toLowerCase() === q) || tokens.find(t => t.name.toLowerCase().includes(q));
+                    if (!tmpl) return fail(`No token named "${input.name}" in your token list.`);
+                    const qty = Math.max(1, Math.min(20, Number(input.quantity) || 1));
+                    for (let i = 0; i < qty; i++) aiSpawnCard(seatId, { ...tmpl, id: crypto.randomUUID(), isToken: true });
+                    addLog(`created ${qty} ${tmpl.name} token${qty > 1 ? 's' : ''}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'add_counter': {
+                    const obj = boardObjectsRef.current.find(o => o.id === input.objectId && o.controllerId === seatId);
+                    if (!obj) return fail('You do not control that permanent.');
+                    const cur = obj.counters?.[input.counterType] || 0;
+                    const next = Math.max(0, cur + (Number(input.delta) || 0));
+                    const counters = { ...obj.counters, [input.counterType]: next };
+                    if (next === 0) delete counters[input.counterType];
+                    updateBoardObject(obj.id, { counters });
+                    addLog(`${(Number(input.delta) || 0) >= 0 ? 'added' : 'removed'} ${Math.abs(Number(input.delta) || 0)} ${input.counterType} on ${obj.cardData.name}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'move_card': {
+                    const from = input.from, to = input.to;
+                    let card: CardData | undefined;
+                    if (from === 'battlefield') {
+                        const obj = boardObjectsRef.current.find(o => o.id === input.cardId && o.controllerId === seatId);
+                        if (!obj) return fail('That permanent is not on your battlefield.');
+                        card = obj.cardData;
+                        setBoardObjects(prev => prev.filter(o => o.id !== obj.id));
+                        emitAction('REMOVE_OBJECT', { id: obj.id });
+                    } else {
+                        const zone = (from === 'graveyard' ? state.graveyard : from === 'exile' ? state.exile : from === 'hand' ? state.hand : from === 'library' ? state.library : null);
+                        if (!zone) return fail('Unknown source zone.');
+                        const idx = zone.findIndex(c => c.id === input.cardId);
+                        if (idx < 0) return fail(`That card is not in your ${from}.`);
+                        card = zone[idx];
+                        const filtered = zone.filter(c => c.id !== card!.id);
+                        if (from === 'graveyard') state.graveyard = filtered;
+                        else if (from === 'exile') state.exile = filtered;
+                        else if (from === 'hand') state.hand = filtered;
+                        else state.library = filtered;
+                    }
+                    if (!card) return fail('Card not found.');
+                    if (to === 'battlefield') aiSpawnCard(seatId, card);
+                    else if (to === 'graveyard') state.graveyard = [...state.graveyard, card];
+                    else if (to === 'exile') state.exile = [...state.exile, card];
+                    else if (to === 'hand') state.hand = [...state.hand, card];
+                    else if (to === 'library-top') state.library = [card, ...state.library];
+                    else if (to === 'library-bottom') state.library = [...state.library, card];
+                    else return fail('Unknown destination zone.');
+                    addLog(`moved ${card.name} to ${String(to).replace('-', ' ')}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'declare_attackers': {
+                    const attacks = Array.isArray(input.attacks) ? input.attacks : [];
+                    if (!attacks.length) return fail('No attackers specified.');
+                    const rot = aiSeatRotation(seatId);
+                    const names: string[] = [];
+                    for (const a of attacks) {
+                        const obj = boardObjectsRef.current.find(o => o.id === a.objectId && o.controllerId === seatId);
+                        if (!obj) continue;
+                        if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: Math.min(obj.quantity, (obj.tappedQuantity || 0) + 1) });
+                        else updateBoardObject(obj.id, { rotation: (rot + 90) % 360 });
+                        const defName = playersList.find(p => p.id === a.defenderSeatId)?.name || 'a player';
+                        names.push(`${obj.cardData.name} → ${defName}`);
+                    }
+                    if (!names.length) return fail('None of those creatures are on your battlefield.');
+                    addLog(`attacks with ${names.join(', ')}`, 'ACTION', name);
+                    return ok(`Declared ${names.length} attacker(s). Defenders should assign blocks and take damage.`);
+                }
+                case 'adjust_life': {
+                    const target = input.seatId || seatId;
+                    const d = Number(input.delta) || 0;
+                    const ts = localPlayerStates.current[target];
+                    if (ts) ts.life = (ts.life || 40) + d;
+                    if (playersList[mySeatIndex]?.id === target) setLife(prev => prev + d);
+                    else setOpponentsLife(prev => ({ ...prev, [target]: ts ? ts.life : (prev[target] ?? 40) + d }));
+                    const tName = playersList.find(p => p.id === target)?.name || 'a player';
+                    const reason = input.reason ? ` (${input.reason})` : '';
+                    addLog(`${d >= 0 ? 'gained' : 'lost'} ${Math.abs(d)} life for ${tName}${reason}`, 'ACTION', name);
+                    return ok();
+                }
+                case 'announce': {
+                    if (!input.message) return fail('No message provided.');
+                    addLog(String(input.message), 'ACTION', name);
+                    return ok();
+                }
+                case 'end_turn': {
+                    return ok('Turn ended.');
+                }
+                default:
+                    return fail(`Unknown tool: ${call.name}`);
+            }
+        } catch (e: any) {
+            return fail(`Error applying ${call.name}: ${e?.message || e}`);
+        }
+    };
+
+    const buildAiView = (seatId: string) => {
+        const state = localPlayerStates.current[seatId];
+        const rot = aiSeatRotation(seatId);
+        const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
+        const opponents = playersList.filter(p => p.id !== seatId).map(p => {
+            const s = localPlayerStates.current[p.id];
+            return {
+                seatId: p.id,
+                name: p.name,
+                life: s?.life ?? opponentsLife[p.id] ?? 40,
+                poison: s?.counters?.['poison'] ?? 0,
+                commanders: (s?.commandZone ?? []).map(c => c.name),
+                handCount: (s?.hand ?? []).filter(c => !c.isToken).length,
+                commanderDamageTakenFromAi: 0,
+            };
+        });
+        const defaultRotations: Record<string, number> = {};
+        playersList.forEach((p, i) => { defaultRotations[p.id] = layout[i]?.rot ?? 0; });
+        // Prepend any binding deals this seat agreed to, so the brain honors them.
+        const deals = (aiDeals.current[seatId] || []).map(d => `[DEAL you agreed to] ${d}`);
+        const recentLog = [...deals, ...logsRef.current.slice(0, 15).reverse().map(l => `${l.playerName}: ${l.message}`)];
+        return buildGameStateView({
+            turn: turnRef.current,
+            aiSeatId: seatId,
+            aiSeatName: aiSeatName(seatId),
+            hand: state.hand,
+            libraryCount: state.library.length,
+            graveyard: state.graveyard,
+            exileCount: state.exile.length,
+            commandZone: state.commandZone,
+            life: state.life,
+            commanderTax: (aiCommanderCasts.current[state.commandZone[0]?.id] || 0) * 2,
+            landsPlayedThisTurn: aiLandsPlayed.current[seatId] || 0,
+            manaAvailable: manaInfo.pool,
+            boardObjects: boardObjectsRef.current,
+            opponents,
+            defaultRotations,
+            recentLog,
+        });
+    };
+
+    const aiUntapAndDraw = (seatId: string) => {
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        aiLandsPlayed.current[seatId] = 0;
+        const rot = aiSeatRotation(seatId);
+        boardObjectsRef.current
+            .filter(o => o.controllerId === seatId && (o.rotation !== rot || o.tappedQuantity > 0))
+            .forEach(o => updateBoardObject(o.id, { rotation: rot, tappedQuantity: 0 }));
+        if (state.library.length > 0) {
+            const drawn = state.library[0];
+            state.library = state.library.slice(1);
+            state.hand = [...state.hand, drawn];
+            addLog('draws for the turn', 'ACTION', aiSeatName(seatId));
+        }
+    };
+
+    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
+        const state = localPlayerStates.current[seatId];
+        if (!state) { nextTurn(); return; }
+        const name = opp.name;
+        setAiThinkingSeat(seatId);
+        try {
+            // Watch from the primary seat so the AI's hand stays hidden from the human.
+            if (mySeatIndex !== 0 && playersList[0]) {
+                const viewed = playersList[mySeatIndex]?.id;
+                if (viewed) saveLocalPlayerState(viewed);
+                setMySeatIndex(0);
+                loadLocalPlayerState(playersList[0].id);
+            }
+
+            aiUntapAndDraw(seatId);
+            await delay(600);
+
+            const persona = (opp.persona || 'balanced') as AiPersonaId;
+            const difficulty = (opp.difficulty || 'casual') as AiDifficulty;
+            const deck = deckToSummaryCards(opp.deck || []);
+
+            let resp;
+            try {
+                resp = await requestTurn({ seatName: name, persona, difficulty, deck, stateView: buildAiView(seatId), provider: opp.provider });
+            } catch (e: any) {
+                addLog(`could not take its turn (${e?.message || 'AI error'}); passing`, 'SYSTEM', name);
+                nextTurn();
+                return;
+            }
+            accumulateUsage(resp.usage);
+            if (resp.text) addLog(resp.text, 'ACTION', name);
+
+            let rounds = 0;
+            while (true) {
+                let ended = false;
+                const results: AiToolResult[] = [];
+                for (const call of resp.toolCalls) {
+                    if (call.name === 'end_turn') {
+                        if (call.input?.summary) addLog(`ends turn — ${call.input.summary}`, 'SYSTEM', name);
+                        else addLog('ends its turn', 'SYSTEM', name);
+                        ended = true;
+                        results.push({ id: call.id, ok: true });
+                        continue;
+                    }
+                    results.push(aiApplyToolCall(seatId, call));
+                    await delay(750);
+                }
+                if (ended || resp.done) break;
+                if (++rounds > 14) { addLog('turn ran long; ending', 'SYSTEM', name); break; }
+                try {
+                    resp = await continueTurn(resp.conversationId, results);
+                } catch (e: any) {
+                    addLog(`turn interrupted (${e?.message || 'AI error'})`, 'SYSTEM', name);
+                    break;
+                }
+                accumulateUsage(resp.usage);
+                if (resp.text) addLog(resp.text, 'ACTION', name);
+            }
+
+            await delay(500);
+            nextTurn();
+        } finally {
+            setAiThinkingSeat(null);
+        }
+    };
+
+    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
+        const seatId = opp.id;
+        if (!seatId) return;
+        const state = localPlayerStates.current[seatId];
+        if (!state) return;
+        setAiThinkingSeat(seatId);
+        try {
+            const persona = (opp.persona || 'balanced') as AiPersonaId;
+            const difficulty = (opp.difficulty || 'casual') as AiDifficulty;
+            const deckSummary = deckStrategySummary(opp.deck || []);
+            for (let attempt = 0; attempt < 4 && !state.hasKeptHand; attempt++) {
+                const hand = state.hand.filter(c => !c.isToken).map(c => ({ id: c.id, name: c.name, manaCost: c.manaCost, typeLine: c.typeLine }));
+                let dec;
+                try {
+                    dec = await requestMulligan({ seatName: opp.name, persona, difficulty, deckSummary, hand, provider: opp.provider });
+                } catch {
+                    state.hasKeptHand = true;
+                    addLog('keeps its hand', 'ACTION', opp.name);
+                    break;
+                }
+                accumulateUsage(dec.usage);
+                if (dec.keep) {
+                    if (Array.isArray(dec.bottomCards) && dec.bottomCards.length) {
+                        const toBottom: CardData[] = [];
+                        for (const cardName of dec.bottomCards) {
+                            const found = state.hand.find(c => !c.isToken && c.name.toLowerCase() === String(cardName).toLowerCase() && !toBottom.includes(c));
+                            if (found) toBottom.push(found);
+                        }
+                        if (toBottom.length) {
+                            state.hand = state.hand.filter(c => !toBottom.includes(c));
+                            state.library = [...state.library, ...toBottom];
+                        }
+                    }
+                    state.hasKeptHand = true;
+                    addLog(`keeps its hand${dec.comment ? ` — "${dec.comment}"` : ''}`, 'ACTION', opp.name);
+                } else {
+                    const nonToken = state.hand.filter(c => !c.isToken);
+                    const tokens = state.hand.filter(c => c.isToken);
+                    const shuffled = [...nonToken, ...state.library].sort(() => Math.random() - 0.5);
+                    state.hand = [...shuffled.slice(0, 7), ...tokens];
+                    state.library = shuffled.slice(7);
+                    state.mulliganCount = (state.mulliganCount || 0) + 1;
+                    addLog(`mulligans${dec.comment ? ` — "${dec.comment}"` : ''}`, 'ACTION', opp.name);
+                }
+            }
+            if (!state.hasKeptHand) state.hasKeptHand = true; // safety after cap
+        } finally {
+            setAiThinkingSeat(null);
+        }
+    };
+
+    // Detect whether the server has AI enabled (falls back to hot-seat otherwise).
+    useEffect(() => {
+        if (!isLocal) return;
+        let mounted = true;
+        aiStatus().then(s => { if (mounted) { setAiAvailable(!!s.enabled); setVoiceRealtimeAvailable(!!s.realtimeVoice); } }).catch(() => { });
+        return () => { mounted = false; };
+    }, [isLocal]);
+
+    // Drive AI seats' turns.
+    useEffect(() => {
+        if (!isLocal || !aiAvailable) return;
+        if (gamePhase !== 'PLAYING') return;
+        const seatId = currentTurnPlayerId;
+        if (!seatId) return;
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || opp.type !== 'ai') return;
+        if (aiTurnActive.current) return;
+        aiTurnActive.current = true;
+        runAiTurn(seatId, opp)
+            .catch(e => { console.error('AI turn failed', e); nextTurn(); })
+            .finally(() => { aiTurnActive.current = false; });
+    }, [currentTurnPlayerId, gamePhase, isLocal, aiAvailable]);
+
+    // Resolve AI seats' mulligan decisions during the MULLIGAN phase.
+    useEffect(() => {
+        if (!isLocal || !aiAvailable) return;
+        if (gamePhase !== 'MULLIGAN') return;
+        if (aiMulliganRunning.current) return;
+        const pending = localOpponents.filter(o => o.type === 'ai' && o.id && localPlayerStates.current[o.id] && !localPlayerStates.current[o.id].hasKeptHand);
+        if (!pending.length) return;
+        aiMulliganRunning.current = true;
+        (async () => {
+            for (const opp of pending) await runAiMulligan(opp);
+            aiMulliganRunning.current = false;
+            if (allSeatsKept()) setGamePhase('PLAYING');
+        })();
+    }, [gamePhase, isLocal, aiAvailable, localOpponents]);
+
+    // --- Voice / negotiation handlers ---
+    // The AI seats the player can talk to.
+    const voiceAiSeats = () => playersList.filter(p => localOpponents.some(o => (o.id || '') === p.id && o.type === 'ai'));
+
+    const handleVoiceSend = async (seatId: string, userText: string) => {
+        const text = userText.trim();
+        if (!text) return;
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || !localPlayerStates.current[seatId]) return;
+        const history = voiceHistory[seatId] || [];
+        setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'user', text }] }));
+        setVoiceBusy(true);
+        try {
+            const view = buildAiView(seatId);
+            const reply = await requestVoiceReply({
+                seatName: opp.name,
+                persona: (opp.persona || 'balanced') as AiPersonaId,
+                provider: opp.provider,
+                view,
+                dealLog: aiDeals.current[seatId] || [],
+                history,
+                userText: text,
+            });
+            accumulateUsage(reply.usage);
+            const spoken = reply.speak && reply.text ? reply.text : '(stays quiet)';
+            setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: spoken }] }));
+            if (reply.deal) {
+                aiDeals.current[seatId] = [...(aiDeals.current[seatId] || []), reply.deal];
+                addLog(`agreed with you: ${reply.deal}`, 'SYSTEM', opp.name);
+            }
+            if (reply.speak && reply.text) {
+                setVoiceSpeaking(true);
+                try { await getVoiceBackend(voiceBackendId).speak(reply.text); } finally { setVoiceSpeaking(false); }
+            }
+        } catch (e: any) {
+            setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: `(voice error: ${e?.message || 'failed'})` }] }));
+        } finally {
+            setVoiceBusy(false);
+        }
+    };
+
+    // Establish (or tear down) an OpenAI Realtime session for the target AI seat.
+    const connectRealtime = async (seatId: string) => {
+        const opp = localOpponents.find(o => (o.id || '') === seatId);
+        if (!opp || !localPlayerStates.current[seatId]) return;
+        rtSession.current?.disconnect();
+        rtSession.current = null;
+        setRtConnecting(true);
+        const persona = (opp.persona || 'balanced') as AiPersonaId;
+        const session = new RealtimeVoiceSession({
+            onUserTranscript: (t) => setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'user', text: t }] })),
+            onAiTranscript: (t) => setVoiceHistory(prev => ({ ...prev, [seatId]: [...(prev[seatId] || []), { role: 'assistant', text: t }] })),
+            onDeal: (summary) => {
+                if (!summary) return;
+                aiDeals.current[seatId] = [...(aiDeals.current[seatId] || []), summary];
+                addLog(`agreed with you: ${summary}`, 'SYSTEM', opp.name);
+            },
+            onState: (s) => {
+                if (s.listening !== undefined) setVoiceListening(s.listening);
+                if (s.speaking !== undefined) setVoiceSpeaking(s.speaking);
+            },
+            onError: (m) => addLog(`voice error: ${m}`, 'SYSTEM', opp.name),
+            consult: (question) => requestConsult({
+                question, seatName: opp.name, persona, provider: opp.provider,
+                view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [],
+            }),
+        });
+        try {
+            await session.connect({ seatName: opp.name, persona, provider: opp.provider, view: buildAiView(seatId), dealLog: aiDeals.current[seatId] || [] });
+            rtSession.current = session;
+        } catch (e: any) {
+            addLog(`could not start realtime voice: ${e?.message || 'error'}. Falling back to browser voice.`, 'SYSTEM', opp.name);
+            session.disconnect();
+            setVoiceBackendId('web-speech');
+        } finally {
+            setRtConnecting(false);
+        }
+    };
+
+    // Connect/disconnect the realtime session as the backend/target/panel changes.
+    useEffect(() => {
+        const useRt = voiceOpen && voiceBackendId === 'openai-realtime' && !!voiceTargetSeat;
+        if (useRt) {
+            connectRealtime(voiceTargetSeat!);
+        } else if (rtSession.current) {
+            rtSession.current.disconnect();
+            rtSession.current = null;
+        }
+        return () => { rtSession.current?.disconnect(); rtSession.current = null; };
+    }, [voiceOpen, voiceBackendId, voiceTargetSeat]);
+
+    const startTalk = () => {
+        if (voiceBackendId === 'openai-realtime') {
+            rtSession.current?.startTalk();
+            return;
+        }
+        if (!voiceTargetSeat || voiceBusy) return;
+        getVoiceBackend(voiceBackendId).cancelSpeech();
+        setVoicePartial('');
+        setVoiceListening(true);
+        getVoiceBackend(voiceBackendId).startListening(setVoicePartial);
+    };
+    const endTalk = async () => {
+        if (voiceBackendId === 'openai-realtime') {
+            rtSession.current?.endTalk();
+            return;
+        }
+        if (!voiceListening) return;
+        setVoiceListening(false);
+        const said = await getVoiceBackend(voiceBackendId).stopListening();
+        setVoicePartial('');
+        if (said && voiceTargetSeat) handleVoiceSend(voiceTargetSeat, said);
+    };
+    const sendTypedVoice = () => {
+        const t = voiceTextInput.trim();
+        if (!t || !voiceTargetSeat) return;
+        setVoiceTextInput('');
+        if (voiceBackendId === 'openai-realtime') {
+            setVoiceHistory(prev => ({ ...prev, [voiceTargetSeat]: [...(prev[voiceTargetSeat] || []), { role: 'user', text: t }] }));
+            rtSession.current?.sendText(t);
+            return;
+        }
+        handleVoiceSend(voiceTargetSeat, t);
+    };
+
+    // Default the talk target to the first AI seat when the panel opens.
+    useEffect(() => {
+        if (voiceOpen && !voiceTargetSeat) {
+            const first = voiceAiSeats()[0];
+            if (first) setVoiceTargetSeat(first.id);
+        }
+    }, [voiceOpen]);
+
+
     const confirmKeepHand = () => {
         const requiredCount = freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount;
         if (cardsToBottom.length !== requiredCount) return;
@@ -2754,7 +3411,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const currentPlayer = playersList[mySeatIndex];
             localPlayerStates.current[currentPlayer.id].hasKeptHand = true;
             addLog(`${currentPlayer.name} kept hand`);
-            const allKept = playersList.every(p => localPlayerStates.current[p.id]?.hasKeptHand);
+            const allKept = allSeatsKept();
             if (allKept) setGamePhase('PLAYING');
             else nextTurn();
         } else {
@@ -2769,7 +3426,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!isLocal || index === mySeatIndex) return;
 
         // Save state of currently viewed player
-        const currentPlayerId = playersList[mySeatIndex].id;
+        const currentPlayerId = playersList[mySeatIndex]?.id;
+        if (!currentPlayerId) return;
         saveLocalPlayerState(currentPlayerId);
 
         // Switch view
@@ -2807,12 +3465,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             healingReceivedThisTurn.current = 0;
 
             // Save currently viewed player's state
-            const viewedPlayerId = playersList[mySeatIndex].id;
-            saveLocalPlayerState(viewedPlayerId);
+            const viewedPlayerId = playersList[mySeatIndex]?.id;
+            if (viewedPlayerId) saveLocalPlayerState(viewedPlayerId);
 
             const currentIndex = playersList.findIndex(p => p.id === currentTurnPlayerId);
             const nextIndex = (currentIndex + 1) % playersList.length;
             const nextPlayer = playersList[nextIndex];
+            if (!nextPlayer) return;
 
             setCurrentTurnPlayerId(nextPlayer.id);
             if (gamePhase === 'PLAYING') setTurn(turn + 1);
@@ -2838,11 +3497,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
 
         if (currentTurnPlayerId === socket.id) {
+            // Add the turn duration exactly once and broadcast the new stats. (This
+            // previously added durationMs twice — once here and once via updateMyStats,
+            // which also read a stale gameStats snapshot.)
             setGameStats(prev => {
                 const current = prev[socket.id] || emptyStats;
-                return { ...prev, [socket.id]: { ...current, totalTurnTime: current.totalTurnTime + durationMs } };
+                const newStats = { ...current, totalTurnTime: current.totalTurnTime + durationMs };
+                socket.emit('game_action', { room: roomId, action: 'UPDATE_STATS', data: { playerId: socket.id, stats: newStats } });
+                return { ...prev, [socket.id]: newStats };
             });
-            updateMyStats({ totalTurnTime: (gameStats[socket.id]?.totalTurnTime || 0) + durationMs });
         }
 
         // Optimistic update
@@ -4337,7 +5000,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         {mulliganSelectionMode ? 'Select Cards to Bottom' : 'Opening Hand'}
                     </h2>
                     <p className="text-gray-400 mb-8 text-center max-w-lg flex flex-col gap-1">
-                        {isLocal && <span className="text-blue-400 font-bold uppercase tracking-widest">{playersList[mySeatIndex].name}</span>}
+                        {isLocal && <span className="text-blue-400 font-bold uppercase tracking-widest">{playersList[mySeatIndex]?.name}</span>}
                         {mulliganSelectionMode
                             ? `Select ${freeMulligan ? Math.max(0, mulliganCount - 1) : mulliganCount} cards to put on the bottom of your library.`
                             : `You have drawn 7 cards. ${mulliganCount > 0 ? `(Mulligan #${mulliganCount}${freeMulligan && mulliganCount === 1 ? ' - Free' : ''})` : ''}`
@@ -4512,7 +5175,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- UI: Top Bar --- */}
-            <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
+            <div className="flex-none min-h-11 md:min-h-16 safe-area-pt bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
                 {/* Left Side: Player Info (Always Visible) */}
                 <div className="flex items-center gap-2 md:gap-6 overflow-hidden flex-1">
                     {/* Players List (Hidden on Mobile) */}
@@ -4818,7 +5481,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     onWheel={handleHandWheel}
                                     className={`relative pointer-events-auto ${isMobile && isLandscape
                                         ? 'h-full overflow-y-auto overflow-x-hidden touch-pan-y pr-4'
-                                        : 'w-full overflow-x-auto overflow-y-hidden touch-pan-x pb-4 md:pb-8'
+                                        : 'w-full overflow-x-auto overflow-y-hidden touch-pan-x pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:pb-8'
                                         }`}
                                     style={{
                                         scrollbarWidth: 'none',
@@ -4999,6 +5662,113 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[9000] pointer-events-none animate-in fade-in slide-in-from-top-4">
                     <div className="bg-black/70 backdrop-blur text-white px-4 py-1 rounded-full text-sm font-medium border border-white/10 shadow-xl">
                         {statusMessage}
+                    </div>
+                </div>
+            )}
+
+            {/* AI "thinking" badge */}
+            {aiThinkingSeat && (
+                <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[9500] pointer-events-none animate-in fade-in slide-in-from-top-2">
+                    <div className="bg-purple-900/80 backdrop-blur text-purple-100 px-4 py-1.5 rounded-full text-sm font-bold border border-purple-500/40 shadow-xl flex items-center gap-2">
+                        <Loader size={14} className="animate-spin" />
+                        🤖 {aiSeatName(aiThinkingSeat)} is thinking…
+                    </div>
+                </div>
+            )}
+
+            {/* Negotiate (talk to an AI opponent) — local games with an AI seat */}
+            {isLocal && aiAvailable && gamePhase !== 'SETUP' && voiceAiSeats().length > 0 && !voiceOpen && (
+                <button
+                    onClick={() => setVoiceOpen(true)}
+                    className="fixed bottom-24 left-4 z-[9400] bg-purple-700 hover:bg-purple-600 text-white rounded-full shadow-xl border border-purple-400/40 px-4 py-3 flex items-center gap-2 font-bold text-sm active:scale-95"
+                    title="Talk / negotiate with an AI opponent"
+                >
+                    <Mic size={18} /> Negotiate
+                </button>
+            )}
+
+            {isLocal && aiAvailable && voiceOpen && (
+                <div className="fixed bottom-4 left-4 z-[9600] w-[92vw] max-w-sm bg-gray-900/95 backdrop-blur border border-purple-500/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-left-4">
+                    <div className="flex items-center justify-between px-4 py-2 bg-purple-900/40 border-b border-purple-500/30">
+                        <div className="flex items-center gap-2 font-bold text-purple-100 text-sm"><MessageSquare size={16} /> Negotiate</div>
+                        <div className="flex items-center gap-2">
+                            {voiceSpeaking && <Volume2 size={14} className="text-purple-300 animate-pulse" />}
+                            <button onClick={() => setVoiceOpen(false)} className="text-gray-400 hover:text-white"><X size={18} /></button>
+                        </div>
+                    </div>
+
+                    {/* Who to talk to + voice backend */}
+                    <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-800">
+                        <span className="text-[10px] text-gray-400 uppercase font-bold">Talking to</span>
+                        <select
+                            value={voiceTargetSeat || ''}
+                            onChange={e => setVoiceTargetSeat(e.target.value)}
+                            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none"
+                        >
+                            {voiceAiSeats().map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <select
+                            value={voiceBackendId}
+                            onChange={e => setVoiceBackendId(e.target.value as VoiceBackendId)}
+                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none"
+                            title="Voice engine"
+                        >
+                            <option value="web-speech">Browser voice (free)</option>
+                            {voiceRealtimeAvailable && <option value="openai-realtime">OpenAI Realtime</option>}
+                        </select>
+                    </div>
+
+                    {/* Transcript */}
+                    <div className="flex-1 max-h-56 overflow-y-auto px-3 py-2 space-y-2 text-sm">
+                        {(voiceTargetSeat && voiceHistory[voiceTargetSeat] || []).length === 0 && (
+                            <div className="text-gray-500 text-xs text-center py-6">
+                                Hold the mic (or type) to negotiate. They won't reveal their hand or plan unless they choose to.
+                            </div>
+                        )}
+                        {(voiceTargetSeat && voiceHistory[voiceTargetSeat] || []).map((t, i) => (
+                            <div key={i} className={`flex ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`px-3 py-1.5 rounded-2xl max-w-[80%] ${t.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-purple-100 border border-purple-500/20'}`}>
+                                    {t.text}
+                                </div>
+                            </div>
+                        ))}
+                        {voiceBusy && <div className="text-purple-300 text-xs flex items-center gap-1"><Loader size={12} className="animate-spin" /> thinking…</div>}
+                        {rtConnecting && <div className="text-purple-300 text-xs flex items-center gap-1"><Loader size={12} className="animate-spin" /> connecting realtime voice…</div>}
+                        {voiceSpeaking && <div className="text-purple-300 text-xs italic flex items-center gap-1"><Volume2 size={12} /> speaking…</div>}
+                        {voiceListening && <div className="text-green-400 text-xs italic">🎙 {voiceBackendId === 'openai-realtime' ? 'listening…' : (voicePartial || 'listening…')}</div>}
+                    </div>
+
+                    {/* Deals struck */}
+                    {voiceTargetSeat && (aiDeals.current[voiceTargetSeat] || []).length > 0 && (
+                        <div className="px-3 py-1.5 border-t border-gray-800 text-[11px] text-amber-300/90">
+                            <span className="font-bold">Deals:</span> {(aiDeals.current[voiceTargetSeat] || []).join(' · ')}
+                        </div>
+                    )}
+
+                    {/* Controls */}
+                    <div className="p-3 border-t border-gray-800 flex items-center gap-2">
+                        {(voiceBackendId === 'openai-realtime' || voiceInputSupported()) ? (
+                            <button
+                                onMouseDown={startTalk} onMouseUp={endTalk} onMouseLeave={() => voiceListening && endTalk()}
+                                onTouchStart={(e) => { e.preventDefault(); startTalk(); }} onTouchEnd={(e) => { e.preventDefault(); endTalk(); }}
+                                disabled={voiceBusy || rtConnecting || (voiceBackendId === 'openai-realtime' && !rtSession.current)}
+                                className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center border transition-colors ${voiceListening ? 'bg-green-600 border-green-400 animate-pulse' : 'bg-purple-700 hover:bg-purple-600 border-purple-400/40'} disabled:opacity-40`}
+                                title="Hold to talk"
+                            >
+                                <Mic size={20} className="text-white" />
+                            </button>
+                        ) : null}
+                        <input
+                            value={voiceTextInput}
+                            onChange={e => setVoiceTextInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') sendTypedVoice(); }}
+                            placeholder={(voiceBackendId === 'openai-realtime' || voiceInputSupported()) ? 'hold mic or type…' : 'type your message…'}
+                            disabled={voiceBusy}
+                            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-purple-500"
+                        />
+                        <button onClick={sendTypedVoice} disabled={voiceBusy || !voiceTextInput.trim()} className="shrink-0 px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg text-sm font-bold">
+                            Send
+                        </button>
                     </div>
                 </div>
             )}

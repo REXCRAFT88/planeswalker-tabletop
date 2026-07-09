@@ -5,6 +5,7 @@ import { Tabletop } from './components/Tabletop';
 import { LocalSetup } from './components/LocalSetup';
 import { MobileController } from './components/MobileController';
 import { CardData, ManaRule } from './types';
+import type { AiPersonaId, AiDifficulty, AiProviderId } from './services/aiTypes';
 import { PLAYER_COLORS } from './constants';
 
 enum View {
@@ -52,6 +53,12 @@ function App() {
     const [playerSleeve, setPlayerSleeve] = useState<string>(() => loadState('playerSleeve', PLAYER_COLORS[0]));
     const [savedDecks, setSavedDecks] = useState<SavedDeck[]>(() => loadState('savedDecks', []));
 
+    // Most-recently-created saved deck, used as a fallback for active-deck fields
+    // when nothing has been explicitly persisted yet.
+    const mostRecentDeck = savedDecks.length > 0
+        ? [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0]
+        : null;
+
     const [activeDeck, setActiveDeck] = useState<CardData[]>(() => {
         const loaded = loadState<CardData[]>('activeDeck', []);
         if (loaded.length > 0) return loaded;
@@ -73,24 +80,18 @@ function App() {
     });
     const [roomId, setRoomId] = useState<string>("");
     const [isGameStarted, setIsGameStarted] = useState(false);
-    const [localOpponents, setLocalOpponents] = useState<{ name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot' }[]>([]);
+    const [localOpponents, setLocalOpponents] = useState<{ id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId }[]>([]);
     const [isLocalTableHost, setIsLocalTableHost] = useState(false);
     const [pendingJoin, setPendingJoin] = useState<{ code?: string; isStarted?: boolean; gameType?: string } | null>(null);
-    const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() => {
-        // Load from most recent saved deck if available
-        if (savedDecks.length > 0) {
-            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            return sorted[0].manaRules || {};
-        }
-        return {};
-    });
-    const [activeDeckName, setActiveDeckName] = useState<string>(() => {
-        if (savedDecks.length > 0) {
-            const sorted = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-            return sorted[0].name;
-        }
-        return 'New Deck';
-    });
+    const [activeManaRules, setActiveManaRules] = useState<Record<string, ManaRule>>(() =>
+        loadState('activeManaRules', mostRecentDeck?.manaRules || {})
+    );
+    const [activeDeckName, setActiveDeckName] = useState<string>(() =>
+        loadState('activeDeckName', mostRecentDeck?.name || 'New Deck')
+    );
+    const [activeDeckId, setActiveDeckId] = useState<string | null>(() =>
+        loadState('activeDeckId', mostRecentDeck?.id ?? null)
+    );
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -99,18 +100,34 @@ function App() {
             playerSleeve,
             activeDeck,
             lobbyTokens,
-            savedDecks
+            savedDecks,
+            activeManaRules,
+            activeDeckName,
+            activeDeckId,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks]);
+    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeManaRules, activeDeckName, activeDeckId]);
 
-    // Prevent Render.com from sleeping by pinging the server
+    // Prevent Render.com from sleeping by pinging the server (production only —
+    // in dev this just spams the Vite server with HEAD requests).
     useEffect(() => {
+        if (!import.meta.env.PROD) return;
         const interval = setInterval(() => {
             fetch(window.location.href, { method: 'HEAD' }).catch(() => { });
         }, 10 * 60 * 1000); // Ping every 10 minutes
         return () => clearInterval(interval);
     }, []);
+
+    // Loads a deck into the active slot without saving it (used by the Lobby's
+    // "Load"/"Edit" actions). Threads manaRules and id so custom rules and deck
+    // identity survive the load.
+    const handleLoadDeck = (deck: CardData[], tokens: CardData[], _shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>, id?: string) => {
+        setActiveDeck(deck);
+        setLobbyTokens(tokens);
+        if (manaRules !== undefined) setActiveManaRules(manaRules || {});
+        if (deckName) setActiveDeckName(deckName);
+        setActiveDeckId(id ?? null);
+    };
 
     const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, manaRules?: Record<string, ManaRule>, id?: string) => {
         setActiveDeck(deck);
@@ -121,8 +138,9 @@ function App() {
         // Always save if we have an ID (update) OR if shouldSave is true (new)
         // If we have an ID, we are updating an existing deck, so we must save regardless of shouldSave flag (which indicates 'new deck')
         if (shouldSave || id) {
+            const deckId = id || crypto.randomUUID();
             const newDeck: SavedDeck = {
-                id: id || crypto.randomUUID(),
+                id: deckId,
                 name: deckName || `Deck ${new Date().toLocaleDateString()}`,
                 deck,
                 tokens,
@@ -130,6 +148,7 @@ function App() {
                 createdAt: Date.now(), // Update timestamp? Maybe keep original if updating? For now update is fine.
                 manaRules: manaRules || activeManaRules,
             };
+            setActiveDeckId(deckId);
             handleSaveDeck(newDeck);
         }
 
@@ -170,6 +189,8 @@ function App() {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
         setActiveManaRules(deck.manaRules || {});
+        setActiveDeckName(deck.name);
+        setActiveDeckId(deck.id);
         setPendingJoin(null);
         if (pendingJoin?.gameType === 'local_table') {
             setCurrentView(View.MOBILE_CONTROLLER);
@@ -202,11 +223,15 @@ function App() {
             return [...prev, deck];
         });
 
-        // Sync with active state if we are saving the currently active deck
-        if (deck.name === activeDeckName) {
+        // Sync with active state if we are saving the currently active deck.
+        // Match by id (name can change when renaming), falling back to name for
+        // decks loaded before an id was tracked.
+        if (deck.id === activeDeckId || (!activeDeckId && deck.name === activeDeckName)) {
             setActiveDeck(deck.deck);
             setLobbyTokens(deck.tokens);
             setActiveManaRules(deck.manaRules || {});
+            setActiveDeckName(deck.name);
+            setActiveDeckId(deck.id);
         }
     };
 
@@ -232,7 +257,7 @@ function App() {
                     savedDecks={savedDecks}
                     onSaveDeck={handleSaveDeck}
                     onDeleteDeck={handleDeleteDeck}
-                    onLoadDeck={handleDeckReady}
+                    onLoadDeck={handleLoadDeck}
                 />
             )}
 
@@ -242,10 +267,7 @@ function App() {
                     initialTokens={lobbyTokens}
                     initialManaRules={activeManaRules}
                     initialName={activeDeckName}
-                    initialId={(() => {
-                        const match = savedDecks.find(d => d.name === activeDeckName);
-                        return match ? match.id : undefined;
-                    })()}
+                    initialId={activeDeckId ?? undefined}
                     onDeckReady={handleDeckReady}
                     onBack={() => setCurrentView(View.LOBBY)}
                 />

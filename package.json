@@ -10,10 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@google/generative-ai": "^0.24.1",
     "@vitejs/plugin-react": "^5.0.0",
     "express": "^5.2.1",
     "helmet": "^8.1.0",
     "lucide-react": "^0.563.0",
+    "openai": "^6.45.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "socket.io": "^4.8.3",
@@ -26,7 +29,11 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.5.2",
     "concurrently": "^9.2.1",
+    "postcss": "^8.5.16",
+    "tailwindcss": "^3.4.19",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.2"
   }
 }
