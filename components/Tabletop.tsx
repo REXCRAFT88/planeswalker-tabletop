@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CardData, BoardObject, LogEntry, PlayerStats, ManaRule } from '../types';
+import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { ManaDisplay } from './ManaDisplay';
 import { searchCards } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
-import {
-    calculateAvailableMana, parseManaCost, autoTapForCost, addToManaPool, subtractFromPool,
-    poolTotal, MANA_DISPLAY, MANA_COLORS, EMPTY_POOL, isBasicLand, getBasicLandColor,
-    type ManaPool, type ManaColor, type ManaSource, type UndoableAction, MAX_UNDO_HISTORY
-} from '../services/mana';
+export type UndoableAction =
+    | { type: 'TAP_CARD'; objectId: string; previousRotation: number; previousTappedQuantity: number }
+    | { type: 'UNTAP_ALL'; objects: { id: string; previousRotation: number; previousTappedQuantity: number }[] }
+    | { type: 'PLAY_CARD'; objectId: string; card: CardData; fromZone: 'HAND' | 'COMMAND' };
+export const MAX_UNDO_HISTORY = 10;
 import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
 import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
 import { getVoiceBackend, voiceInputSupported, requestVoiceReply } from '../services/voice';
@@ -40,7 +39,6 @@ interface TabletopProps {
     isLocal?: boolean;
     isLocalTableHost?: boolean;
     localOpponents?: { id?: string, name: string, deck: CardData[], tokens: CardData[], color: string, type?: 'ai' | 'human_local' | 'open_slot', persona?: AiPersonaId, difficulty?: AiDifficulty, provider?: AiProviderId, model?: string }[];
-    manaRules?: Record<string, ManaRule>;
     onExit: () => void;
 }
 
@@ -823,11 +821,10 @@ const emptyStats: PlayerStats = {
     damageDealt: {}, damageReceived: 0, healingGiven: 0, healingReceived: 0, selfHealing: 0,
     tappedCounts: {},
     totalTurnTime: 0, cardsPlayed: 0, cardsSentToGraveyard: 0,
-    cardsExiled: 0, cardsDrawn: 0,
-    manaUsed: {}, manaProduced: {}
+    cardsExiled: 0, cardsDrawn: 0
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], manaRules, onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -870,7 +867,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
-    const [showManaCalculator, setShowManaCalculator] = useState(true);
+
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
 
@@ -911,7 +908,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
         return localStorage.getItem('planeswalker_auto_tap') === 'true';
     });
-    const [floatingMana, setFloatingMana] = useState<ManaPool>({ ...EMPTY_POOL });
+
     const [lastPlayedCard, setLastPlayedCard] = useState<CardData | null>(null);
     const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
     const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
@@ -922,7 +919,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setUndoHistory(prev => [...prev.slice(-(MAX_UNDO_HISTORY - 1)), action]);
     }, []);
 
-    // Persist mana settings
     useEffect(() => {
         localStorage.setItem('planeswalker_auto_tap', String(autoTapEnabled));
     }, [autoTapEnabled]);
@@ -3040,7 +3036,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
     };
 
-    const poolStr = (p: ManaPool) => ['W', 'U', 'B', 'R', 'G', 'C'].map(c => `${c}:${(p as any)[c] || 0}`).join(' ');
 
     // Applies one AI tool call to the AI seat's state. Returns a result the model
     // can react to (so an illegal move produces a correction rather than a crash).
@@ -3067,13 +3062,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const card = state.hand.find(c => c.id === input.cardId);
                     if (!card) return fail('That card is not in your hand.');
                     if (card.isLand) return fail('Use play_land for lands.');
-                    const cost = parseManaCost(card.manaCost || '');
-                    const rot = aiSeatRotation(seatId);
-                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
-                    const res = autoTapForCost(cost, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
-                    if (!res.success) return fail(`Not enough mana for ${card.name} (${card.manaCost || 'free'}). Available: ${poolStr(manaInfo.pool)}.`);
-                    aiTapSources(seatId, res.tappedIds);
-                    state.hand = state.hand.filter(c => c.id !== card.id);
                     const type = (card.typeLine || '').toLowerCase();
                     const isPermanent = /creature|artifact|enchantment|planeswalker|battle/.test(type) && !/instant|sorcery/.test(type);
                     if (isPermanent) aiSpawnCard(seatId, card);
@@ -3086,13 +3074,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const card = state.commandZone.find(c => c.id === input.cardId);
                     if (!card) return fail('That commander is not in your command zone.');
                     const prevCasts = aiCommanderCasts.current[card.id] || 0;
-                    const base = parseManaCost(card.manaCost || '');
-                    const taxed = { symbols: [...base.symbols, { type: 'generic', count: prevCasts * 2 } as any], cmc: base.cmc + prevCasts * 2, hasX: base.hasX };
-                    const rot = aiSeatRotation(seatId);
-                    const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
-                    const res = autoTapForCost(taxed as any, manaInfo.sources, { ...EMPTY_POOL }, Number(input.xValue) || 0, manaInfo.cmdColors);
-                    if (!res.success) return fail(`Not enough mana for ${card.name} + ${prevCasts * 2} tax. Available: ${poolStr(manaInfo.pool)}.`);
-                    aiTapSources(seatId, res.tappedIds);
                     state.commandZone = state.commandZone.filter(c => c.id !== card.id);
                     aiSpawnCard(seatId, card);
                     aiCommanderCasts.current[card.id] = prevCasts + 1;
@@ -3106,7 +3087,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const rot = aiSeatRotation(seatId);
                     if (obj.quantity > 1) updateBoardObject(obj.id, { tappedQuantity: Math.min(obj.quantity, (obj.tappedQuantity || 0) + 1) });
                     else updateBoardObject(obj.id, { rotation: (rot + 90) % 360 });
-                    addLog(`${call.name === 'activate_mana' ? 'tapped for mana' : 'tapped'} ${obj.cardData.name}`, 'ACTION', name);
+                    addLog(`tapped ${obj.cardData.name}`, 'ACTION', name);
                     return ok();
                 }
                 case 'untap_permanent': {
@@ -3705,8 +3686,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             });
         }
 
-        // Clear floating mana on untap all
-        setFloatingMana({ ...EMPTY_POOL });
+
         addLog("untapped all permanents");
     };
 
@@ -3751,44 +3731,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setBoardObjects(prev => [...prev, newObject]);
         emitAction('ADD_OBJECT', newObject);
         addLog(`split 1 ${obj.cardData.name} from stack`);
-    };
-
-    const handleManaButtonClick = (source: ManaSource) => {
-        // If single color and not flexible, produce immediately
-        // Note: Global rules might produce flexible mana (multiple options in producedMana)
-        if (source.producedMana.length === 1) {
-            const color = source.producedMana[0];
-            setFloatingMana(prev => {
-                const next = { ...prev };
-                next[color] = (next[color] || 0) + 1;
-                console.log(`Using mana ability: Added {${color}}`);
-                return next;
-            });
-            addLog(`added {${color}} to mana pool (via ${source.cardName})`);
-
-            // Tap the card (only if abilityType is 'tap')
-            // activated/multi/complex might have different costs or no tap
-            if (source.abilityType === 'tap') {
-                const obj = boardObjects.find(o => o.id === source.objectId);
-                if (obj) {
-                    const defaultRotation = (playersList.findIndex(p => p.id === obj.controllerId) !== -1 && layout[playersList.findIndex(p => p.id === obj.controllerId)]) ? layout[playersList.findIndex(p => p.id === obj.controllerId)].rot : 0;
-
-                    if (obj.quantity > 1) {
-                        const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                        updateBoardObject(obj.id, { tappedQuantity: newTapped });
-                    } else {
-                        const isTapped = obj.rotation !== defaultRotation;
-                        if (!isTapped) {
-                            const newRotation = (defaultRotation + 90) % 360;
-                            updateBoardObject(obj.id, { rotation: newRotation });
-                        }
-                    }
-                }
-            }
-        } else {
-            // Flexible - show choice modal
-            setChoosingColorForId(source.objectId);
-        }
     };
 
     const updateBoardObject = (id: string, updates: Partial<BoardObject>) => {
@@ -3914,160 +3856,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
     };
 
-    // --- Mana Calculator Functions ---
-    const myDefaultRotation = useMemo(() => layout[mySeatIndex]?.rot || 0, [layout, mySeatIndex]);
 
-    // Compute available mana from untapped sources
-    const manaInfo = useMemo(() => {
-        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-
-        // Determine commander colors for Command Tower logic
-        // Look for commander in command zone or on board
-        const myPlayer = playersList.find(p => p.id === myId);
-        let commander: CardData | undefined;
-        // Check if I am the controller
-        const amIController = (isLocal && myId === (playersList[mySeatIndex]?.id || 'player-0')) || (!isLocal && myId === (socket.id || 'local-player'));
-
-        if (amIController) {
-            // Use local state
-            commander = commandZone.find(c => c.isCommander);
-        } else {
-            // Check opponents commanders
-            const oppCmds = opponentsCommanders[myId];
-            if (oppCmds) {
-                commander = oppCmds.find(c => c.isCommander);
-            }
-        }
-
-        // Fallback to board search
-        if (!commander) {
-            commander = boardObjects.find(o => o.controllerId === myId && o.cardData.isCommander)?.cardData;
-        }
-
-        let cmdColors: ManaColor[] | undefined;
-        if (commander) {
-            // Estimate colors from mana cost
-            // This is a simplification; ideally we parse mana cost symbols
-            // For now, let's use producedMana if available, or just infer from cost string
-            const cost = commander.manaCost || "";
-            cmdColors = [];
-            if (cost.includes('W')) cmdColors.push('W');
-            if (cost.includes('U')) cmdColors.push('U');
-            if (cost.includes('B')) cmdColors.push('B');
-            if (cost.includes('R')) cmdColors.push('R');
-            if (cost.includes('G')) cmdColors.push('G');
-            if (cost.includes('C')) cmdColors.push('C'); // Colorless commander?
-            // Handle W/U etc.
-        }
-        return calculateAvailableMana(boardObjects, myId, myDefaultRotation, cmdColors, manaRules);
-    }, [boardObjects, isLocal, playersList, mySeatIndex, myDefaultRotation, manaRules]);
-
-    // Reset floating mana on turn change
-    useEffect(() => {
-        setFloatingMana({ ...EMPTY_POOL });
-    }, [turn, currentTurnPlayerId]);
-
-    const handleAddMana = (type: keyof ManaPool) => {
-        setFloatingMana(prev => ({
-            ...prev,
-            [type]: (prev[type] || 0) + 1
-        }));
-    };
-
-    const handleRemoveMana = (type: keyof ManaPool) => {
-        setFloatingMana(prev => ({
-            ...prev,
-            [type]: Math.max(0, (prev[type] || 0) - 1)
-        }));
-    };
-
-    // Handle auto-tap when Tab is pressed
-    const handleAutoTap = useCallback((card: CardData) => {
-        if (!card.manaCost || card.isLand) return; // Don't auto-tap for lands
-
-        const myId = isLocal ? playersList[mySeatIndex]?.id || 'player-0' : (socket.id || 'local-player');
-
-        const cost = parseManaCost(card.manaCost);
-        if (cost.symbols.length === 0) return;
-
-        // X spells: skip auto-tap (user needs to manually decide X value)
-        if (cost.hasX) {
-            addLog(`${card.name} has X in its cost — tap mana manually`);
-            return;
-        }
-
-        // 1. Try to pay with Floating Mana first
-        const result = autoTapForCost(cost, manaInfo.sources, floatingMana, 0, manaInfo.cmdColors);
-
-        if (!result.success) {
-            addLog(`Not enough mana to pay for ${card.name} (${card.manaCost})`);
-            return;
-        }
-
-        // Save previous states for undo
-        const previousStates = result.tappedIds.map(id => {
-            const obj = boardObjects.find(o => o.id === id);
-            return { id, rotation: obj?.rotation || 0, tappedQuantity: obj?.tappedQuantity || 0 };
-        });
-
-        // Tap each source
-        // Tap sources (handling stacks)
-        const tappedRotation = (myDefaultRotation + 90) % 360;
-        const tapCounts: Record<string, number> = {};
-        result.tappedIds.forEach(id => {
-            tapCounts[id] = (tapCounts[id] || 0) + 1;
-        });
-
-        Object.entries(tapCounts).forEach(([id, count]) => {
-            const obj = boardObjects.find(o => o.id === id);
-            if (!obj) return;
-
-            if (obj.quantity > 1) {
-                const newTappedQty = Math.min(obj.quantity, (obj.tappedQuantity || 0) + count);
-                updateBoardObject(id, { tappedQuantity: newTappedQty });
-            } else {
-                updateBoardObject(id, { rotation: tappedRotation });
-            }
-        });
-
-        // Update floating mana — subtract what was spent and add any excess produced
-        setFloatingMana(result.floatingManaRemaining);
-
-        // Track mana stats
-        const addProduced: Record<string, number> = {};
-        const addUsed: Record<string, number> = {};
-        MANA_COLORS.forEach(c => {
-            // Mana produced from tapping
-            if (result.manaProducedFromTap[c] > 0) {
-                addProduced[c] = (gameStats[myId]?.manaProduced?.[c] || 0) + result.manaProducedFromTap[c];
-            }
-            // Mana used from floating or tapping
-            if (result.manaUsed[c] > 0) {
-                addUsed[c] = (gameStats[myId]?.manaUsed?.[c] || 0) + result.manaUsed[c];
-            }
-        });
-        updateMyStats({
-            manaProduced: { ...gameStats[myId]?.manaProduced, ...addProduced },
-            manaUsed: { ...gameStats[myId]?.manaUsed, ...addUsed },
-        });
-
-        // Record undo
-        pushUndo({
-            type: 'AUTO_TAP',
-            tappedIds: result.tappedIds,
-            previousStates,
-            previousFloatingMana: floatingMana, // Save previous floating mana for undo
-        });
-
-        // Visual flash feedback
-        setAutoTappedIds(result.tappedIds);
-        if (autoTapFlashTimer.current) clearTimeout(autoTapFlashTimer.current);
-        autoTapFlashTimer.current = setTimeout(() => setAutoTappedIds([]), 1500);
-
-        const tappedNames = result.tappedIds.map(id => boardObjects.find(o => o.id === id)?.cardData.name).filter(Boolean);
-        addLog(`auto-tapped for ${card.name}: ${tappedNames.join(', ')}`);
-        setLastPlayedCard(null);
-    }, [boardObjects, manaInfo.sources, myDefaultRotation, pushUndo, floatingMana, isLocal, playersList, mySeatIndex, gameStats, updateMyStats]);
 
     // Handle undo (Ctrl+Z)
     const handleUndo = useCallback(() => {
@@ -4110,18 +3899,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     }
                 }
                 addLog(`undid playing ${action.card.name}`);
-                break;
-            }
-            case 'AUTO_TAP': {
-                // Restore all tapped cards to their previous state
-                action.previousStates.forEach(state => {
-                    updateBoardObject(state.id, {
-                        rotation: state.rotation,
-                        tappedQuantity: state.tappedQuantity
-                    });
-                });
-                setAutoTappedIds([]);
-                addLog('undid auto-tap');
                 break;
             }
         }
@@ -4489,7 +4266,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             case 'arrowdown': handleLifeChange(-1); break;
             case 'q': setShowStatsModal(prev => !prev); break;
             case 'w': setShowCmdrDamage(prev => !prev); break;
-            case 'm': setShowManaCalculator(prev => !prev); break;
+
             case 'tab': {
                 e.preventDefault();
                 if (hoveredCardId) {
@@ -4999,11 +4776,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 defaultRotation={defaultRotation}
                                 isHandVisible={isHandVisible}
                                 onHover={(id) => setHoveredCardId(id)}
-                                manaSource={(manaInfo.sources.find(s => s.objectId === obj.id && s.abilityType !== 'passive') || manaInfo.potentialSources.find(s => s.objectId === obj.id)) as ManaSource}
-                                onManaClick={() => {
-                                    const source = manaInfo.sources.find(s => s.objectId === obj.id) || manaInfo.potentialSources.find(s => s.objectId === obj.id);
-                                    if (source && source.abilityType !== 'passive') handleManaButtonClick(source);
-                                }}
                             />
                         </div>
                     );
@@ -5259,72 +5031,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </button>
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* Color Choice Modal (Runtime) */}
-            {choosingColorForId && (
-                <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-6 flex flex-col items-center gap-6">
-                        <h3 className="text-xl font-bold text-white">Choose Color</h3>
-                        <div className="flex gap-4">
-                            {MANA_COLORS.filter(c => c !== 'C').map(color => (
-                                <button
-                                    key={color}
-                                    onClick={() => {
-                                        setFloatingMana(prev => {
-                                            const next = { ...prev };
-                                            next[color] = (next[color] || 0) + 1;
-                                            return next;
-                                        });
-                                        addLog(`added {${color}} to mana pool`);
-
-                                        // Tap the card (only if abilityType is 'tap')
-                                        // We need the source info here to know abilityType. 
-                                        // Problem: 'choosingColorForId' only stores ID.
-                                        // We need to re-find the source or store source in state.
-                                        // Workaround: Re-find source from manaInfo.
-                                        const source = manaInfo.sources.find(s => s.objectId === choosingColorForId) || manaInfo.potentialSources.find(s => s.objectId === choosingColorForId);
-
-                                        if (source && source.abilityType === 'tap' && choosingColorForId) {
-                                            const obj = boardObjects.find(o => o.id === choosingColorForId);
-                                            if (obj) {
-                                                const controllerIdx = (!isLocal && obj.controllerId === 'local-player')
-                                                    ? mySeatIndex
-                                                    : playersList.findIndex(p => p.id === obj.controllerId);
-                                                const defaultRotation = (controllerIdx !== -1 && layout[controllerIdx]) ? layout[controllerIdx].rot : 0;
-
-                                                if (obj.quantity > 1) {
-                                                    const newTapped = Math.min(obj.quantity, obj.tappedQuantity + 1);
-                                                    updateBoardObject(obj.id, { tappedQuantity: newTapped });
-                                                } else {
-                                                    const isTapped = obj.rotation !== defaultRotation;
-                                                    if (!isTapped) {
-                                                        const newRotation = (defaultRotation + 90) % 360;
-                                                        updateBoardObject(obj.id, { rotation: newRotation });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        setChoosingColorForId(null);
-                                    }}
-                                    className="w-12 h-12 rounded-full hover:scale-110 active:scale-95 transition-transform shadow-lg relative group"
-                                >
-                                    <img src={`/mana/${color === 'W' ? 'white' : color === 'U' ? 'blue' : color === 'B' ? 'black' : color === 'R' ? 'red' : 'green'
-                                        }.png`} className="w-full h-full object-contain" />
-                                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 text-[10px] font-bold uppercase tracking-wider bg-black/80 px-1.5 rounded transition-opacity pointer-events-none">
-                                        {color}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                        <button
-                            onClick={() => setChoosingColorForId(null)}
-                            className="text-sm text-gray-400 hover:text-white underline mt-2"
-                        >
-                            Cancel
-                        </button>
-                    </div>
                 </div>
             )}
 
@@ -5733,18 +5439,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     )}
                 </div>
 
-                {/* Mana Display */}
-                {(gamePhase === 'PLAYING' && showManaCalculator) && (
-                    <ManaDisplay
-                        pool={manaInfo.pool}
-                        potentialPool={manaInfo.potentialPool}
-                        floatingMana={floatingMana}
-                        onAddMana={handleAddMana}
-                        onRemoveMana={handleRemoveMana}
-                        totalAvailable={manaInfo.totalAvailable}
-                        totalPotential={manaInfo.totalPotential}
-                    />
-                )}
 
                 {/* Auto-Tap Flash Overlay — highlights tapped cards */}
                 {autoTappedIds.length > 0 && (
@@ -6173,8 +5867,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Opponent View</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">V</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Switch Opponent</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">← / →</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Play Hand Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">1 - 0</kbd></div>
-                            <div className="col-span-2 pt-2 border-t border-gray-700 mt-1 text-xs text-gray-500 font-bold uppercase">Mana & Undo</div>
-                            <div className="flex justify-between items-center p-2 bg-blue-900/30 rounded border border-blue-800/30"><span className="text-gray-300">Mana Panel</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">M</kbd></div>
+                            <div className="col-span-2 pt-2 border-t border-gray-700 mt-1 text-xs text-gray-500 font-bold uppercase">Undo</div>
                             <div className="flex justify-between items-center p-2 bg-yellow-900/30 rounded border border-yellow-800/30"><span className="text-gray-300">Auto-Tap</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Tab</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-amber-900/30 rounded border border-amber-800/30 col-span-2"><span className="text-gray-300">Undo Last Action</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
                         </div>

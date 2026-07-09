@@ -1,21 +1,18 @@
 import React, { useState } from 'react';
-import { parseDeckList, fetchBatch, searchCards, generateDefaultManaRule } from '../services/scryfall';
-import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
-import { CardData, ManaRule, ManaColor } from '../types';
-import { ManaRulesModal } from './ManaRulesModal';
+import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
+import { CardData } from '../types';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
-    initialManaRules?: Record<string, ManaRule>;
     initialName?: string;
     initialId?: string; // ID of the deck being edited
-    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, manaRules?: Record<string, ManaRule>, id?: string) => void;
+    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string) => void;
     onBack: () => void;
 }
 
-export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialManaRules, initialName, initialId, onDeckReady, onBack }) => {
+export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialName, initialId, onDeckReady, onBack }) => {
     const [deckText, setDeckText] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number, total: number } | null>(null);
@@ -35,8 +32,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     // Actually, if we passed cards but no ID, it might be an imported deck or a clone.
 
     const [deckName, setDeckName] = useState(initialName || (isNewDeck ? 'New Deck' : ''));
-    const [manaRules, setManaRules] = useState<Record<string, ManaRule>>(initialManaRules || {});
-    const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const [showManaFilter, setShowManaFilter] = useState(false);
 
@@ -109,20 +104,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 return;
             }
 
-            // Auto-generate default mana rules for mana sources, keyed by scryfallId.
-            // Don't overwrite rules the user has already customized.
-            const generatedRules: Record<string, ManaRule> = {};
-            const seenScryfall = new Set<string>();
-            for (const card of [...deck, ...tokens]) {
-                if (seenScryfall.has(card.scryfallId)) continue;
-                seenScryfall.add(card.scryfallId);
-                if (manaRules[card.scryfallId]) continue; // preserve existing/custom rule
-                const rule = generateDefaultManaRule(card);
-                if (rule) generatedRules[card.scryfallId] = rule;
-            }
-            if (Object.keys(generatedRules).length > 0) {
-                setManaRules(prev => ({ ...generatedRules, ...prev }));
-            }
 
             setStagedDeck(deck);
             setStagedTokens(prev => [...prev, ...tokens]);
@@ -172,20 +153,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const finalizeDeck = () => {
         if (!stagedDeck) return;
         // Pass initialId back
-        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, manaRules, initialId);
+        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, initialId);
     };
 
-    const handleSaveManaRule = (card: CardData, rule: ManaRule | null) => {
-        setManaRules(prev => {
-            const next = { ...prev };
-            if (rule) {
-                next[card.scryfallId] = rule;
-            } else {
-                delete next[card.scryfallId];
-            }
-            return next;
-        });
-    };
 
     const clearDeck = () => {
         if (confirm("Are you sure you want to clear this deck and import a new one?")) {
@@ -450,29 +420,6 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                             ×{count}
                                         </div>
                                     )}
-                                    {/* Mana rules indicator */}
-                                    {manaRules[card.scryfallId] && (
-                                        <div className="absolute top-2 left-2 bg-purple-600 text-white p-1 rounded-full shadow-lg" title="Custom mana rules set">
-                                            <Zap size={12} />
-                                        </div>
-                                    )}
-                                    {/* Disabled indicator */}
-                                    {manaRules[card.scryfallId]?.disabled && (
-                                        <div className="absolute inset-0 bg-red-900/30 rounded-md flex items-center justify-center">
-                                            <span className="text-red-400 text-[10px] font-bold bg-black/60 px-2 py-0.5 rounded">DISABLED</span>
-                                        </div>
-                                    )}
-                                    {/* Hover overlay with Set Mana Rules button */}
-                                    {hoveredCardId === card.id && (
-                                        <div className="absolute inset-0 bg-black/40 flex items-end justify-center pb-8 rounded-md">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); setManaRulesCard(card); }}
-                                                className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold rounded-lg flex items-center gap-1 shadow-lg"
-                                            >
-                                                <Zap size={10} /> Set Mana Rules
-                                            </button>
-                                        </div>
-                                    )}
                                     <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-1 text-center text-xs truncate">
                                         {card.name}
                                     </div>
@@ -488,69 +435,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 </div>
             )}
 
-            {/* Mana Rules Modal */}
-            {manaRulesCard && (
-                <ManaRulesModal
-                    card={manaRulesCard}
-                    existingRule={manaRules[manaRulesCard.scryfallId]}
-                    commanderColors={(() => {
-                        const commander = stagedDeck?.find(c => c.isCommander);
-                        if (!commander?.manaCost) return undefined;
-                        const colors: ManaColor[] = [];
-                        if (commander.manaCost.includes('W')) colors.push('W');
-                        if (commander.manaCost.includes('U')) colors.push('U');
-                        if (commander.manaCost.includes('B')) colors.push('B');
-                        if (commander.manaCost.includes('R')) colors.push('R');
-                        if (commander.manaCost.includes('G')) colors.push('G');
-                        return colors.length > 0 ? colors : undefined;
-                    })()}
-                    onSave={(rule) => {
-                        // Inline handleSave if handleSaveManaRule isn't visible in my context
-                        // But previous view showed it being used.
-                        // I will assume handleSaveManaRule exists.
-                        // Wait, previous view showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
-                        // I should preserve that.
-                        // But I need to view the file to be sure about the handler name or if I can just use the existing line.
-                        // The snippet showed: onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
-                        const newRules = { ...manaRules };
-                        if (rule === null) {
-                            delete newRules[manaRulesCard.scryfallId];
-                        } else {
-                            newRules[manaRulesCard.scryfallId] = rule;
-                        }
-                        setManaRules(newRules);
-                    }}
-                    onClose={() => setManaRulesCard(null)}
-                    allSources={stagedDeck
-                        ?.filter(c => (c.producedMana && c.producedMana.length > 0) || c.typeLine.toLowerCase().includes('land'))
-                        .map(c => {
-                            const rule = manaRules[c.scryfallId];
-                            let priority = rule?.autoTapPriority;
 
-                            if (priority === undefined) {
-                                let produced: ManaColor[] = [];
-                                if (rule) {
-                                    if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
-                                        Object.entries(rule.produced).forEach(([color, count]) => {
-                                            if (count > 0) produced.push(color as ManaColor);
-                                        });
-                                    } else {
-                                        produced = ['W', 'U'];
-                                    }
-                                } else {
-                                    produced = parseProducedMana(c.producedMana);
-                                    if (produced.length === 0) {
-                                        const basic = getBasicLandColor(c.name);
-                                        if (basic) produced = [basic];
-                                    }
-                                }
-                                priority = getManaPriority(c, produced);
-                            }
-                            return { id: c.id, name: c.name, priority };
-                        }) || []
-                    }
-                />
-            )}
         </div>
     );
 };

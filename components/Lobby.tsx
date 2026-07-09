@@ -2,13 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings } from 'lucide-react';
 import { AiSettingsModal } from './AiSettingsModal';
 import { PLAYER_COLORS } from '../constants';
-import { CardData, ManaRule, ManaColor } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
-import { getManaPriority, parseProducedMana, getBasicLandColor } from '../services/mana';
 
 import { connectSocket } from '../services/socket';
 import { SavedDeck } from '../App';
-import { ManaRulesModal } from './ManaRulesModal';
 
 interface LobbyProps {
     playerName: string;
@@ -25,7 +22,7 @@ interface LobbyProps {
     savedDecks: SavedDeck[];
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
-    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, manaRules?: Record<string, ManaRule>, id?: string) => void;
+    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -53,7 +50,6 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [tokenImportText, setTokenImportText] = useState('');
     const [isImportingTokens, setIsImportingTokens] = useState(false);
     const [tokenImportError, setTokenImportError] = useState<string | null>(null);
-    const [manaRulesCard, setManaRulesCard] = useState<CardData | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -208,7 +204,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         // If no deck is active, load the most recent one.
         if (activeDeck.length === 0 && savedDecks.length > 0) {
             const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, false, mostRecentDeck.name, mostRecentDeck.manaRules, mostRecentDeck.id);
+            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, false, mostRecentDeck.name, mostRecentDeck.id);
         }
 
         onLocalGame();
@@ -223,7 +219,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name, deck.manaRules, deck.id);
+        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name, deck.id);
         setIsLibraryOpen(false);
     };
 
@@ -237,14 +233,14 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
-        onLoadDeck(deck.deck, deck.tokens, false, deck.name, deck.manaRules, deck.id);
+        onLoadDeck(deck.deck, deck.tokens, false, deck.name, deck.id);
         // Then go to builder
         onImportDeck();
     };
 
     const handleCreateNewDeck = () => {
-        // Clear current active deck (empty mana rules, no id)
-        onLoadDeck([], [], false, 'New Deck', {}, undefined);
+        // Clear current active deck (no id)
+        onLoadDeck([], [], false, 'New Deck', undefined);
         onImportDeck();
     };
 
@@ -284,16 +280,6 @@ export const Lobby: React.FC<LobbyProps> = ({
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-    const handleSaveManaRule = (card: CardData, rule: ManaRule | null) => {
-        if (!editingDeck) return;
-        const rules = { ...(editingDeck.manaRules || {}) };
-        if (rule) {
-            rules[card.scryfallId] = rule;
-        } else {
-            delete rules[card.scryfallId];
-        }
-        setEditingDeck({ ...editingDeck, manaRules: rules });
-    };
 
     const toggleFullScreen = () => {
         if (!document.fullscreenElement) {
@@ -548,21 +534,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                         >
                                                             <img src={card.imageUrl} className="w-full h-full object-cover rounded-sm" />
                                                             {card.isCommander && <div className="absolute top-1 right-1 bg-amber-500 text-black p-0.5 rounded-full"><Crown size={10} /></div>}
-                                                            {editingDeck.manaRules?.[card.scryfallId] && (
-                                                                <div className="absolute top-1 left-1 bg-purple-600 text-white p-0.5 rounded-full" title="Custom mana rules">
-                                                                    <Zap size={8} />
-                                                                </div>
-                                                            )}
-                                                            {hoveredCardId === card.id && (
-                                                                <div className="absolute inset-0 bg-black/40 flex items-end justify-center pb-4 rounded-sm">
-                                                                    <button
-                                                                        onClick={(e) => { e.stopPropagation(); setManaRulesCard(card); }}
-                                                                        className="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-bold rounded-md flex items-center gap-1 shadow-lg"
-                                                                    >
-                                                                        <Zap size={8} /> Mana Rules
-                                                                    </button>
-                                                                </div>
-                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -596,56 +567,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 )}
             </div>
 
-            {/* Mana Rules Modal */}
-            {
-                manaRulesCard && editingDeck && (
-                    <ManaRulesModal
-                        card={manaRulesCard}
-                        existingRule={editingDeck.manaRules?.[manaRulesCard.scryfallId]}
-                        commanderColors={(() => {
-                            const commander = editingDeck.deck.find((c: CardData) => c.isCommander);
-                            if (!commander?.manaCost) return undefined;
-                            const colors: ManaColor[] = [];
-                            if (commander.manaCost.includes('W')) colors.push('W');
-                            if (commander.manaCost.includes('U')) colors.push('U');
-                            if (commander.manaCost.includes('B')) colors.push('B');
-                            if (commander.manaCost.includes('R')) colors.push('R');
-                            if (commander.manaCost.includes('G')) colors.push('G');
-                            return colors.length > 0 ? colors : undefined;
-                        })()}
-                        onSave={(rule) => handleSaveManaRule(manaRulesCard, rule)}
-                        onClose={() => setManaRulesCard(null)}
-                        allSources={editingDeck.deck
-                            .filter(c => c.isManaSource || c.typeLine.toLowerCase().includes('land'))
-                            .map(c => {
-                                const rule = editingDeck.manaRules?.[c.scryfallId];
-                                let priority = rule?.autoTapPriority;
 
-                                if (priority === undefined) {
-                                    let produced: ManaColor[] = [];
-                                    if (rule) {
-                                        if (rule.prodMode === 'standard' || rule.prodMode === 'multiplied' || rule.prodMode === 'available') {
-                                            Object.entries(rule.produced).forEach(([color, count]) => {
-                                                if (count > 0) produced.push(color as ManaColor);
-                                            });
-                                        } else {
-                                            produced = ['W', 'U'];
-                                        }
-                                    } else {
-                                        produced = parseProducedMana(c.producedMana);
-                                        if (produced.length === 0) {
-                                            const basic = getBasicLandColor(c.name);
-                                            if (basic) produced = [basic];
-                                        }
-                                    }
-                                    priority = getManaPriority(c, produced);
-                                }
-                                return { id: c.id, name: c.name, priority };
-                            })
-                        }
-                    />
-                )
-            }
         </>
     );
 };

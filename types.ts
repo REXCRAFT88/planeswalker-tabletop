@@ -1,49 +1,4 @@
-export type ManaColor = 'W' | 'U' | 'B' | 'R' | 'G' | 'C' | 'WUBRG' | 'CMD';
 
-export interface ManaRule {
-  // Disable mana production from this card entirely
-  disabled?: boolean;
-  // Activation trigger
-  trigger: 'tap' | 'activated' | 'passive';
-  // Activation cost (mana required to activate ability)
-  activationCost: Record<ManaColor, number>;
-  genericActivationCost?: number; // Generic mana cost (e.g. {1})
-  // How the mana amount is calculated
-  calcMode: 'set' | 'counters' | 'creatures' | 'basicLands';
-  calcMultiplier: number; // default 1
-  includeBasePower?: boolean; // when counters mode: add creature's base power to counter count
-  // How the mana is produced
-  prodMode: 'standard' | 'multiplied' | 'available' | 'chooseColor' | 'commander';
-  // 'available' = one mana of any color you have lands for
-  // 'chooseColor' = player picks a color at runtime via modal
-  produced: Record<ManaColor, number>; // e.g. {W:0,U:0,B:0,R:0,G:2,C:0}
-  producedAlt?: Record<ManaColor, number>; // "or" choice
-  includeNonBasics?: boolean; // for multiplied mode
-  // Alternative rule set (opens modal for player to choose which rule to apply)
-  alternativeRule?: ManaRule;
-  // Persistence of produced mana
-  persistence: 'permanent' | 'untilNextTurn' | 'untilEndOfTurn';
-  // Global application (e.g. "All Creatures have...")
-  appliesTo?: ('creatures' | 'lands')[];
-  appliesToCondition?: 'counters'; // Only applies if card has counters (e.g. Rishkar)
-
-  // Auto-tap settings
-  autoTap: boolean;
-  autoTapPriority: number; // decimal allowed
-}
-
-export const EMPTY_MANA_RULE: ManaRule = {
-  trigger: 'tap',
-  activationCost: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  genericActivationCost: 0,
-  calcMode: 'set',
-  calcMultiplier: 1,
-  prodMode: 'standard',
-  produced: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, WUBRG: 0, CMD: 0 },
-  persistence: 'untilEndOfTurn',
-  autoTap: true,
-  autoTapPriority: 1,
-};
 
 export enum CardState {
   UNTAPPED = 'UNTAPPED',
@@ -118,8 +73,7 @@ export interface PlayerStats {
   cardsSentToGraveyard: number;
   cardsExiled: number;
   cardsDrawn: number;
-  manaUsed: Record<string, number>; // color -> total spent (W, U, B, R, G, C)
-  manaProduced: Record<string, number>; // color -> total produced
+
 }
 
 export interface GameState {
