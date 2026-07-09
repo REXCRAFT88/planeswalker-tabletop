@@ -1,15 +1,7 @@
-// Pure serialization of the host's game state into the compact, hidden-info-free
-// GameStateView the AI sees. Kept separate from the Tabletop component so it can be
-// unit-tested and reused by the driver.
 import { CardData, BoardObject } from '../types';
-import type { ManaPool } from './mana';
 import type {
-    GameStateView, AiBoardRef, AiCardRef, AiManaPool, AiDeckCard, AiOpponentView, AiPersonaId,
+    GameStateView, AiBoardRef, AiCardRef, AiDeckCard, AiOpponentView, AiPersonaId,
 } from './aiTypes';
-
-const toManaPool = (p: ManaPool): AiManaPool => ({
-    W: p.W || 0, U: p.U || 0, B: p.B || 0, R: p.R || 0, G: p.G || 0, C: p.C || 0,
-});
 
 const cardRef = (c: CardData): AiCardRef => ({
     id: c.id, name: c.name, manaCost: c.manaCost || undefined, typeLine: c.typeLine || undefined, oracleText: c.oracleText || undefined
@@ -45,7 +37,7 @@ export interface BuildViewInput {
     life: number;
     commanderTax: number;
     landsPlayedThisTurn: number;
-    manaAvailable: ManaPool;
+
     boardObjects: BoardObject[];
     opponents: Array<{ seatId: string; name: string; life: number; poison: number; commanders: string[]; handCount: number; commanderDamageTakenFromAi: number }>;
     defaultRotations: Record<string, number>; // seatId -> default board rotation
@@ -90,7 +82,6 @@ export function buildGameStateView(input: BuildViewInput): GameStateView {
             exileCount: input.exileCount,
             libraryCount: input.libraryCount,
             commandZone: input.commandZone.map(cardRef),
-            manaAvailable: toManaPool(input.manaAvailable),
             landsPlayedThisTurn: input.landsPlayedThisTurn,
         },
         opponents,

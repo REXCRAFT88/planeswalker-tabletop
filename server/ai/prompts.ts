@@ -56,10 +56,6 @@ Decide using the mulligan_decision tool.`;
 // Compact, per-turn state description appended as the user message.
 export function formatStateView(view: GameStateView): string {
     const you = view.you;
-    const mana = you.manaAvailable;
-    const manaStr = ['W', 'U', 'B', 'R', 'G', 'C']
-        .map(c => `${c}:${(mana as any)[c] || 0}`)
-        .join(' ');
 
     const hand = you.hand.length
         ? you.hand.map(c => `  [${c.id}] ${c.name}${c.manaCost ? ' ' + c.manaCost : ''}${c.typeLine ? ' — ' + c.typeLine : ''}${c.oracleText ? '\n      (Text: ' + c.oracleText.replace(/\n/g, ' ') + ')' : ''}`).join('\n')
@@ -92,7 +88,6 @@ export function formatStateView(view: GameStateView): string {
     return `It is your turn ${view.turn}. Play your turn now, one tool at a time, then call end_turn.
 
 YOUR LIFE: ${you.life}   Commander tax: ${you.commanderTax}   Lands played this turn: ${you.landsPlayedThisTurn}/1
-AVAILABLE MANA (untapped sources): ${manaStr}
 
 YOUR HAND:
 ${hand}

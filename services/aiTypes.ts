@@ -39,9 +39,7 @@ export interface AiBoardRef {
     oracleText?: string;
 }
 
-export interface AiManaPool {
-    W: number; U: number; B: number; R: number; G: number; C: number;
-}
+
 
 export interface AiSelfView {
     seatId: string;
@@ -54,7 +52,6 @@ export interface AiSelfView {
     exileCount: number;
     libraryCount: number;
     commandZone: AiCardRef[];
-    manaAvailable: AiManaPool;
     landsPlayedThisTurn: number;
 }
 

@@ -3201,7 +3201,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const buildAiView = (seatId: string) => {
         const state = localPlayerStates.current[seatId];
         const rot = aiSeatRotation(seatId);
-        const manaInfo = calculateAvailableMana(boardObjectsRef.current, seatId, rot, undefined, manaRules);
         const opponents = playersList.filter(p => p.id !== seatId).map(p => {
             const s = localPlayerStates.current[p.id];
             return {
@@ -3231,7 +3230,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             life: state.life,
             commanderTax: (aiCommanderCasts.current[state.commandZone[0]?.id] || 0) * 2,
             landsPlayedThisTurn: aiLandsPlayed.current[seatId] || 0,
-            manaAvailable: manaInfo.pool,
             boardObjects: boardObjectsRef.current,
             opponents,
             defaultRotations,
