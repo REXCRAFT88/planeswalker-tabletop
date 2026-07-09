@@ -1,4 +1,4 @@
-
+import { CardData } from '../types';
 
 const BASE_URL = 'https://api.scryfall.com';
 

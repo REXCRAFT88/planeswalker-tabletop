@@ -52,8 +52,7 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                                 damageDealt: {}, damageReceived: 0, healingGiven: 0, healingReceived: 0, selfHealing: 0,
                                 tappedCounts: {},
                                 totalTurnTime: 0, cardsPlayed: 0, cardsSentToGraveyard: 0,
-                                cardsExiled: 0, cardsDrawn: 0,
-                                manaUsed: {}, manaProduced: {}
+                                cardsExiled: 0, cardsDrawn: 0
                             };
 
                             const mostTapped = getMost(s.tappedCounts);
@@ -94,49 +93,7 @@ export const GameStatsModal: React.FC<GameStatsModalProps> = ({ isOpen, onClose,
                                             </div>
                                         </div>
 
-                                        <div className="space-y-1">
-                                            <div className="text-gray-400 text-xs uppercase font-bold border-b border-gray-600 pb-1 mb-1">Mana Usage</div>
-                                            {(() => {
-                                                const manaColors = [
-                                                    { key: 'W', symbol: '☀', label: 'White' },
-                                                    { key: 'U', symbol: '💧', label: 'Blue' },
-                                                    { key: 'B', symbol: '💀', label: 'Black' },
-                                                    { key: 'R', symbol: '🔥', label: 'Red' },
-                                                    { key: 'G', symbol: '🌲', label: 'Green' },
-                                                    { key: 'C', symbol: '◇', label: 'Colorless' },
-                                                ];
-                                                const produced = s.manaProduced || {};
-                                                const used = s.manaUsed || {};
-                                                const totalProduced = Object.values(produced).reduce((a, b) => (a as number) + (b as number), 0) as number;
-                                                const totalUsed = Object.values(used).reduce((a, b) => (a as number) + (b as number), 0) as number;
-                                                return (
-                                                    <>
-                                                        <div className="grid grid-cols-3 gap-1 mb-1">
-                                                            {manaColors.map(mc => {
-                                                                const p = (produced[mc.key] as number) || 0;
-                                                                const u = (used[mc.key] as number) || 0;
-                                                                if (p === 0 && u === 0) return null;
-                                                                return (
-                                                                    <div key={mc.key} className="text-center">
-                                                                        <div className="text-sm">{mc.symbol}</div>
-                                                                        <div className="text-[10px] text-green-400 font-mono">{p}</div>
-                                                                        <div className="text-[10px] text-red-400 font-mono">{u}</div>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        <div className="flex justify-between text-gray-300 text-xs">
-                                                            <span>Produced:</span>
-                                                            <span className="text-green-400 font-mono">{totalProduced}</span>
-                                                        </div>
-                                                        <div className="flex justify-between text-gray-300 text-xs">
-                                                            <span>Spent:</span>
-                                                            <span className="text-red-400 font-mono">{totalUsed}</span>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
+
                                     </div>
 
                                     <div className="p-3 bg-gray-800/50 border-t border-gray-600">

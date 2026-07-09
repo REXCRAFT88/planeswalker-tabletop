@@ -3253,7 +3253,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
+    const runAiTurn = async (seatId: string, opp: { name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId; model?: string }) => {
         const state = localPlayerStates.current[seatId];
         if (!state) { nextTurn(); return; }
         const name = opp.name;
@@ -3319,7 +3319,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId }) => {
+    const runAiMulligan = async (opp: { id?: string; name: string; deck: CardData[]; persona?: AiPersonaId; difficulty?: AiDifficulty; provider?: AiProviderId; model?: string }) => {
         const seatId = opp.id;
         if (!seatId) return;
         const state = localPlayerStates.current[seatId];
@@ -4267,16 +4267,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             case 'tab': {
                 e.preventDefault();
-                if (hoveredCardId) {
-                    const obj = boardObjects.find(o => o.id === hoveredCardId);
-                    if (obj) {
-                        handleAutoTap(obj.cardData);
-                        return;
-                    }
-                }
-                if (autoTapEnabled && lastPlayedCard) {
-                    handleAutoTap(lastPlayedCard);
-                }
                 break;
             }
             case 'z': {

@@ -38,7 +38,7 @@ const VIEW: GameStateView = {
         battlefield: [{ id: 'b1', name: 'Forest', tapped: false, quantity: 3, typeLine: 'Basic Land — Forest' }],
         graveyard: [], exileCount: 0, libraryCount: 60,
         commandZone: [{ id: 'cmd1', name: 'Marwyn, the Nurturer', manaCost: '{2}{G}' }],
-        manaAvailable: { W: 0, U: 0, B: 0, R: 0, G: 3, C: 0 }, landsPlayedThisTurn: 0,
+        landsPlayedThisTurn: 0,
     },
     opponents: [{
         seatId: 'p0', name: 'Human', life: 38, poison: 0,

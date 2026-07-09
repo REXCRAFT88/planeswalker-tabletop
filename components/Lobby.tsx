@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings } from 'lucide-react';
-import { AiSettingsModal } from './AiSettingsModal';
 import { PLAYER_COLORS } from '../constants';
+import { AiSettingsModal } from './AiSettingsModal';
+import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
 
 import { connectSocket } from '../services/socket';
