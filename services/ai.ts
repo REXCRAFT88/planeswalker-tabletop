@@ -15,12 +15,28 @@ export interface AiStatus {
     realtimeVoice: boolean; // OpenAI Realtime voice backend available
 }
 
+// fetch() has no default timeout, so a stalled network request would hang an AI
+// turn forever. Bound each call (a little above the server's own 75s ceiling so
+// the server's structured error wins the race when it can) and abort otherwise.
+const CLIENT_TIMEOUT_MS = 90_000;
+
 async function post<T>(path: string, body: any): Promise<T> {
-    const resp = await fetch(`${API_BASE}/api/ai${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
+    let resp: Response;
+    try {
+        resp = await fetch(`${API_BASE}/api/ai${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+        });
+    } catch (e: any) {
+        if (e?.name === 'AbortError') throw new Error('AI request timed out');
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
     if (!resp.ok) {
         let detail = '';
         try { detail = (await resp.json())?.error || ''; } catch { /* ignore */ }
