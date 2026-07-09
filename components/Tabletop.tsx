@@ -5175,7 +5175,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {/* --- UI: Top Bar --- */}
-            <div className="flex-none h-11 md:h-16 bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
+            <div className="flex-none min-h-11 md:min-h-16 safe-area-pt bg-gray-900/90 border-b border-gray-700 flex items-center justify-between px-2 md:px-6 z-50 backdrop-blur-md relative">
                 {/* Left Side: Player Info (Always Visible) */}
                 <div className="flex items-center gap-2 md:gap-6 overflow-hidden flex-1">
                     {/* Players List (Hidden on Mobile) */}
@@ -5481,7 +5481,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     onWheel={handleHandWheel}
                                     className={`relative pointer-events-auto ${isMobile && isLandscape
                                         ? 'h-full overflow-y-auto overflow-x-hidden touch-pan-y pr-4'
-                                        : 'w-full overflow-x-auto overflow-y-hidden touch-pan-x pb-4 md:pb-8'
+                                        : 'w-full overflow-x-auto overflow-y-hidden touch-pan-x pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:pb-8'
                                         }`}
                                     style={{
                                         scrollbarWidth: 'none',

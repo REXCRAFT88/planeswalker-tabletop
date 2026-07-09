@@ -282,7 +282,7 @@ export const MobileController: React.FC<MobileControllerProps> = ({ roomId, play
                 </div>
 
                 {/* Bottom Navigation */}
-                <div className="bg-gray-900 border-top border-gray-800 p-2 flex justify-around items-center safe-area-pb shadow-[0_-5px_10px_rgba(0,0,0,0.3)]">
+                <div className="bg-gray-900 border-t border-gray-800 p-2 flex justify-around items-center safe-area-pb shadow-[0_-5px_10px_rgba(0,0,0,0.3)]">
                     <button
                         onClick={() => setActiveTab('CARDS')}
                         className={`flex flex-col items-center gap-1 p-2 w-20 rounded-xl transition-colors ${activeTab === 'CARDS' ? 'text-blue-400 bg-blue-900/20' : 'text-gray-500 hover:text-gray-300'}`}
