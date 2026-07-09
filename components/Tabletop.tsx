@@ -569,20 +569,20 @@ const Playmat: React.FC<PlaymatProps> = ({
                         </div>
                     </div>
                 );
+                // Lay commanders + companion out horizontally, extending RIGHT from
+                // the command slot. Stacking them vertically covered the graveyard/
+                // exile zones directly below the command zone.
+                if (cmdrs.length === 0 && comps.length === 0) return null;
                 return (
-                    <>
-                        {cmdrs.length > 0 && (
-                            <div className="absolute flex flex-col gap-2" style={{ left: zones.command.x, top: zones.command.y }}>
-                                {cmdrs.map(c => slot(c, 'commander'))}
+                    <div className="absolute flex flex-row gap-2" style={{ left: zones.command.x, top: zones.command.y }}>
+                        {cmdrs.map(c => slot(c, 'commander'))}
+                        {comps.map(c => (
+                            <div key={c.id} className="relative">
+                                {slot(c, 'companion')}
+                                <div className="absolute -bottom-5 w-full text-center text-[9px] text-indigo-300 font-bold uppercase tracking-wide pointer-events-none">Companion</div>
                             </div>
-                        )}
-                        {comps.length > 0 && (
-                            <div className="absolute flex flex-col gap-2" style={{ left: zones.command.x, top: zones.command.y + (cmdrs.length * (CARD_HEIGHT + 8)) + (cmdrs.length ? 22 : 0) }}>
-                                <div className="text-[10px] text-indigo-300 font-bold uppercase text-center tracking-wide">Companion</div>
-                                {comps.map(c => slot(c, 'companion'))}
-                            </div>
-                        )}
-                    </>
+                        ))}
+                    </div>
                 );
             })()}
 
