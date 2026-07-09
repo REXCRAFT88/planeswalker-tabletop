@@ -2573,7 +2573,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     }, [hand, gamePhase, mulliganCount, isLocal, mySeatIndex, playersList]);
 
     // --- Game Flow Methods ---
-    const handleStartGameLogic = (options?: { mulligansAllowed: boolean, trackDamage?: boolean }) => {
+    const handleStartGameLogic = (options?: { mulligansAllowed: boolean, trackDamage?: boolean, firstPlayerId?: string }) => {
         const shouldUseMulligans = options?.mulligansAllowed ?? true;
         setMulligansAllowed(shouldUseMulligans);
         if (options?.trackDamage !== undefined) setTrackDamage(options.trackDamage);
@@ -2637,7 +2637,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (isLocal) {
             // In local mode, set turn order based on players list
             setTurnOrder(playersList.map(p => p.id));
-            setCurrentTurnPlayerId(playersList[0].id);
+            setCurrentTurnPlayerId(options?.firstPlayerId || playersList[0].id);
         }
 
         addLog("Game Started", "SYSTEM", "Host");
@@ -2654,7 +2654,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const orderedIds = playersList.map(p => p.id);
         const startingPlayer = playersList[Math.floor(Math.random() * playersList.length)];
         emitAction('START_GAME', { mulligansAllowed, trackDamage, firstPlayerId: startingPlayer.id, playerOrder: orderedIds });
-        handleStartGameLogic({ mulligansAllowed });
+        handleStartGameLogic({ mulligansAllowed, firstPlayerId: startingPlayer.id });
         setCurrentTurnPlayerId(startingPlayer.id);
 
         if (isLocal) {
@@ -4937,7 +4937,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         <>
                             {/* Larger Card Grid for visibility */}
                             <div className={`flex ${isMobile ? 'overflow-x-auto snap-x snap-mandatory w-full px-[10vw] pb-8 gap-4 items-center' : 'justify-center gap-6 flex-wrap max-w-[90vw]'} mb-12`}>
-                                {hand.filter(c => !c.isToken).map((card, idx) => (
+                                {isLocal && playersList[mySeatIndex]?.id.startsWith('ai-') ? (
+                                    <div className="text-gray-400 italic text-xl py-12">
+                                        AI is making mulligan decisions...
+                                    </div>
+                                ) : (
+                                    hand.filter(c => !c.isToken).map((card, idx) => (
                                     <div
                                         key={idx}
                                         className={`${isMobile ? 'w-[70vw] snap-center flex-shrink-0' : 'w-32 md:w-48'} aspect-[2.5/3.5] rounded-xl overflow-hidden shadow-2xl transform hover:-translate-y-4 transition-transform cursor-pointer group relative`}
@@ -4948,10 +4953,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             <span className="bg-black/80 px-2 py-1 rounded text-xs text-white">Click to Inspect</span>
                                         </div>
                                     </div>
-                                ))}
+                                    ))
+                                )}
                             </div>
 
-                            <div className="flex flex-col md:flex-row gap-6">
+                            {!isLocal || !playersList[mySeatIndex]?.id.startsWith('ai-') ? (
+                                <div className="flex flex-col md:flex-row gap-6">
                                 <button
                                     onClick={() => handleMulliganChoice(false)}
                                     className="flex items-center gap-2 px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-full shadow-lg"
@@ -4965,6 +4972,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <CheckCircle size={20} /> Keep Hand
                                 </button>
                             </div>
+                            ) : null}
                         </>
                     ) : (
                         <div className="flex flex-col items-center w-full max-w-6xl h-full">
