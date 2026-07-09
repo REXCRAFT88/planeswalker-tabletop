@@ -2,11 +2,18 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { LLMProvider, LLMRequest, LLMResult, NormMessage } from './types';
 import { emptyUsage } from './types';
 import type { AiToolCall } from '../../../services/aiTypes';
+import { getEnv, isConfigured } from '../runtimeConfig';
 
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || process.env.AI_MODEL || 'claude-opus-4-8';
 
+// Rebuild the client when the key changes (e.g. set via the settings page).
 let client: Anthropic | null = null;
-const getClient = () => (client ||= new Anthropic());
+let clientKey: string | undefined;
+const getClient = () => {
+    const key = getEnv('ANTHROPIC_API_KEY');
+    if (!client || clientKey !== key) { client = new Anthropic({ apiKey: key }); clientKey = key; }
+    return client;
+};
 
 export function toAnthropicMessages(msgs: NormMessage[]): any[] {
     return msgs.map(m => {
@@ -32,7 +39,7 @@ export function toAnthropicMessages(msgs: NormMessage[]): any[] {
 export const anthropicProvider: LLMProvider = {
     id: 'anthropic',
     label: 'Claude',
-    enabled: () => !!process.env.ANTHROPIC_API_KEY,
+    enabled: () => isConfigured('ANTHROPIC_API_KEY'),
     async generate(req: LLMRequest): Promise<LLMResult> {
         const body: any = {
             model: DEFAULT_MODEL,

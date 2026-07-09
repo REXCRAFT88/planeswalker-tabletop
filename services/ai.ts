@@ -13,6 +13,31 @@ export interface AiStatus {
     providers: { id: AiProviderId; label: string }[];
     defaultProvider: AiProviderId | null;
     realtimeVoice: boolean; // OpenAI Realtime voice backend available
+    configured?: { anthropic: boolean; openai: boolean; gemini: boolean };
+}
+
+export interface AiConfigUpdate {
+    anthropicKey?: string;
+    openaiKey?: string;
+    geminiKey?: string;
+    defaultProvider?: AiProviderId | '';
+    adminPin?: string;
+}
+
+// Push provider keys to the server (held in server memory only, never returned).
+export async function saveAiConfig(update: AiConfigUpdate): Promise<AiStatus> {
+    const { adminPin, ...body } = update;
+    const resp = await fetch(`${API_BASE}/api/ai/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(adminPin ? { 'x-admin-pin': adminPin } : {}) },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        let detail = '';
+        try { detail = (await resp.json())?.error || ''; } catch { /* ignore */ }
+        throw new Error(detail || `Failed to save AI settings (${resp.status})`);
+    }
+    return resp.json();
 }
 
 // fetch() has no default timeout, so a stalled network request would hang an AI

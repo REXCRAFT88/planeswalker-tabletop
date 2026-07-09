@@ -1,5 +1,6 @@
 import express from 'express';
 import { aiEnabled, callLLM, availableProviders, defaultProvider } from './client';
+import { getEnv, isConfigured, setConfig } from './runtimeConfig';
 import type { NormMessage } from './client';
 import { TURN_TOOLS, MULLIGAN_TOOL } from './tools';
 import { buildTurnSystemPrompt, buildMulliganSystemPrompt, formatStateView } from './prompts';
@@ -61,13 +62,49 @@ export function createAiRouter(): express.Router {
     router.use(express.json({ limit: MAX_BODY }));
 
     // Lets the client hide/disable AI features and pick a provider / voice backend.
+    // `configured` reports which providers have a key WITHOUT revealing the key —
+    // used by the settings page to show per-provider status.
     router.get('/status', (_req, res) => {
         const providers = availableProviders();
         res.json({
             enabled: aiEnabled(),
             providers,
             defaultProvider: defaultProvider(),
-            realtimeVoice: !!process.env.OPENAI_API_KEY, // OpenAI Realtime voice backend
+            realtimeVoice: isConfigured('OPENAI_API_KEY'), // OpenAI Realtime voice backend
+            configured: {
+                anthropic: isConfigured('ANTHROPIC_API_KEY'),
+                openai: isConfigured('OPENAI_API_KEY'),
+                gemini: isConfigured('GEMINI_API_KEY') || isConfigured('GOOGLE_API_KEY'),
+            },
+        });
+    });
+
+    // Set provider API keys / default at runtime, from the settings page. Keys are
+    // held in server memory only and never returned. Optionally gate with ADMIN_PIN
+    // for shared deployments (sent as the x-admin-pin header).
+    router.post('/config', express.json({ limit: 16 * 1024 }), (req, res) => {
+        const pin = process.env.ADMIN_PIN;
+        if (pin && req.header('x-admin-pin') !== pin) {
+            return res.status(403).json({ error: 'Admin PIN required to change AI settings.' });
+        }
+        const { anthropicKey, openaiKey, geminiKey, defaultProvider: dp } = req.body || {};
+        // undefined = leave as-is; '' = clear. Only apply keys that were provided.
+        const updates: Record<string, string | null | undefined> = {};
+        if (anthropicKey !== undefined) updates['ANTHROPIC_API_KEY'] = anthropicKey || null;
+        if (openaiKey !== undefined) updates['OPENAI_API_KEY'] = openaiKey || null;
+        if (geminiKey !== undefined) updates['GEMINI_API_KEY'] = geminiKey || null;
+        if (dp !== undefined) updates['AI_PROVIDER'] = dp || null;
+        setConfig(updates);
+        res.json({
+            enabled: aiEnabled(),
+            providers: availableProviders(),
+            defaultProvider: defaultProvider(),
+            realtimeVoice: isConfigured('OPENAI_API_KEY'),
+            configured: {
+                anthropic: isConfigured('ANTHROPIC_API_KEY'),
+                openai: isConfigured('OPENAI_API_KEY'),
+                gemini: isConfigured('GEMINI_API_KEY') || isConfigured('GOOGLE_API_KEY'),
+            },
         });
     });
 
@@ -171,8 +208,9 @@ export function createAiRouter(): express.Router {
     // token. Hidden state is not placed in the instructions — the Realtime model must
     // call consult_strategist (relayed to /consult) to learn anything about its hand.
     router.post('/realtime/token', async (req, res) => {
-        if (!process.env.OPENAI_API_KEY) {
-            return res.status(503).json({ error: 'OpenAI Realtime voice requires OPENAI_API_KEY on the server.' });
+        const openaiKey = getEnv('OPENAI_API_KEY');
+        if (!openaiKey) {
+            return res.status(503).json({ error: 'OpenAI Realtime voice requires an OpenAI API key on the server.' });
         }
         try {
             const { seatName, persona, view, dealLog } = req.body || {};
@@ -191,7 +229,7 @@ export function createAiRouter(): express.Router {
             };
             const r = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+                headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session }),
             });
             const data: any = await r.json().catch(() => ({}));

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings } from 'lucide-react';
+import { AiSettingsModal } from './AiSettingsModal';
 import { PLAYER_COLORS } from '../constants';
 import { CardData, ManaRule, ManaColor } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -41,6 +42,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [isJoining, setIsJoining] = useState(false);
     const [joinStatus, setJoinStatus] = useState('');
     const [showReconnectModal, setShowReconnectModal] = useState(false);
+    const [showAiSettings, setShowAiSettings] = useState(false);
     const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
     const hasAutoAttempted = useRef(false);
 
@@ -327,7 +329,16 @@ export const Lobby: React.FC<LobbyProps> = ({
                             <p className="text-gray-400">
                                 The ultimate browser-based commander interface.
                             </p>
+                            <button
+                                onClick={() => setShowAiSettings(true)}
+                                title="AI opponent settings"
+                                className="mt-3 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-gray-800/70 hover:bg-gray-700 border border-gray-700 rounded-full px-3 py-1.5 transition-colors"
+                            >
+                                <Settings size={14} /> AI Settings
+                            </button>
                         </div>
+
+                        {showAiSettings && <AiSettingsModal onClose={() => setShowAiSettings(false)} />}
 
                         <div className="w-full space-y-4 bg-gray-800/50 backdrop-blur-sm p-6 rounded-2xl border border-gray-700 shadow-xl relative z-10">
 

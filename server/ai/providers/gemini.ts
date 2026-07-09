@@ -2,9 +2,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { LLMProvider, LLMRequest, LLMResult, NormMessage } from './types';
 import { stripUnsupportedSchema } from './types';
 import type { AiToolCall } from '../../../services/aiTypes';
+import { getEnv } from '../runtimeConfig';
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-const getKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+const getKey = () => getEnv('GEMINI_API_KEY') || getEnv('GOOGLE_API_KEY') || '';
 
 // Gemini function calls carry no ids. We encode the function name into the synthetic
 // tool-call id ("name##index") so we can supply it back on the functionResponse.

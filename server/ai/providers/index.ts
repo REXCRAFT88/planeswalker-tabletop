@@ -2,6 +2,7 @@ import type { LLMProvider, LLMRequest, LLMResult, AiProviderId } from './types';
 import { anthropicProvider } from './anthropic';
 import { openaiProvider } from './openai';
 import { geminiProvider } from './gemini';
+import { getEnv } from '../runtimeConfig';
 
 const PROVIDERS: Record<AiProviderId, LLMProvider> = {
     anthropic: anthropicProvider,
@@ -14,7 +15,7 @@ const ORDER: AiProviderId[] = ['anthropic', 'openai', 'gemini'];
 // The default provider: honor AI_PROVIDER if its key is set, else the first
 // provider that has a key.
 export function defaultProvider(): AiProviderId | null {
-    const pref = process.env.AI_PROVIDER as AiProviderId | undefined;
+    const pref = getEnv('AI_PROVIDER') as AiProviderId | undefined;
     if (pref && PROVIDERS[pref]?.enabled()) return pref;
     for (const id of ORDER) if (PROVIDERS[id].enabled()) return id;
     return null;

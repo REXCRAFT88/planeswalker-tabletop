@@ -2,11 +2,18 @@ import OpenAI from 'openai';
 import type { LLMProvider, LLMRequest, LLMResult, NormMessage } from './types';
 import { safeParseJson } from './types';
 import type { AiToolCall } from '../../../services/aiTypes';
+import { getEnv, isConfigured } from '../runtimeConfig';
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 
+// Rebuild the client when the key changes (e.g. set via the settings page).
 let client: OpenAI | null = null;
-const getClient = () => (client ||= new OpenAI());
+let clientKey: string | undefined;
+const getClient = () => {
+    const key = getEnv('OPENAI_API_KEY');
+    if (!client || clientKey !== key) { client = new OpenAI({ apiKey: key }); clientKey = key; }
+    return client;
+};
 
 // Reasoning models (o-series, gpt-5) take reasoning_effort + max_completion_tokens
 // and reject temperature; classic chat models take temperature + max_tokens.
@@ -38,7 +45,7 @@ export function toOpenAIMessages(system: string, msgs: NormMessage[]): any[] {
 export const openaiProvider: LLMProvider = {
     id: 'openai',
     label: 'ChatGPT',
-    enabled: () => !!process.env.OPENAI_API_KEY,
+    enabled: () => isConfigured('OPENAI_API_KEY'),
     async generate(req: LLMRequest): Promise<LLMResult> {
         const model = DEFAULT_MODEL;
         const body: any = {
