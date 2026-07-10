@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings, Palette, Image as ImageIcon } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { AiSettingsModal } from './AiSettingsModal';
-import { AppearanceSettingsModal } from './AppearanceSettingsModal';
+import { LobbySettingsModal } from './LobbySettingsModal';
 import { ArtPickerModal } from './ArtPickerModal';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
@@ -43,7 +43,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [joinStatus, setJoinStatus] = useState('');
     const [showReconnectModal, setShowReconnectModal] = useState(false);
     const [showAiSettings, setShowAiSettings] = useState(false);
-    const [showAppearanceSettings, setShowAppearanceSettings] = useState(false);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
     const hasAutoAttempted = useRef(false);
 
@@ -352,19 +352,19 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 title="AI opponent settings"
                                 className="mt-3 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-gray-800/70 hover:bg-gray-700 border border-gray-700 rounded-full px-3 py-1.5 transition-colors"
                             >
-                                <Settings size={14} /> AI Settings
+                                <Zap size={14} /> AI Settings
                             </button>
                             <button
-                                onClick={() => setShowAppearanceSettings(true)}
-                                title="Table appearance settings"
+                                onClick={() => setShowSettingsModal(true)}
+                                title="Global Settings"
                                 className="mt-3 ml-2 inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-gray-800/70 hover:bg-gray-700 border border-gray-700 rounded-full px-3 py-1.5 transition-colors"
                             >
-                                <Palette size={14} /> Appearance
+                                <Settings size={14} /> Settings
                             </button>
                         </div>
 
                         {showAiSettings && <AiSettingsModal onClose={() => setShowAiSettings(false)} />}
-                        {showAppearanceSettings && <AppearanceSettingsModal onClose={() => setShowAppearanceSettings(false)} />}
+                        {showSettingsModal && <LobbySettingsModal onClose={() => setShowSettingsModal(false)} />}
 
                         <div className="w-full space-y-4 bg-gray-800/50 backdrop-blur-sm p-6 rounded-2xl border border-gray-700 shadow-xl relative z-10">
 

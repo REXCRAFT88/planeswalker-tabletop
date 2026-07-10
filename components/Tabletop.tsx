@@ -59,7 +59,7 @@ export const KEY_ACTIONS: KeyActionDef[] = [
     { id: 'toggleOpponentView', label: 'Toggle opponent view', defaultKey: 'v', group: 'Panels' },
     { id: 'toggleShortcuts', label: 'Open controls / help', defaultKey: '?', group: 'Panels' },
 ];
-const KEYBINDINGS_STORAGE = 'planeswalker_keybindings_v1';
+export const KEYBINDINGS_STORAGE = 'planeswalker_keybindings_v1';
 
 // --- Turn sub-phases ---
 // The active player steps through these with Enter (or by tapping the phase
@@ -143,7 +143,7 @@ export const contrastText = (hex: string): string => {
     return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? '#000000' : '#ffffff';
 };
 
-const defaultKeyBindings = (): Record<string, string> => {
+export const defaultKeyBindings = (): Record<string, string> => {
     const m: Record<string, string> = {};
     KEY_ACTIONS.forEach(a => { m[a.id] = a.defaultKey; });
     return m;
@@ -159,7 +159,7 @@ const loadKeyBindings = (): Record<string, string> => {
 };
 
 // Human-readable label for a bound key ('arrowup' -> '↑', 'enter' -> 'Enter').
-const keyLabel = (key: string): string => {
+export const keyLabel = (key: string): string => {
     if (!key) return '—';
     const map: Record<string, string> = {
         arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→',
@@ -1083,6 +1083,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // the current pointer position (for the transient assignment line).
     const [combatDragFrom, setCombatDragFrom] = useState<string | null>(null);
     const [combatDragPos, setCombatDragPos] = useState<{ x: number; y: number } | null>(null);
+    const [combatTrayGeom, setCombatTrayGeom] = useState(() => lsGetJSON('planeswalker_combat_tray', { x: -1, y: -1, w: -1, h: -1, scale: 1 }));
+    const combatTrayDrag = useRef<{ startX: number, startY: number, initialGeom: any, mode: 'drag' | 'resize' } | null>(null);
+
+    useEffect(() => { localStorage.setItem('planeswalker_combat_tray', JSON.stringify(combatTrayGeom)); }, [combatTrayGeom]);
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -2639,6 +2643,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 setTurnStartTime(data.turnStartTime);
                 if (data.commanderDamage) setCommanderDamage(data.commanderDamage);
                 if (data.turnOrder) {
+                    turnOrderRef.current = data.turnOrder;
                     setTurnOrder(data.turnOrder);
                     setPlayersList(prev => sortPlayers(prev, data.turnOrder));
                 }
@@ -2801,6 +2806,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (typeof meta.turnNumber === 'number') setTurn(meta.turnNumber);
             if (meta.currentTurnPlayerId) setCurrentTurnPlayerId(meta.currentTurnPlayerId);
             if (meta.turnOrder) {
+                turnOrderRef.current = meta.turnOrder;
                 setTurnOrder(meta.turnOrder);
                 setPlayersList(prev => sortPlayers(prev, meta.turnOrder));
             }
@@ -4131,7 +4137,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Step through the combat sub-phases while in COMBAT.
         const c = combatRef.current;
         if (turnPhaseRef.current === 'COMBAT' && c?.active) {
-            if (c.step === 'attackers') { updateCombat({ ...c, step: 'blockers' }); return; }
+            if (c.step === 'attackers') { 
+                if (c.attackers.length === 0) {
+                    updateCombat({ ...c, active: false });
+                    setTurnPhase('MAIN2'); turnPhaseRef.current = 'MAIN2';
+                    if (!isLocal) emitAction('PHASE_CHANGE', { phase: 'MAIN2' });
+                    return;
+                }
+                updateCombat({ ...c, step: 'blockers' }); return; 
+            }
             if (c.step === 'blockers') { updateCombat({ ...c, step: 'resolve' }); return; }
             if (c.step === 'resolve') {
                 updateCombat({ ...c, active: false });
@@ -6094,7 +6108,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 <span className="text-white font-bold text-center flex items-center gap-1">Roll Dice <ChevronDown size={14} /></span>
                             </button>
                             {showDiceMenu && (
-                                <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
+                                <div className="absolute bottom-full left-0 right-0 mb-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
                                     {[2, 4, 6, 10, 12, 20, 100].map(sides => (
                                         <button 
                                             key={sides}
@@ -6690,9 +6704,44 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             {/* Combat: compact assignment panel */}
             {combat?.active && gamePhase === 'PLAYING' && (
-                <div data-attacker-seat={combat.attackerSeatId} className="fixed bottom-[260px] left-1/2 -translate-x-1/2 z-[9000] w-[min(94vw,900px)] bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl p-4 backdrop-blur animate-in fade-in slide-in-from-bottom-4">
-                    <div className="flex items-center justify-between mb-2 gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
+                <div data-attacker-seat={combat.attackerSeatId} 
+                    className={`fixed z-[9000] bg-gray-900/95 border border-gray-700 shadow-2xl backdrop-blur animate-in fade-in flex flex-col p-4 ${combatTrayGeom.x === -1 ? 'bottom-[260px] left-1/2 -translate-x-1/2 w-[min(94vw,900px)] rounded-xl slide-in-from-bottom-4' : 'rounded-lg'}`}
+                    style={combatTrayGeom.x !== -1 ? { 
+                        left: combatTrayGeom.x, 
+                        top: combatTrayGeom.y, 
+                        width: combatTrayGeom.w > 0 ? combatTrayGeom.w : Math.min(window.innerWidth * 0.94, 900),
+                        height: combatTrayGeom.h > 0 ? combatTrayGeom.h : 'auto',
+                        transform: `scale(${combatTrayGeom.scale})`,
+                        transformOrigin: 'top left',
+                        resize: 'both',
+                        overflow: 'hidden'
+                    } : {}}
+                >
+                    <div className="flex items-center justify-between mb-2 gap-2 cursor-grab active:cursor-grabbing -mt-2 -mx-2 p-2 rounded hover:bg-gray-800/50"
+                        onPointerDown={(e) => {
+                            if (e.target instanceof HTMLButtonElement) return;
+                            const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+                            combatTrayDrag.current = { startX: e.clientX, startY: e.clientY, initialGeom: { x: rect.left, y: rect.top, w: rect.width, h: rect.height, scale: combatTrayGeom.scale }, mode: 'drag' };
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                        }}
+                        onPointerMove={(e) => {
+                            if (combatTrayDrag.current?.mode === 'drag') {
+                                const { startX, startY, initialGeom } = combatTrayDrag.current;
+                                setCombatTrayGeom(prev => ({ ...prev, x: initialGeom.x + (e.clientX - startX), y: initialGeom.y + (e.clientY - startY), w: initialGeom.w, h: initialGeom.h }));
+                            }
+                        }}
+                        onPointerUp={(e) => {
+                            combatTrayDrag.current = null;
+                            e.currentTarget.releasePointerCapture(e.pointerId);
+                        }}
+                        onWheel={(e) => {
+                            if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                                e.preventDefault();
+                                setCombatTrayGeom(prev => ({ ...prev, scale: Math.min(2, Math.max(0.5, prev.scale - e.deltaY * 0.001)) }));
+                            }
+                        }}
+                    >
+                        <div className="flex items-center gap-2 min-w-0 pointer-events-none">
                             <Swords size={16} className="text-red-400 shrink-0" />
                             <span className="font-bold text-white text-sm truncate">Combat — {COMBAT_STEP_LABEL[combat.step]}</span>
                             <span className="text-xs text-gray-400 hidden sm:inline truncate">({playersList.find(p => p.id === combat.attackerSeatId)?.name || 'Player'}'s attack)</span>
@@ -6720,7 +6769,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             const canUndoAtk = combat.step === 'attackers' && (isLocal || atk.controllerId === socket.id);
                                             return (
                                                 <div key={a.objectId} className="flex flex-col items-center gap-1">
-                                                    <div data-combat-obj={a.objectId} className={`relative group ${combat.step === 'blockers' ? 'ring-2 ring-amber-300/60 rounded' : ''}`} onDoubleClick={() => setInspectCard(atk.cardData)} title={`${atk.cardData.name} — dbl-click to inspect${combat.step === 'blockers' ? ' · drag a blocker here' : ''}`}>
+                                                    <div data-combat-obj={a.objectId} className={`relative group ${combat.step === 'blockers' ? 'ring-2 ring-amber-300/60 rounded' : ''}`} onContextMenu={(e) => { e.preventDefault(); setInspectCard(atk.cardData); }} title={`${atk.cardData.name} - right-click to inspect${combat.step === 'blockers' ? ' \n drag a blocker here' : ''}`}>
                                                         <img src={atk.cardData.imageUrl} className="w-[100px] h-[140px] object-cover rounded border-4 border-red-500" />
                                                         {parsePower(atk.cardData.power) > 0 && <span className="absolute bottom-0 right-0 bg-black/80 text-white text-xs font-bold px-2 py-0.5 rounded-tl">{atk.cardData.power}</span>}
                                                         {canUndoAtk && <button onClick={() => removeAttacker(a.objectId)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={14} /></button>}
@@ -6732,7 +6781,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                                 if (!bl) return null;
                                                                 const canUndoBlk = combat.step === 'blockers' && (isLocal || bl.controllerId === socket.id);
                                                                 return (
-                                                                    <div key={b.blockerObjectId} className="relative group" onDoubleClick={() => setInspectCard(bl.cardData)} title={`${bl.cardData.name} — dbl-click to inspect`}>
+                                                                    <div key={b.blockerObjectId} className="relative group" onContextMenu={(e) => { e.preventDefault(); setInspectCard(bl.cardData); }} title={`${bl.cardData.name} - right-click to inspect`}>
                                                                         <img src={bl.cardData.imageUrl} className="w-[80px] h-[112px] object-cover rounded border-4 border-sky-400" />
                                                                         {canUndoBlk && <button onClick={() => removeBlock(b.blockerObjectId)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={12} /></button>}
                                                                     </div>
