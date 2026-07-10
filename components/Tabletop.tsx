@@ -752,10 +752,10 @@ const Playmat: React.FC<PlaymatProps> = ({
                     className="absolute flex items-center justify-center cursor-help group"
                     style={{
                         left: '50%',
-                        top: -CARD_HEIGHT - 20,
+                        bottom: -90,
                         transform: 'translateX(-50%)',
-                        width: counts.hand * 25 + CARD_WIDTH,
-                        height: CARD_HEIGHT,
+                        width: Math.min(counts.hand * 15 + CARD_WIDTH * 0.6, 200),
+                        height: CARD_HEIGHT * 0.6,
                         zIndex: 50
                     }}
                     onClick={(e) => {
@@ -774,9 +774,9 @@ const Playmat: React.FC<PlaymatProps> = ({
                                 key={`hand-card-${i}`}
                                 className="absolute bg-blue-900 border border-white/50 rounded shadow-lg transition-transform group-hover:-translate-y-2 pointer-events-none"
                                 style={{
-                                    width: CARD_WIDTH,
-                                    height: CARD_HEIGHT,
-                                    left: i * 25,
+                                    width: CARD_WIDTH * 0.6,
+                                    height: CARD_HEIGHT * 0.6,
+                                    left: i * 15,
                                     transform: `rotate(${rot}deg)`,
                                     transformOrigin: 'bottom center'
                                 }}
@@ -6602,7 +6602,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
             {/* Combat: compact assignment panel */}
             {combat?.active && gamePhase === 'PLAYING' && (
-                <div data-attacker-seat={combat.attackerSeatId} className="fixed top-16 left-1/2 -translate-x-1/2 z-[9000] w-[min(94vw,760px)] bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl p-3 backdrop-blur animate-in fade-in slide-in-from-top-2">
+                <div data-attacker-seat={combat.attackerSeatId} className="fixed bottom-[260px] left-1/2 -translate-x-1/2 z-[9000] w-[min(94vw,900px)] bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl p-4 backdrop-blur animate-in fade-in slide-in-from-bottom-4">
                     <div className="flex items-center justify-between mb-2 gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                             <Swords size={16} className="text-red-400 shrink-0" />
@@ -6633,9 +6633,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             return (
                                                 <div key={a.objectId} className="flex flex-col items-center gap-1">
                                                     <div data-combat-obj={a.objectId} className={`relative group ${combat.step === 'blockers' ? 'ring-2 ring-amber-300/60 rounded' : ''}`} onDoubleClick={() => setInspectCard(atk.cardData)} title={`${atk.cardData.name} — dbl-click to inspect${combat.step === 'blockers' ? ' · drag a blocker here' : ''}`}>
-                                                        <img src={atk.cardData.imageUrl} className="w-11 h-[62px] object-cover rounded border-2 border-red-500" />
-                                                        {parsePower(atk.cardData.power) > 0 && <span className="absolute bottom-0 right-0 bg-black/80 text-white text-[9px] font-bold px-1 rounded-tl">{atk.cardData.power}</span>}
-                                                        {canUndoAtk && <button onClick={() => removeAttacker(a.objectId)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={10} /></button>}
+                                                        <img src={atk.cardData.imageUrl} className="w-[100px] h-[140px] object-cover rounded border-4 border-red-500" />
+                                                        {parsePower(atk.cardData.power) > 0 && <span className="absolute bottom-0 right-0 bg-black/80 text-white text-xs font-bold px-2 py-0.5 rounded-tl">{atk.cardData.power}</span>}
+                                                        {canUndoAtk && <button onClick={() => removeAttacker(a.objectId)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={14} /></button>}
                                                     </div>
                                                     {blks.length > 0 ? (
                                                         <div className="flex gap-1">
@@ -6645,8 +6645,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                                 const canUndoBlk = combat.step === 'blockers' && (isLocal || bl.controllerId === socket.id);
                                                                 return (
                                                                     <div key={b.blockerObjectId} className="relative group" onDoubleClick={() => setInspectCard(bl.cardData)} title={`${bl.cardData.name} — dbl-click to inspect`}>
-                                                                        <img src={bl.cardData.imageUrl} className="w-8 h-11 object-cover rounded border-2 border-sky-400" />
-                                                                        {canUndoBlk && <button onClick={() => removeBlock(b.blockerObjectId)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={9} /></button>}
+                                                                        <img src={bl.cardData.imageUrl} className="w-[80px] h-[112px] object-cover rounded border-4 border-sky-400" />
+                                                                        {canUndoBlk && <button onClick={() => removeBlock(b.blockerObjectId)} className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={12} /></button>}
                                                                     </div>
                                                                 );
                                                             })}
