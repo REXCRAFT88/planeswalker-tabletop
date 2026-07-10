@@ -66,6 +66,12 @@ const COMBAT_STEP_LABEL: Record<CombatStep, string> = {
 };
 const parsePower = (p?: string): number => { const n = parseInt(p || '0', 10); return isNaN(n) ? 0 : n; };
 
+// localStorage read helpers (module scope so component state initializers can use
+// them regardless of where they appear in the component body — avoids a
+// use-before-declaration TDZ crash).
+const lsGet = (k: string, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const lsGetJSON = <T,>(k: string, d: T): T => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
+
 // --- Table appearance (custom mat / sleeve) ---
 // Shared definitions live in ../appearance.tsx to avoid circular imports.
 export type { ImgTransform } from '../appearance';
@@ -1205,8 +1211,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     // --- Table appearance (custom playmat / sleeve) ---
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
-    const lsGet = (k: string, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
-    const lsGetJSON = <T,>(k: string, d: T): T => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
     const [customMatUrl, setCustomMatUrl] = useState<string>(() => lsGet('planeswalker_mat_url'));
     const [customSleeveUrl, setCustomSleeveUrl] = useState<string>(() => lsGet('planeswalker_sleeve_url'));
     const [matTransform, setMatTransform] = useState<ImgTransform>(() => lsGetJSON('planeswalker_mat_tf', DEFAULT_TRANSFORM));
