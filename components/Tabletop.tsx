@@ -752,7 +752,7 @@ const Playmat: React.FC<PlaymatProps> = ({
                     className="absolute flex items-center justify-center cursor-help group"
                     style={{
                         left: '50%',
-                        bottom: -40,
+                        bottom: -90,
                         transform: 'translateX(-50%)',
                         width: Math.min(counts.hand * 15 + CARD_WIDTH * 0.6, 200),
                         height: CARD_HEIGHT * 0.6,
