@@ -169,6 +169,8 @@ const transformScryfallData = (data: any): CardData => {
         imageUrl = data.card_faces[0].image_uris.normal;
     }
 
+    const typeLine = data.type_line || (data.card_faces && data.card_faces[0] ? data.card_faces[0].type_line : "") || "";
+
     return {
         id: crypto.randomUUID(),
         scryfallId: data.id,
@@ -177,12 +179,12 @@ const transformScryfallData = (data: any): CardData => {
         backImageUrl: data.card_faces && data.card_faces[1] && data.card_faces[1].image_uris
             ? data.card_faces[1].image_uris.normal
             : undefined,
-        typeLine: data.type_line,
+        typeLine: typeLine,
         oracleText: data.oracle_text || "",
         manaCost: data.mana_cost,
         cmc: data.cmc,
-        isLand: data.type_line.toLowerCase().includes('land'),
-        isManaSource: data.type_line.toLowerCase().includes('land') ||
+        isLand: typeLine.toLowerCase().includes('land'),
+        isManaSource: typeLine.toLowerCase().includes('land') ||
             !!(data.produced_mana && data.produced_mana.length > 0) ||
             !!(data.oracle_text && (
                 data.oracle_text.includes('{T}: Add') ||
