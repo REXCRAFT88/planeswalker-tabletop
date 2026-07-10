@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Palette } from 'lucide-react';
-import { AppearancePicker, DEFAULT_TRANSFORM, ImgTransform } from './Tabletop';
+import { AppearancePicker, DEFAULT_TRANSFORM, ImgTransform } from '../appearance';
 
 export const AppearanceSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const [customMatUrl, setCustomMatUrl] = useState(() => localStorage.getItem('planeswalker_mat_url') || '');
