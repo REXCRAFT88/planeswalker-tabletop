@@ -31,35 +31,11 @@ import {
 const isCmdZoneCard = (c: CardData) => !!c.isCommander || !!c.isCompanion;
 
 // --- Rebindable keyboard actions ---
-// A single registry drives both the key handler and the Controls editor. Each
-// action has a stable id, a label, and a default single-key binding. User
-// overrides live in localStorage; the handlers are dispatched by id, so a rebind
-// is just a change to the id->key map. Modifier/system keys (Space to pan, Tab,
-// Ctrl+Z undo, number keys, arrow-left/right opponent nav) are NOT rebindable and
-// are handled separately.
-export interface KeyActionDef { id: string; label: string; defaultKey: string; group: string; }
-export const KEY_ACTIONS: KeyActionDef[] = [
-    { id: 'tapHovered', label: 'Tap / untap hovered card', defaultKey: 't', group: 'Board' },
-    { id: 'untapAll', label: 'Untap all', defaultKey: 'u', group: 'Board' },
-    { id: 'draw', label: 'Draw a card', defaultKey: 'd', group: 'Board' },
-    { id: 'shuffle', label: 'Shuffle library', defaultKey: 's', group: 'Board' },
-    { id: 'playCommander', label: 'Play / return commander', defaultKey: 'c', group: 'Board' },
-    { id: 'rollDice', label: 'Roll a d6', defaultKey: 'r', group: 'Board' },
-    { id: 'spawnCounter', label: 'Create a counter', defaultKey: 'f', group: 'Board' },
-    { id: 'nextTurn', label: 'Pass turn / advance phase', defaultKey: 'enter', group: 'Turn' },
-    { id: 'lifeUp', label: 'Life +1', defaultKey: 'arrowup', group: 'Turn' },
-    { id: 'lifeDown', label: 'Life -1', defaultKey: 'arrowdown', group: 'Turn' },
-    { id: 'searchLibrary', label: 'Search library', defaultKey: 'x', group: 'Zones' },
-    { id: 'searchGraveyard', label: 'View graveyard', defaultKey: 'g', group: 'Zones' },
-    { id: 'searchExile', label: 'View exile', defaultKey: 'e', group: 'Zones' },
-    { id: 'searchTokens', label: 'Token search', defaultKey: 'k', group: 'Zones' },
-    { id: 'toggleLog', label: 'Toggle log', defaultKey: 'l', group: 'Panels' },
-    { id: 'toggleStats', label: 'Toggle stats', defaultKey: 'q', group: 'Panels' },
-    { id: 'toggleCmdrDamage', label: 'Toggle commander damage', defaultKey: 'w', group: 'Panels' },
-    { id: 'toggleOpponentView', label: 'Toggle opponent view', defaultKey: 'v', group: 'Panels' },
-    { id: 'toggleShortcuts', label: 'Open controls / help', defaultKey: '?', group: 'Panels' },
-];
-export const KEYBINDINGS_STORAGE = 'planeswalker_keybindings_v1';
+// Shared definitions live in ../keybindings.ts so LobbySettingsModal can import
+// them without creating a circular dependency back to this file.
+export { KEY_ACTIONS, KEYBINDINGS_STORAGE, defaultKeyBindings, keyLabel, loadKeyBindings } from '../keybindings';
+export type { KeyActionDef } from '../keybindings';
+import { KEY_ACTIONS, KEYBINDINGS_STORAGE, defaultKeyBindings, keyLabel, loadKeyBindings } from '../keybindings';
 
 // --- Turn sub-phases ---
 // The active player steps through these with Enter (or by tapping the phase
@@ -141,31 +117,6 @@ export const contrastText = (hex: string): string => {
     if (h.length < 6) return '#ffffff';
     const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
     return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? '#000000' : '#ffffff';
-};
-
-export const defaultKeyBindings = (): Record<string, string> => {
-    const m: Record<string, string> = {};
-    KEY_ACTIONS.forEach(a => { m[a.id] = a.defaultKey; });
-    return m;
-};
-
-const loadKeyBindings = (): Record<string, string> => {
-    const defaults = defaultKeyBindings();
-    try {
-        const stored = JSON.parse(localStorage.getItem(KEYBINDINGS_STORAGE) || '{}');
-        // Merge over defaults so newly-added actions always get a binding.
-        return { ...defaults, ...stored };
-    } catch { return defaults; }
-};
-
-// Human-readable label for a bound key ('arrowup' -> '↑', 'enter' -> 'Enter').
-export const keyLabel = (key: string): string => {
-    if (!key) return '—';
-    const map: Record<string, string> = {
-        arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→',
-        enter: 'Enter', ' ': 'Space', escape: 'Esc',
-    };
-    return map[key] || key.toUpperCase();
 };
 
 interface TabletopProps {

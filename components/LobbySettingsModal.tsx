@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Keyboard, Volume2, Palette, ChevronRight, Archive, Trash2 } from "lucide-react";
-import { KEY_ACTIONS, defaultKeyBindings, KEYBINDINGS_STORAGE, keyLabel } from "./Tabletop";
+import { KEY_ACTIONS, defaultKeyBindings, KEYBINDINGS_STORAGE, keyLabel } from "../keybindings";
 import { AppearanceSettingsModal } from "./AppearanceSettingsModal";
 
 export const LobbySettingsModal = ({ onClose }: { onClose: () => void }) => {
