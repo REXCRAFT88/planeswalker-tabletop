@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings, Palette } from 'lucide-react';
+import { Shield, Play, Plus, Edit3, Layers, Search, X, Loader, Users, BookOpen, Save, Trash2, Check, Crown, Maximize, Download, Upload, Zap, Settings, Palette, Image as ImageIcon } from 'lucide-react';
 import { PLAYER_COLORS } from '../constants';
 import { AiSettingsModal } from './AiSettingsModal';
 import { AppearanceSettingsModal } from './AppearanceSettingsModal';
+import { ArtPickerModal } from './ArtPickerModal';
 import { CardData } from '../types';
 import { searchCards, parseDeckList, fetchBatch } from '../services/scryfall';
 
@@ -54,6 +55,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     const [isImportingTokens, setIsImportingTokens] = useState(false);
     const [tokenImportError, setTokenImportError] = useState<string | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+    const [artPickerCard, setArtPickerCard] = useState<CardData | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Auto-join if session exists
@@ -234,12 +236,31 @@ export const Lobby: React.FC<LobbyProps> = ({
         setEditingDeck({ ...editingDeck, deck: newCards });
     };
 
-    const toggleCompanionInEdit = (cardId: string) => {
+    const makeCompanionInEdit = (e: React.MouseEvent, cardId: string) => {
+        e.stopPropagation();
         if (!editingDeck) return;
         const newCards = editingDeck.deck.map(c =>
-            c.id === cardId ? { ...c, isCompanion: !c.isCompanion, isCommander: false } : { ...c, isCompanion: false }
+            c.id === cardId ? { ...c, isCompanion: true, isCommander: false } : { ...c, isCompanion: false }
         );
         setEditingDeck({ ...editingDeck, deck: newCards });
+    };
+
+    const removeCompanionInEdit = (e: React.MouseEvent, cardId: string) => {
+        e.stopPropagation();
+        if (!editingDeck) return;
+        const newCards = editingDeck.deck.map(c =>
+            c.id === cardId ? { ...c, isCompanion: false, isCommander: false } : c
+        );
+        setEditingDeck({ ...editingDeck, deck: newCards });
+    };
+
+    const handleSelectArtInEdit = (newArt: CardData) => {
+        if (!editingDeck || !artPickerCard) return;
+        setEditingDeck({
+            ...editingDeck,
+            deck: editingDeck.deck.map(c => c.id === artPickerCard.id ? { ...c, imageUrl: newArt.imageUrl, scryfallId: newArt.scryfallId } : c)
+        });
+        setArtPickerCard(null);
     };
 
     const handleEditDeck = (deck: SavedDeck) => {
@@ -541,7 +562,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                         </div>
                                         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
                                             <div className="flex-1 overflow-y-auto p-4 border-r border-gray-700 min-h-0">
-                                                <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Cards (Click to set Commander, Shield for Companion)</h4>
+                                                <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Cards (Click to set Commander)</h4>
                                                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                                                     {editingDeck.deck.map(card => (
                                                         <div
@@ -552,16 +573,33 @@ export const Lobby: React.FC<LobbyProps> = ({
                                                             className={`relative aspect-[2.5/3.5] rounded cursor-pointer border-2 ${card.isCommander ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : card.isCompanion ? 'border-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]' : 'border-transparent hover:border-gray-500'}`}
                                                         >
                                                             <img src={card.imageUrl} className="w-full h-full object-cover rounded-sm" />
-                                                            {card.isCommander && <div className="absolute top-1 right-1 bg-amber-500 text-black p-0.5 rounded-full"><Crown size={10} /></div>}
-                                                            {card.isCompanion && <div className="absolute top-1 right-1 bg-indigo-500 text-white p-0.5 rounded-full"><Shield size={10} /></div>}
-                                                            
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); toggleCompanionInEdit(card.id); }}
-                                                                title={card.isCompanion ? 'Remove companion' : 'Set as companion'}
-                                                                className={`absolute bottom-1 right-1 p-1 rounded-full shadow-lg border transition-colors ${card.isCompanion ? 'bg-indigo-500 text-white border-white/30' : 'bg-black/60 text-indigo-300 border-white/10 hover:bg-indigo-500/70 hover:text-white'}`}
-                                                            >
-                                                                <Shield size={10} />
-                                                            </button>
+                                                            {card.isCommander && (
+                                                                <div 
+                                                                    className="absolute top-1 right-1 bg-amber-500 text-black p-0.5 rounded-full cursor-pointer hover:scale-110 hover:bg-indigo-400 transition-all"
+                                                                    onClick={(e) => makeCompanionInEdit(e, card.id)}
+                                                                    title="Click to make Companion"
+                                                                >
+                                                                    <Crown size={12} />
+                                                                </div>
+                                                            )}
+                                                            {card.isCompanion && (
+                                                                <div 
+                                                                    className="absolute top-1 right-1 bg-indigo-500 text-white p-0.5 rounded-full cursor-pointer hover:scale-110 hover:bg-indigo-400 transition-all"
+                                                                    onClick={(e) => removeCompanionInEdit(e, card.id)}
+                                                                    title="Click to remove Companion"
+                                                                >
+                                                                    <Shield size={12} />
+                                                                </div>
+                                                            )}
+                                                            {hoveredCardId === card.id && (
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); setArtPickerCard(card); }}
+                                                                    title="Change Art"
+                                                                    className="absolute top-1 left-1 p-1 rounded-full bg-black/70 text-white hover:bg-blue-600 transition-colors shadow-lg"
+                                                                >
+                                                                    <ImageIcon size={12} />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -596,6 +634,9 @@ export const Lobby: React.FC<LobbyProps> = ({
             </div>
 
 
+            {artPickerCard && (
+                <ArtPickerModal card={artPickerCard} onClose={() => setArtPickerCard(null)} onSelectArt={handleSelectArtInEdit} />
+            )}
         </>
     );
 };

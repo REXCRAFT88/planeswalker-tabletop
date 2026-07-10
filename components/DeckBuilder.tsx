@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { parseDeckList, fetchBatch, searchCards, fetchCardsByIds, splitSideboard } from '../services/scryfall';
 import { CardData } from '../types';
-import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield } from 'lucide-react';
+import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield, Image as ImageIcon } from 'lucide-react';
+import { ArtPickerModal } from './ArtPickerModal';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
@@ -42,6 +43,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
     const [stagedSideboard, setStagedSideboard] = useState<CardData[]>(initialSideboard || []);
     const [autoTokenMsg, setAutoTokenMsg] = useState<string | null>(null);
+    const [artPickerCard, setArtPickerCard] = useState<CardData | null>(null);
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -166,25 +168,42 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
     const setCommander = (id: string) => {
         if (!stagedDeck) return;
+        const target = stagedDeck.find(c => c.id === id);
+        if (!target) return;
+        
         const updated = stagedDeck.map(c => ({
             ...c,
-            // Toggle commander; a card can't be both commander and companion.
-            isCommander: c.id === id ? !c.isCommander : c.isCommander,
+            isCommander: c.id === id ? !c.isCommander : false,
             isCompanion: c.id === id ? false : c.isCompanion,
         }));
         setStagedDeck(updated);
     };
 
-    // Companion: sits outside the deck in its own zone. Mutually exclusive with
-    // commander. Only one companion per deck.
-    const setCompanion = (id: string) => {
+    const makeCompanion = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
         if (!stagedDeck) return;
         const updated = stagedDeck.map(c => ({
             ...c,
-            isCompanion: c.id === id ? !c.isCompanion : false,
+            isCompanion: c.id === id ? true : false,
             isCommander: c.id === id ? false : c.isCommander,
         }));
         setStagedDeck(updated);
+    };
+
+    const removeCompanion = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        if (!stagedDeck) return;
+        const updated = stagedDeck.map(c => ({
+            ...c,
+            isCompanion: c.id === id ? false : c.isCompanion,
+        }));
+        setStagedDeck(updated);
+    };
+
+    const handleSelectArt = (newArt: CardData) => {
+        if (!stagedDeck || !artPickerCard) return;
+        setStagedDeck(stagedDeck.map(c => c.id === artPickerCard.id ? { ...c, imageUrl: newArt.imageUrl, scryfallId: newArt.scryfallId } : c));
+        setArtPickerCard(null);
     };
 
     const proceedToTokens = () => {
@@ -401,7 +420,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 <div className="flex-1 flex flex-col bg-gray-800 rounded-xl border border-gray-700 overflow-hidden min-h-0">
                     <div className="p-4 bg-gray-900 border-b border-gray-700 flex flex-col gap-4 shrink-0">
                         <div className="flex flex-col md:flex-row justify-between items-center gap-2">
-                            <span className="text-gray-300 text-xs md:text-base">Click a card to set it as Commander (click again for partners). Use the <Shield size={11} className="inline text-indigo-300" /> button to set a Companion.</span>
+                            <span className="text-gray-300 text-xs md:text-base">Click a card to toggle Commander/Companion.</span>
                             <div className="flex gap-2">
                                 <button
                                     onClick={clearDeck}
@@ -449,23 +468,32 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                                 >
                                     <img src={card.imageUrl} className="w-full h-full object-cover rounded-md" />
                                     {card.isCommander && (
-                                        <div className="absolute top-2 right-2 bg-amber-500 text-black p-1 rounded-full shadow-lg">
-                                            <Crown size={20} fill="black" />
+                                        <div 
+                                            className="absolute top-2 right-2 bg-amber-500 text-black p-1 rounded-full shadow-lg cursor-pointer hover:scale-110 hover:bg-indigo-400 transition-all"
+                                            onClick={(e) => makeCompanion(e, card.id)}
+                                            title="Click to make Companion"
+                                        >
+                                            <Crown size={16} />
                                         </div>
                                     )}
                                     {card.isCompanion && (
-                                        <div className="absolute top-2 right-2 bg-indigo-500 text-white p-1 rounded-full shadow-lg">
-                                            <Shield size={20} />
+                                        <div 
+                                            className="absolute top-2 right-2 bg-indigo-500 text-white p-1 rounded-full shadow-lg cursor-pointer hover:scale-110 hover:bg-indigo-400 transition-all"
+                                            onClick={(e) => removeCompanion(e, card.id)}
+                                            title="Click to remove Companion"
+                                        >
+                                            <Shield size={16} />
                                         </div>
                                     )}
-                                    {/* Companion toggle (separate from the click-to-set-commander) */}
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setCompanion(card.id); }}
-                                        title={card.isCompanion ? 'Remove companion' : 'Set as companion'}
-                                        className={`absolute bottom-1 right-1 p-1 rounded-full shadow-lg border transition-colors ${card.isCompanion ? 'bg-indigo-500 text-white border-white/30' : 'bg-black/60 text-indigo-300 border-white/10 hover:bg-indigo-500/70 hover:text-white'}`}
-                                    >
-                                        <Shield size={12} />
-                                    </button>
+                                    {hoveredCardId === card.id && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setArtPickerCard(card); }}
+                                            title="Change Art"
+                                            className="absolute top-2 left-2 p-1.5 rounded-full bg-black/70 text-white hover:bg-blue-600 transition-colors shadow-lg"
+                                        >
+                                            <ImageIcon size={16} />
+                                        </button>
+                                    )}
                                     {/* Count badge */}
                                     {count > 1 && (
                                         <div className="absolute bottom-8 left-1 bg-gray-900/90 text-white text-[11px] font-bold px-1.5 py-0.5 rounded shadow-lg border border-gray-600">
@@ -487,7 +515,9 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                 </div>
             )}
 
-
+            {artPickerCard && (
+                <ArtPickerModal card={artPickerCard} onClose={() => setArtPickerCard(null)} onSelectArt={handleSelectArt} />
+            )}
         </div>
     );
 };
