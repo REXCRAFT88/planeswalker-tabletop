@@ -1104,6 +1104,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     ]);
     const [turnOrder, setTurnOrder] = useState<string[]>([]);
     const [mySeatIndex, setMySeatIndex] = useState(0);
+    const mySeatIndexRef = useRef(0);
+    useEffect(() => { mySeatIndexRef.current = mySeatIndex; }, [mySeatIndex]);
 
     const [boardObjects, setBoardObjects] = useState<BoardObject[]>([]);
     const [hand, setHand] = useState<CardData[]>([]);
@@ -1959,7 +1961,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const handleExit = () => {
         socket.emit('leave_room', { room: roomId });
+        // Clear all per-room persistence so this room can't resurrect an old board
+        // (phase + local backup) if its code is ever reused for a fresh game.
         localStorage.removeItem(`game_phase_${roomId}`);
+        localStorage.removeItem(`planeswalker_backup_${roomId}`);
         sessionStorage.removeItem('active_game_session');
         onExit();
     };
@@ -2343,7 +2348,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
 
             setPlayersList(sortedPlayers);
-            if (myIndex !== -1) {
+            // Only move our seat when it actually changes — redundant roster
+            // broadcasts (joins, disconnects, appearance) otherwise re-set the same
+            // index and flip the view around, which reads as the board flickering
+            // and "switching sides" before settling.
+            if (myIndex !== -1 && myIndex !== mySeatIndexRef.current) {
                 setMySeatIndex(myIndex);
             }
         };
@@ -2769,7 +2778,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (meta.currentTurnPlayerId) setCurrentTurnPlayerId(meta.currentTurnPlayerId);
         };
 
+        const handlePlayerAppearance = (d: { id: string; matUrl?: string; sleeveUrl?: string; matTransform?: ImgTransform; sleeveTransform?: ImgTransform }) => {
+            if (d.id === socket.id) return;
+            setOpponentAppearance(prev => ({ ...prev, [d.id]: { matUrl: d.matUrl, sleeveUrl: d.sleeveUrl, matTransform: d.matTransform, sleeveTransform: d.sleeveTransform } }));
+        };
+
         socket.on('room_players_update', handleRoomUpdate);
+        socket.on('player_appearance', handlePlayerAppearance);
         socket.on('game_action', handleAction);
         socket.on('game_meta', handleGameMeta);
         socket.on('sync_replay', handleSyncReplay);
@@ -2788,6 +2803,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
         return () => {
             socket.off('room_players_update', handleRoomUpdate);
+            socket.off('player_appearance', handlePlayerAppearance);
             socket.off('game_action', handleAction);
             socket.off('game_meta', handleGameMeta);
             socket.off('sync_replay', handleSyncReplay);

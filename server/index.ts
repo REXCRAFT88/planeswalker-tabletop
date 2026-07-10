@@ -492,9 +492,10 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Relay a player's custom table appearance (mat/sleeve image + transforms) to
-    // the whole room. Persisted on the player object so reconnects and late joins
-    // see it via the normal room_players_update payload.
+    // Relay a player's custom table appearance (mat/sleeve image + transforms).
+    // Stored on the player object so reconnects/late joins pick it up from the
+    // normal room_players_update roster, but live changes go out on a dedicated
+    // lightweight event so we DON'T force a roster re-sort (which flickers seats).
     socket.on('update_player_appearance', ({ room, matUrl, sleeveUrl, matTransform, sleeveTransform }) => {
         if (room) room = room.trim().toUpperCase();
         const player = rooms[room]?.find(p => p.id === socket.id);
@@ -503,7 +504,7 @@ io.on('connection', (socket) => {
         player.customSleeveUrl = sleeveUrl || undefined;
         player.matTransform = matTransform || undefined;
         player.sleeveTransform = sleeveTransform || undefined;
-        io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
+        io.to(room).emit('player_appearance', { id: socket.id, matUrl: matUrl || undefined, sleeveUrl: sleeveUrl || undefined, matTransform: matTransform || undefined, sleeveTransform: sleeveTransform || undefined });
     });
 
     socket.on('kick_player', ({ room, targetId }) => {
