@@ -6984,7 +6984,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                 </div>
                                             )}
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         );
