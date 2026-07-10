@@ -33,7 +33,7 @@ const VIEW: GameStateView = {
         hand: [
             { id: 'c1', name: 'Grizzly Bears', manaCost: '{1}{G}', typeLine: 'Creature — Bear' },
             { id: 'c2', name: 'Forest', manaCost: '', typeLine: 'Basic Land — Forest' },
-            { id: 'c3', name: 'Cultivate', manaCost: '{2}{G}', typeLine: 'Sorcery' },
+            { id: 'c3', name: 'Cultivate', manaCost: '{2}{G}', typeLine: 'Sorcery', oracleText: 'Search your library for up to two basic land cards...' },
         ],
         battlefield: [{ id: 'b1', name: 'Forest', tapped: false, quantity: 3, typeLine: 'Basic Land — Forest' }],
         graveyard: [], exileCount: 0, libraryCount: 60,
@@ -53,10 +53,9 @@ function offlineChecks(): boolean {
     const state = formatStateView(VIEW);
     const checks: [string, boolean][] = [
         ['system prompt includes persona', sys.includes('Timmy')],
-        ['system prompt includes oracle text', sys.includes('Add {C}{C}')],
         ['system prompt includes rules of engagement', sys.includes('one land drop')],
         ['system prompt includes commander rules digest', sys.includes('COMMANDER RULES DIGEST') && sys.includes('21 or more combat damage')],
-        ['state shows available mana', state.includes('G:3')],
+        ['state view includes card oracle text', state.includes('Search your library for up to two basic land cards')],
         ['state shows hand card ids', state.includes('[c1] Grizzly Bears')],
         ['state shows opponents', state.includes('Human [p0]: 38 life')],
         ['persona suggest aggro -> timmy', suggestPersona(4.0, 0.5) === 'timmy'],

@@ -866,7 +866,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [incomingViewRequest, setIncomingViewRequest] = useState<{ requesterId: string, requesterName: string, zone: string } | null>(null);
     const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-    const [choosingColorForId, setChoosingColorForId] = useState<string | null>(null);
 
     const [incomingJoinRequest, setIncomingJoinRequest] = useState<{ applicantId: string, name: string, color: string } | null>(null);
     const [areTokensExpanded, setAreTokensExpanded] = useState(false);
@@ -905,23 +904,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [damageReportData, setDamageReportData] = useState({ damage: 0, healing: 0 });
     const [activeDice, setActiveDice] = useState<DieRoll[]>([]);
 
-    const [autoTapEnabled, setAutoTapEnabled] = useState(() => {
-        return localStorage.getItem('planeswalker_auto_tap') === 'true';
-    });
-
-    const [lastPlayedCard, setLastPlayedCard] = useState<CardData | null>(null);
-    const [autoTappedIds, setAutoTappedIds] = useState<string[]>([]);
-    const autoTapFlashTimer = useRef<NodeJS.Timeout | null>(null);
-
     // --- Undo System ---
     const [undoHistory, setUndoHistory] = useState<UndoableAction[]>([]);
     const pushUndo = useCallback((action: UndoableAction) => {
         setUndoHistory(prev => [...prev.slice(-(MAX_UNDO_HISTORY - 1)), action]);
     }, []);
-
-    useEffect(() => {
-        localStorage.setItem('planeswalker_auto_tap', String(autoTapEnabled));
-    }, [autoTapEnabled]);
 
     // Local Table Host Logic
     useEffect(() => {
@@ -3845,9 +3832,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         if (!card.isToken) setHand(prev => prev.filter(c => c.id !== card.id));
 
-        // Track last played card for auto-tap
-        setLastPlayedCard(card);
-
         // Record undo
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });
 
@@ -5436,16 +5420,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
 
 
-                {/* Auto-Tap Flash Overlay — highlights tapped cards */}
-                {autoTappedIds.length > 0 && (
-                    <style>{`
-                        ${autoTappedIds.map(id => `[data-object-id="${id}"]`).join(', ')} {
-                            box-shadow: 0 0 20px 6px rgba(250, 204, 21, 0.5) !important;
-                            transition: box-shadow 0.3s ease !important;
-                        }
-                    `}</style>
-                )}
-
                 {/* Right / Opponent Pane */}
                 {isOpponentViewOpen && (
                     <div className={`${isMobile ? 'fixed inset-0 z-[60]' : 'w-full h-1/2 md:w-1/2 md:h-full relative'} bg-gray-900 md:border-l border-gray-700 flex flex-col`}>
@@ -5864,7 +5838,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Switch Opponent</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">← / →</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Play Hand Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">1 - 0</kbd></div>
                             <div className="col-span-2 pt-2 border-t border-gray-700 mt-1 text-xs text-gray-500 font-bold uppercase">Undo</div>
-                            <div className="flex justify-between items-center p-2 bg-yellow-900/30 rounded border border-yellow-800/30"><span className="text-gray-300">Auto-Tap</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Tab</kbd></div>
                             <div className="flex justify-between items-center p-2 bg-amber-900/30 rounded border border-amber-800/30 col-span-2"><span className="text-gray-300">Undo Last Action</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
                         </div>
                     </div>
@@ -6174,21 +6147,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     <div
                                         onClick={() => setControlMode(prev => prev === 'auto' ? 'mobile' : 'auto')}
                                         className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${controlMode === 'mobile' ? 'bg-blue-600 justify-end' : 'bg-gray-600 justify-start'}`}
-                                    >
-                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
-                                    </div>
-                                </label>
-                            </div>
-
-                            <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
-                                <label className="flex justify-between items-center cursor-pointer">
-                                    <div>
-                                        <h4 className="font-bold text-white flex items-center gap-2"><Zap size={16} className="text-yellow-400" /> Auto-Tap Mana</h4>
-                                        <p className="text-xs text-gray-400">Press Tab after playing a card to auto-tap lands/mana sources. Basics first.</p>
-                                    </div>
-                                    <div
-                                        onClick={() => setAutoTapEnabled(prev => !prev)}
-                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${autoTapEnabled ? 'bg-yellow-500 justify-end' : 'bg-gray-600 justify-start'}`}
                                     >
                                         <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
                                     </div>
