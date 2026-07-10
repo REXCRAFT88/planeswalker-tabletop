@@ -2571,6 +2571,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     else if (zone === 'EXILE') setExile(prev => prev.filter(c => c.id !== cardId));
                     emitAction('UPDATE_COUNTS', { counts: getCounts() });
                 }
+            } else if (action === 'RETURN_TO_OWNER_ZONE') {
+                if (data.ownerId === socket.id) {
+                    if (data.zone === 'GRAVEYARD') setGraveyard(prev => [data.card, ...prev]);
+                    else if (data.zone === 'EXILE') setExile(prev => [data.card, ...prev]);
+                    addLog(`your ${data.card.name} was returned to your ${data.zone.toLowerCase()}`);
+                    emitAction('UPDATE_COUNTS', { counts: getCounts() });
+                }
             } else if (action === 'UPDATE_OBJECT') {
                 setBoardObjects(prev => prev.map(o => {
                     if (o.id === data.id) {
@@ -4258,7 +4265,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const myId = getMyId();
         if (obj.controllerId === myId) return;
         const myRot = layout[mySeatIndex]?.rot ?? 0;
-        updateBoardObject(id, { controllerId: myId, rotation: myRot });
+        updateBoardObject(id, { controllerId: myId, rotation: myRot, ownerId: obj.ownerId || obj.controllerId });
         addLog(`took control of ${obj.cardData.name}`);
     };
 
@@ -4704,7 +4711,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         setTimeout(() => setActiveDice(prev => prev.filter(d => d.id !== rollData.id)), 3000);
     };
 
-    const sendToZone = (card: CardData, zone: 'GRAVEYARD' | 'EXILE') => {
+    const sendToZone = (card: CardData, zone: 'GRAVEYARD' | 'EXILE', objOwnerId?: string) => {
+        if (card.isToken || card.isCopy) {
+            addLog(`token ${card.name} vanished into ${zone.toLowerCase()}`);
+            if (!card.isToken) setHand(prev => prev.filter(c => c.id !== card.id));
+            return;
+        }
+
+        if (objOwnerId && objOwnerId !== getMyId()) {
+            emitAction('RETURN_TO_OWNER_ZONE', { card, ownerId: objOwnerId, zone });
+            addLog(`returned ${card.name} to owner's ${zone.toLowerCase()}`);
+            if (!card.isToken) setHand(prev => prev.filter(c => c.id !== card.id));
+            return;
+        }
+
         if (zone === 'GRAVEYARD') {
             setGraveyard(prev => [card, ...prev]);
             addLog(`moved ${card.name} to graveyard`);
@@ -4760,8 +4780,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (checkZoneCollision(x, y, mySeatIndex, 'LIBRARY')) { setLibraryAction({ isOpen: true, cardId: id }); return; }
         if (checkZoneCollision(x, y, mySeatIndex, 'GRAVEYARD')) {
             if (!obj.cardData.isToken && !obj.cardData.isCopy) {
-                setGraveyard(prev => [obj.cardData, ...prev]);
-                addLog(`moved ${obj.cardData.name} from battlefield to graveyard`);
+                const actualOwner = obj.ownerId || obj.controllerId;
+                if (actualOwner && actualOwner !== getMyId()) {
+                    emitAction('RETURN_TO_OWNER_ZONE', { card: obj.cardData, ownerId: actualOwner, zone: 'GRAVEYARD' });
+                    addLog(`returned ${obj.cardData.name} to owner's graveyard`);
+                } else {
+                    setGraveyard(prev => [obj.cardData, ...prev]);
+                    addLog(`moved ${obj.cardData.name} from battlefield to graveyard`);
+                }
             } else {
                 addLog(`token ${obj.cardData.name} vanished upon entering graveyard`);
             }
@@ -4771,8 +4797,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
         if (checkZoneCollision(x, y, mySeatIndex, 'EXILE')) {
             if (!obj.cardData.isToken && !obj.cardData.isCopy) {
-                setExile(prev => [obj.cardData, ...prev]);
-                addLog(`exiled ${obj.cardData.name} from battlefield`);
+                const actualOwner = obj.ownerId || obj.controllerId;
+                if (actualOwner && actualOwner !== getMyId()) {
+                    emitAction('RETURN_TO_OWNER_ZONE', { card: obj.cardData, ownerId: actualOwner, zone: 'EXILE' });
+                    addLog(`returned ${obj.cardData.name} to owner's exile`);
+                } else {
+                    setExile(prev => [obj.cardData, ...prev]);
+                    addLog(`exiled ${obj.cardData.name} from battlefield`);
+                }
             } else {
                 addLog(`token ${obj.cardData.name} vanished into exile`);
             }
@@ -5101,12 +5133,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const newObjId = crypto.randomUUID();
             const obj: BoardObject = {
                 id: newObjId,
-                cardData: item.card,
+                cardData: action === 'CLONE' ? { ...item.card, id: crypto.randomUUID(), isToken: true, isCopy: true } : item.card,
                 x: 0, y: 0, z: maxZ + 1,
                 rotation: 0,
-                isTapped: false,
+                isFaceDown: false,
+                isTransformed: false,
+                counters: {},
+                commanderDamage: {},
                 controllerId: socket.id,
-                counters: {}
+                ownerId: action === 'STEAL' ? searchModal.playerId : socket.id,
+                quantity: 1, tappedQuantity: 0
             };
             setMaxZ(p => p + 1);
             setBoardObjects(prev => [...prev, obj]);
@@ -6468,11 +6504,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                     <span className="text-[10px] text-gray-300">Flip</span>
                                                 </button>
                                                 {obj.quantity > 1 && <button onClick={() => { unstackCards(obj.id); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-blue-600"><Layers size={24} className="text-white" /><span className="text-[10px] text-gray-300">Unstack</span></button>}
-                                                <button onClick={() => { sendToZone(cardData, 'GRAVEYARD'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
+                                                <button onClick={() => { sendToZone(cardData, 'GRAVEYARD', obj.ownerId || obj.controllerId); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                     <Archive size={24} className="text-red-400" />
                                                     <span className="text-[10px] text-gray-300">Grave</span>
                                                 </button>
-                                                <button onClick={() => { sendToZone(cardData, 'EXILE'); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
+                                                <button onClick={() => { sendToZone(cardData, 'EXILE', obj.ownerId || obj.controllerId); emitAction('REMOVE_OBJECT', { id: obj.id }); setBoardObjects(prev => prev.filter(o => o.id !== obj.id)); setMobileActionCardId(null); }} className="flex flex-col items-center gap-1 p-2 bg-gray-800/80 rounded-xl active:bg-red-900/50">
                                                     <X size={24} className="text-red-400" />
                                                     <span className="text-[10px] text-gray-300">Exile</span>
                                                 </button>

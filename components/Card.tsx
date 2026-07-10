@@ -443,6 +443,12 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
 
             <div className="relative w-full h-full group perspective-1000">
                 <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border ${object.cardData.isCopy ? 'border-2 border-white' : object.cardData.isToken ? 'border-yellow-400' : 'border-black/50'}`}>
+                    {object.cardData.isCopy && (
+                        <div className="absolute top-0 right-0 bg-white text-black text-[8px] md:text-[10px] font-bold px-1 rounded-bl shadow-md z-10 pointer-events-none">COPY</div>
+                    )}
+                    {!object.cardData.isCopy && object.cardData.isToken && (
+                        <div className="absolute top-0 right-0 bg-yellow-400 text-black text-[8px] md:text-[10px] font-bold px-1 rounded-bl shadow-md z-10 pointer-events-none">TOKEN</div>
+                    )}
                     {object.isFaceDown ? (
                         // Render Sleeve (custom image if the controller set one)
                         <div
