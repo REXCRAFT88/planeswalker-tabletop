@@ -578,7 +578,7 @@ const Playmat: React.FC<PlaymatProps> = ({
     return (
         <div
             data-combat-target={combatTargetId}
-            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 overflow-hidden ${disconnected ? 'opacity-50' : ''}`}
+            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 ${disconnected ? 'opacity-50' : ''}`}
             style={{
                 left: x, top: y, width, height,
                 borderColor: sleeveColor,
@@ -586,12 +586,16 @@ const Playmat: React.FC<PlaymatProps> = ({
                 transform: `rotate(${rotation}deg)`
             }}
         >
-            {/* Custom playmat image (behind everything) */}
+            {/* Custom playmat image (behind everything). Clipped to the rounded mat
+                by its own overflow-hidden wrapper — the mat root must NOT clip, or the
+                zone piles (which sit outside the mat rect) would be hidden. */}
             {matUrl && (
-                <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{ backgroundImage: `url("${matUrl}")`, ...transformToBg(matTransform) }}
-                />
+                <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+                    <div
+                        className="absolute inset-0"
+                        style={{ backgroundImage: `url("${matUrl}")`, ...transformToBg(matTransform) }}
+                    />
+                </div>
             )}
 
             <div
