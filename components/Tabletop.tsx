@@ -2569,14 +2569,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     if (zone === 'LIBRARY') setLibrary(prev => prev.filter(c => c.id !== cardId));
                     else if (zone === 'GRAVEYARD') setGraveyard(prev => prev.filter(c => c.id !== cardId));
                     else if (zone === 'EXILE') setExile(prev => prev.filter(c => c.id !== cardId));
-                    emitAction('UPDATE_COUNTS', { counts: getCounts() });
                 }
             } else if (action === 'RETURN_TO_OWNER_ZONE') {
                 if (data.ownerId === socket.id) {
                     if (data.zone === 'GRAVEYARD') setGraveyard(prev => [data.card, ...prev]);
                     else if (data.zone === 'EXILE') setExile(prev => [data.card, ...prev]);
                     addLog(`your ${data.card.name} was returned to your ${data.zone.toLowerCase()}`);
-                    emitAction('UPDATE_COUNTS', { counts: getCounts() });
                 }
             } else if (action === 'UPDATE_OBJECT') {
                 setBoardObjects(prev => prev.map(o => {
@@ -4561,7 +4559,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (card.isCompanion) {
             setHand(prev => [...prev, card]);
             addLog(`put companion ${card.name} into hand`);
-            playSound('cardDraw');
+            playSound('draw');
             return;
         }
         
@@ -5133,6 +5131,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const newObjId = crypto.randomUUID();
             const obj: BoardObject = {
                 id: newObjId,
+                type: 'CARD',
                 cardData: action === 'CLONE' ? { ...item.card, id: crypto.randomUUID(), isToken: true, isCopy: true } : item.card,
                 x: 0, y: 0, z: maxZ + 1,
                 rotation: 0,
