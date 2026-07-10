@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
-import { parseDeckList, fetchBatch, searchCards, fetchCardsByIds } from '../services/scryfall';
+import { parseDeckList, fetchBatch, searchCards, fetchCardsByIds, splitSideboard } from '../services/scryfall';
 import { CardData } from '../types';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield } from 'lucide-react';
 
 interface DeckBuilderProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
+    initialSideboard?: CardData[];
     initialName?: string;
     initialId?: string; // ID of the deck being edited
-    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string) => void;
+    onDeckReady: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string, sideboard?: CardData[]) => void;
     onBack: () => void;
 }
 
-export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialName, initialId, onDeckReady, onBack }) => {
+export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTokens, initialSideboard, initialName, initialId, onDeckReady, onBack }) => {
     const [deckText, setDeckText] = useState('');
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number, total: number } | null>(null);
@@ -39,6 +40,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
     const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
+    const [stagedSideboard, setStagedSideboard] = useState<CardData[]>(initialSideboard || []);
     const [autoTokenMsg, setAutoTokenMsg] = useState<string | null>(null);
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -74,13 +76,16 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
         setProgress(null);
 
         try {
-            const parsed = parseDeckList(deckText);
+            // Separate the main deck from an optional sideboard section first.
+            const { main, side } = splitSideboard(deckText);
+            const parsed = parseDeckList(main);
+            const parsedSide = parseDeckList(side);
             if (parsed.length === 0) {
                 setError("No valid cards found in the list.");
                 return;
             }
 
-            const uniqueNames = parsed.map(p => p.name);
+            const uniqueNames = Array.from(new Set([...parsed, ...parsedSide].map(p => p.name)));
             const cardMap = await fetchBatch(uniqueNames, (current, total) => setProgress({ current, total }));
 
             const deck: CardData[] = [];
@@ -99,6 +104,18 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                     else deck.push(instance);
                 }
             }
+
+            // Build the sideboard from its own section (tokens there go to tokens).
+            const sideboard: CardData[] = [];
+            for (const item of parsedSide) {
+                const data = cardMap.get(item.name.toLowerCase());
+                if (!data) continue;
+                for (let i = 0; i < item.count; i++) {
+                    const instance = { ...data, id: crypto.randomUUID() };
+                    if (data.isToken) tokens.push(instance); else sideboard.push(instance);
+                }
+            }
+            setStagedSideboard(sideboard);
 
             if (deck.length === 0 && tokens.length === 0) {
                 setError("Could not load any cards. Please check the card names.");
@@ -178,7 +195,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     const finalizeDeck = () => {
         if (!stagedDeck) return;
         // Pass initialId back
-        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, initialId);
+        onDeckReady(stagedDeck, stagedTokens, isNewDeck, deckName, initialId, stagedSideboard);
     };
 
 
@@ -293,6 +310,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                         {autoTokenMsg && (
                             <div className="mb-3 p-2 bg-green-900/40 border border-green-700 rounded text-green-200 text-xs flex items-center gap-2 shrink-0">
                                 <Check size={14} /> {autoTokenMsg}
+                            </div>
+                        )}
+                        {stagedSideboard.length > 0 && (
+                            <div className="mb-3 p-2 bg-indigo-900/40 border border-indigo-700 rounded text-indigo-200 text-xs flex items-center gap-2 shrink-0">
+                                <Shield size={14} /> Sideboard: {stagedSideboard.length} card{stagedSideboard.length > 1 ? 's' : ''} (saved with the deck).
                             </div>
                         )}
                         <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">

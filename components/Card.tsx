@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Hand } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Hand, Palette } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -18,6 +18,7 @@ interface CardProps {
     isControlledByMe: boolean;
     onCopy?: (id: string) => void;
     onSteal?: (id: string) => void;
+    onChangeArt?: (id: string) => void;
     onUpdate: (id: string, updates: Partial<BoardObject>) => void;
     onBringToFront: (id: string) => void;
     onRelease: (id: string, x: number, y: number) => void;
@@ -43,7 +44,7 @@ interface CardProps {
     onHover?: (id: string | null) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onCopy, onSteal, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onCopy, onSteal, onChangeArt, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -503,6 +504,11 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
                                     {onCopy && (
                                         <button onClick={(e) => { e.stopPropagation(); onCopy(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-teal-500" title="Make a copy">
                                             <Copy size={12} />
+                                        </button>
+                                    )}
+                                    {onChangeArt && !object.cardData.isToken && (
+                                        <button onClick={(e) => { e.stopPropagation(); onChangeArt(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-pink-500" title="Change art">
+                                            <Palette size={12} />
                                         </button>
                                     )}
                                 </>

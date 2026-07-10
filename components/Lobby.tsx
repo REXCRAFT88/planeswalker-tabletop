@@ -23,7 +23,7 @@ interface LobbyProps {
     savedDecks: SavedDeck[];
     onSaveDeck: (deck: SavedDeck) => void;
     onDeleteDeck: (id: string) => void;
-    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string) => void;
+    onLoadDeck: (deck: CardData[], tokens: CardData[], shouldSave?: boolean, name?: string, id?: string, sideboard?: CardData[]) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -205,7 +205,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         // If no deck is active, load the most recent one.
         if (activeDeck.length === 0 && savedDecks.length > 0) {
             const mostRecentDeck = [...savedDecks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, false, mostRecentDeck.name, mostRecentDeck.id);
+            onLoadDeck(mostRecentDeck.deck, mostRecentDeck.tokens, false, mostRecentDeck.name, mostRecentDeck.id, mostRecentDeck.sideboard);
         }
 
         onLocalGame();
@@ -220,7 +220,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     };
 
     const handleLoadDeck = (deck: SavedDeck) => {
-        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name, deck.id);
+        onLoadDeck([...deck.deck], [...deck.tokens], false, deck.name, deck.id, deck.sideboard);
         setIsLibraryOpen(false);
     };
 
@@ -234,7 +234,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     const handleEditDeck = (deck: SavedDeck) => {
         // Load the deck first so it's active
-        onLoadDeck(deck.deck, deck.tokens, false, deck.name, deck.id);
+        onLoadDeck(deck.deck, deck.tokens, false, deck.name, deck.id, deck.sideboard);
         // Then go to builder
         onImportDeck();
     };

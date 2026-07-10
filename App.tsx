@@ -27,6 +27,7 @@ export interface SavedDeck {
     tokens: CardData[];
     sleeveColor: string;
     createdAt?: number;
+    sideboard?: CardData[];
     // manaRules?: Record<string, any>; // legacy field, dropped on migration
 }
 
@@ -89,6 +90,9 @@ function App() {
     const [activeDeckId, setActiveDeckId] = useState<string | null>(() =>
         loadState('activeDeckId', mostRecentDeck?.id ?? null)
     );
+    const [activeSideboard, setActiveSideboard] = useState<CardData[]>(() =>
+        loadState('activeSideboard', mostRecentDeck?.sideboard || [])
+    );
 
     // Persist state changes to Local Storage
     useEffect(() => {
@@ -100,9 +104,10 @@ function App() {
             savedDecks,
             activeDeckName,
             activeDeckId,
+            activeSideboard,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeDeckName, activeDeckId]);
+    }, [playerName, playerSleeve, activeDeck, lobbyTokens, savedDecks, activeDeckName, activeDeckId, activeSideboard]);
 
     // Prevent Render.com from sleeping by pinging the server (production only —
     // in dev this just spams the Vite server with HEAD requests).
@@ -116,17 +121,19 @@ function App() {
 
     // Loads a deck into the active slot without saving it (used by the Lobby's
     // "Load"/"Edit" actions). Threads id so deck identity survives the load.
-    const handleLoadDeck = (deck: CardData[], tokens: CardData[], _shouldSave?: boolean, deckName?: string, id?: string) => {
+    const handleLoadDeck = (deck: CardData[], tokens: CardData[], _shouldSave?: boolean, deckName?: string, id?: string, sideboard?: CardData[]) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
         if (deckName) setActiveDeckName(deckName);
         setActiveDeckId(id ?? null);
+        setActiveSideboard(sideboard ?? []);
     };
 
-    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, id?: string) => {
+    const handleDeckReady = (deck: CardData[], tokens: CardData[], shouldSave?: boolean, deckName?: string, id?: string, sideboard?: CardData[]) => {
         setActiveDeck(deck);
         setLobbyTokens(tokens);
         if (deckName) setActiveDeckName(deckName);
+        if (sideboard) setActiveSideboard(sideboard);
 
         // Always save if we have an ID (update) OR if shouldSave is true (new)
         // If we have an ID, we are updating an existing deck, so we must save regardless of shouldSave flag (which indicates 'new deck')
@@ -139,6 +146,7 @@ function App() {
                 tokens,
                 sleeveColor: playerSleeve,
                 createdAt: Date.now(), // Update timestamp? Maybe keep original if updating? For now update is fine.
+                sideboard: sideboard ?? [],
             };
             setActiveDeckId(deckId);
             handleSaveDeck(newDeck);
@@ -167,6 +175,7 @@ function App() {
         if (savedDecks.length === 1) {
             setActiveDeck([...savedDecks[0].deck]);
             setLobbyTokens([...savedDecks[0].tokens]);
+            setActiveSideboard([...(savedDecks[0].sideboard || [])]);
         }
 
         if (gameType === 'local_table') {
@@ -179,6 +188,7 @@ function App() {
     const handleDeckSelected = (deck: SavedDeck) => {
         setActiveDeck([...deck.deck]);
         setLobbyTokens([...deck.tokens]);
+        setActiveSideboard([...(deck.sideboard || [])]);
         setActiveDeckName(deck.name);
         setActiveDeckId(deck.id);
         setPendingJoin(null);
@@ -219,6 +229,7 @@ function App() {
         if (deck.id === activeDeckId || (!activeDeckId && deck.name === activeDeckName)) {
             setActiveDeck(deck.deck);
             setLobbyTokens(deck.tokens);
+            setActiveSideboard(deck.sideboard || []);
             setActiveDeckName(deck.name);
             setActiveDeckId(deck.id);
         }
@@ -254,6 +265,7 @@ function App() {
                 <DeckBuilder
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
+                    initialSideboard={activeSideboard}
                     initialName={activeDeckName}
                     initialId={activeDeckId ?? undefined}
                     onDeckReady={handleDeckReady}
@@ -273,6 +285,7 @@ function App() {
                 <Tabletop
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
+                    initialSideboard={activeSideboard}
                     playerName={playerName}
                     sleeveColor={playerSleeve}
                     roomId={roomId}
@@ -285,6 +298,7 @@ function App() {
                 <Tabletop
                     initialDeck={activeDeck}
                     initialTokens={lobbyTokens}
+                    initialSideboard={activeSideboard}
                     playerName={playerName}
                     sleeveColor={playerSleeve}
                     roomId={isLocalTableHost ? roomId : "LOCAL"}

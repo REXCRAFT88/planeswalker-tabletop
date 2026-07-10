@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CardData, BoardObject, LogEntry, PlayerStats } from '../types';
 import { Card } from './Card';
 import { GameStatsModal } from './GameStatsModal';
-import { searchCards } from '../services/scryfall';
+import { searchCards, fetchPrints } from '../services/scryfall';
 import { socket } from '../services/socket';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
 import { PLAYER_COLORS } from '../constants';
@@ -153,6 +153,7 @@ const keyLabel = (key: string): string => {
 interface TabletopProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
+    initialSideboard?: CardData[];
     playerName: string;
     sleeveColor?: string;
     roomId: string;
@@ -194,7 +195,7 @@ interface ViewState {
 
 interface SearchState {
     isOpen: boolean;
-    source: 'LIBRARY' | 'GRAVEYARD' | 'EXILE' | 'TOKENS' | 'HAND';
+    source: 'LIBRARY' | 'GRAVEYARD' | 'EXILE' | 'TOKENS' | 'HAND' | 'SIDEBOARD';
     items: { card: CardData; isRevealed: boolean }[];
     tray: CardData[];
     isReadOnly?: boolean;
@@ -1044,7 +1045,7 @@ const emptyStats: PlayerStats = {
     cardsExiled: 0, cardsDrawn: 0
 };
 
-export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
+export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, initialSideboard = [], playerName, sleeveColor = '#ef4444', roomId, initialGameStarted, isLocal = false, isLocalTableHost = false, localOpponents = [], onExit }) => {
     // --- State Declarations ---
     const [gamePhase, setGamePhase] = useState<'SETUP' | 'MULLIGAN' | 'PLAYING'>('SETUP');
     const [mulligansAllowed, setMulligansAllowed] = useState(true);
@@ -1077,6 +1078,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [graveyard, setGraveyard] = useState<CardData[]>([]);
     const [exile, setExile] = useState<CardData[]>([]);
     const [commandZone, setCommandZone] = useState<CardData[]>([]);
+    const [sideboard, setSideboard] = useState<CardData[]>(initialSideboard);
     const [life, setLife] = useState(40);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [commanderDamage, setCommanderDamage] = useState<Record<string, Record<string, number>>>({});
@@ -1346,6 +1348,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [soundMuted, setSoundMutedState] = useState(isSoundMuted());
     const toggleSound = () => { const next = !soundMuted; setSoundMuted(next); setSoundMutedState(next); if (!next) playSound('draw'); };
+
+    // --- Change card art (Scryfall version picker) ---
+    const [changeArtFor, setChangeArtFor] = useState<BoardObject | null>(null);
+    const [artPrints, setArtPrints] = useState<CardData[]>([]);
+    const [artLoading, setArtLoading] = useState(false);
 
     // --- Table appearance (custom playmat / sleeve) ---
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
@@ -4098,6 +4105,31 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog(`took control of ${obj.cardData.name}`);
     };
 
+    // Open the change-art picker for a board object and load its printings.
+    const openChangeArt = async (id: string) => {
+        const obj = boardObjects.find(o => o.id === id);
+        if (!obj) return;
+        setChangeArtFor(obj);
+        setArtPrints([]);
+        setArtLoading(true);
+        try {
+            const prints = await fetchPrints(obj.cardData.name);
+            setArtPrints(prints);
+        } finally {
+            setArtLoading(false);
+        }
+    };
+
+    // Swap the chosen printing's art onto the selected board object (synced).
+    const applyArt = (print: CardData) => {
+        if (!changeArtFor) return;
+        const newCard = { ...changeArtFor.cardData, imageUrl: print.imageUrl, backImageUrl: print.backImageUrl, scryfallId: print.scryfallId };
+        updateBoardObject(changeArtFor.id, { cardData: newCard });
+        addLog(`changed art of ${changeArtFor.cardData.name}`);
+        setChangeArtFor(null);
+        setArtPrints([]);
+    };
+
     const unstackCards = (id: string) => {
         const obj = boardObjects.find(o => o.id === id);
         if (!obj || obj.quantity <= 1) return;
@@ -4813,6 +4845,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         else if (source === 'GRAVEYARD') items = targetGraveyard.map(c => ({ card: c, isRevealed: true }));
         else if (source === 'EXILE') items = targetExile.map(c => ({ card: c, isRevealed: true }));
         else if (source === 'HAND') items = targetHand.map(c => ({ card: c, isRevealed: true }));
+        else if (source === 'SIDEBOARD') items = sideboard.map(c => ({ card: c, isRevealed: true }));
         setSearchModal({ isOpen: true, source, items, tray: [], playerId: targetPlayerId });
     };
     const searchTokens = async () => {
@@ -4848,13 +4881,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const trayCards = searchModal.tray;
         const trayIds = new Set(trayCards.map(c => c.id));
         if (trayCards.length === 0) return;
-        let sourceList = searchModal.source === 'LIBRARY' ? library : searchModal.source === 'GRAVEYARD' ? graveyard : exile;
+        let sourceList = searchModal.source === 'LIBRARY' ? library : searchModal.source === 'GRAVEYARD' ? graveyard : searchModal.source === 'SIDEBOARD' ? sideboard : exile;
         const rest = sourceList.filter(c => !trayIds.has(c.id));
 
         let newLib = [...library], newGrave = [...graveyard], newExile = [...exile], newHand = [...hand];
         if (searchModal.source === 'LIBRARY') newLib = rest;
         else if (searchModal.source === 'GRAVEYARD') newGrave = rest;
         else if (searchModal.source === 'EXILE') newExile = rest;
+        else if (searchModal.source === 'SIDEBOARD') setSideboard(rest);
 
         if (action === 'HAND') { newHand = [...newHand, ...trayCards]; addLog(`added ${trayCards.length} cards from tray to hand`); }
         else if (action === 'HAND_REVEAL') {
@@ -5213,6 +5247,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 isControlledByMe={isControlled}
                                 onCopy={copyBoardObject}
                                 onSteal={stealBoardObject}
+                                onChangeArt={openChangeArt}
                                 players={playersList}
                                 onUpdate={updateBoardObject}
                                 onBringToFront={(id) => { setMaxZ(p => p + 1); updateBoardObject(id, { z: maxZ + 1 }); }}
@@ -5690,6 +5725,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     >
                         <BarChart3 size={20} />
                     </button>
+                    {sideboard.length > 0 && (
+                        <button
+                            onClick={() => openSearch('SIDEBOARD')}
+                            className="p-2 rounded-lg transition-colors hover:bg-gray-800 text-indigo-400 hover:text-indigo-300 relative"
+                            title={`Sideboard (${sideboard.length})`}
+                        >
+                            <Shield size={20} />
+                            <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-[9px] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5 border border-gray-900">{sideboard.length}</span>
+                        </button>
+                    )}
                     {isHost && (
                         <button onClick={() => setShowEndGameModal(true)} className="p-2 rounded-lg hover:bg-gray-800 text-red-400 hover:text-red-300" title="End Game">
                             <RotateCcw size={20} />
@@ -5776,6 +5821,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         )}
                         <button onClick={() => { setIsLogOpen(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><History /> Game Log</button>
                         <button onClick={() => { setShowStatsModal(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-gray-800 rounded-xl text-white font-bold flex items-center justify-center gap-2"><BarChart3 /> Stats</button>
+                        {sideboard.length > 0 && <button onClick={() => { openSearch('SIDEBOARD'); setMobileMenuOpen(false); }} className="w-full py-3 bg-indigo-900/40 text-indigo-200 rounded-xl font-bold flex items-center justify-center gap-2"><Shield /> Sideboard ({sideboard.length})</button>}
                         {isHost && <button onClick={() => { setShowPlayerManager(true); setMobileMenuOpen(false); }} className="w-full py-3 bg-blue-900/50 text-blue-200 rounded-xl font-bold flex items-center justify-center gap-2"><Shield /> Host Controls</button>}
                         <button onClick={handleExit} className="w-full py-3 bg-red-900/50 text-red-200 rounded-xl font-bold flex items-center justify-center gap-2"><LogOut /> Leave Game</button>
                     </div>
@@ -6319,6 +6365,33 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             })}
                             {playersList.filter(p => p.id !== socket.id).length === 0 && <div className="text-center text-gray-500">No opponents found.</div>}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {changeArtFor && (
+                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setChangeArtFor(null)}>
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2"><Palette className="text-pink-400" /> Change Art — {changeArtFor.cardData.name}</h3>
+                            <button onClick={() => setChangeArtFor(null)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                        </div>
+                        {artLoading ? (
+                            <div className="flex-1 flex items-center justify-center text-gray-400 gap-2 py-12"><Loader className="animate-spin" /> Loading printings…</div>
+                        ) : artPrints.length === 0 ? (
+                            <div className="flex-1 flex items-center justify-center text-gray-500 py-12">No alternate printings found.</div>
+                        ) : (
+                            <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pr-1">
+                                {artPrints.map((p, i) => (
+                                    <button key={p.scryfallId + i} onClick={() => applyArt(p)} className="relative rounded-lg overflow-hidden border-2 border-transparent hover:border-pink-400 transition-all active:scale-95 group">
+                                        <img src={p.imageUrl} alt={p.name} className="w-full aspect-[5/7] object-cover" />
+                                        {p.scryfallId === changeArtFor.cardData.scryfallId && (
+                                            <div className="absolute top-1 right-1 bg-pink-500 text-white rounded-full p-0.5"><CheckCircle size={14} /></div>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

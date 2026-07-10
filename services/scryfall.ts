@@ -200,6 +200,23 @@ const transformScryfallData = (data: any): CardData => {
     };
 };
 
+// All printings of a card by exact name (for the change-art version picker).
+// unique=prints returns every version; ordered newest-first.
+export const fetchPrints = async (cardName: string): Promise<CardData[]> => {
+    try {
+        const q = `!"${cardName.replace(/"/g, '')}"`;
+        const resp = await fetch(`${BASE_URL}/cards/search?q=${encodeURIComponent(q)}&unique=prints&order=released&dir=desc`, {
+            mode: 'cors', credentials: 'omit', headers: { 'Accept': 'application/json' },
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return (data.data || []).map((c: any) => transformScryfallData(c));
+    } catch (e) {
+        console.error('fetchPrints failed', e);
+        return [];
+    }
+};
+
 // Fetch full card objects by Scryfall id (used for token auto-import). Batches of
 // 75 per the collection endpoint; unknown ids are silently skipped.
 export const fetchCardsByIds = async (ids: string[]): Promise<CardData[]> => {
@@ -295,6 +312,30 @@ const detectManaAbilityType = (data: any): { manaAbilityType?: 'tap' | 'activate
     return {};
 };
 
+
+// Split a pasted list into main deck and sideboard. Recognizes an explicit
+// "Sideboard" header (Moxfield/Arena) or, failing that, a single blank line that
+// separates two card blocks (Arena's plain export). Returns the whole thing as
+// main when no clear boundary exists.
+export const splitSideboard = (text: string): { main: string; side: string } => {
+    const lines = text.split('\n');
+    const headerIdx = lines.findIndex(l => /^\s*sideboard\s*:?\s*$/i.test(l));
+    if (headerIdx >= 0) {
+        return { main: lines.slice(0, headerIdx).join('\n'), side: lines.slice(headerIdx + 1).join('\n') };
+    }
+    // Arena plain format: exactly one blank-line gap with cards on both sides.
+    const firstBlank = lines.findIndex(l => l.trim() === '');
+    if (firstBlank > 0) {
+        const before = lines.slice(0, firstBlank).some(l => l.trim());
+        const after = lines.slice(firstBlank + 1).some(l => l.trim());
+        // Only treat the tail as a sideboard if there's a single separating gap.
+        const laterBlank = lines.slice(firstBlank + 1).some(l => l.trim() === '');
+        if (before && after && !laterBlank) {
+            return { main: lines.slice(0, firstBlank).join('\n'), side: lines.slice(firstBlank + 1).join('\n') };
+        }
+    }
+    return { main: text, side: '' };
+};
 
 export const parseDeckList = (text: string): { count: number; name: string }[] => {
     const lines = text.split('\n');
