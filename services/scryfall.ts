@@ -191,7 +191,38 @@ const transformScryfallData = (data: any): CardData => {
         producedMana: data.produced_mana,
         power: data.power,
         toughness: data.toughness,
+        // Related tokens/emblems this card makes (Moxfield-style auto-import).
+        tokenParts: Array.isArray(data.all_parts)
+            ? data.all_parts
+                .filter((p: any) => p.component === 'token' && p.id !== data.id)
+                .map((p: any) => p.id as string)
+            : undefined,
     };
+};
+
+// Fetch full card objects by Scryfall id (used for token auto-import). Batches of
+// 75 per the collection endpoint; unknown ids are silently skipped.
+export const fetchCardsByIds = async (ids: string[]): Promise<CardData[]> => {
+    const unique = Array.from(new Set(ids)).filter(Boolean);
+    const out: CardData[] = [];
+    for (let i = 0; i < unique.length; i += 75) {
+        const chunk = unique.slice(i, i + 75);
+        try {
+            const resp = await fetch(`${BASE_URL}/cards/collection`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ identifiers: chunk.map(id => ({ id })) }),
+                mode: 'cors', credentials: 'omit',
+            });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            (data.data || []).forEach((c: any) => out.push(transformScryfallData(c)));
+        } catch (e) {
+            console.error('Token id batch failed', e);
+        }
+        await new Promise(r => setTimeout(r, 100)); // respect rate limits
+    }
+    return out;
 };
 
 // Detect how this card produces mana

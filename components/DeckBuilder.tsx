@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { parseDeckList, fetchBatch, searchCards } from '../services/scryfall';
+import { parseDeckList, fetchBatch, searchCards, fetchCardsByIds } from '../services/scryfall';
 import { CardData } from '../types';
 import { Loader2, Download, AlertCircle, Crown, Check, Search, Trash2, Plus, X, ArrowRight, Zap, Filter, Shield } from 'lucide-react';
 
@@ -39,6 +39,7 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
     // If initialDeck has cards, we assume we are in "Edit/Select Commander" mode
     const [stagedDeck, setStagedDeck] = useState<CardData[] | null>(initialDeck && initialDeck.length > 0 ? initialDeck : null);
     const [stagedTokens, setStagedTokens] = useState<CardData[]>(initialTokens || []);
+    const [autoTokenMsg, setAutoTokenMsg] = useState<string | null>(null);
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -106,7 +107,31 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
 
 
             setStagedDeck(deck);
-            setStagedTokens(prev => [...prev, ...tokens]);
+
+            // --- Token auto-import (Moxfield-style) ---
+            // Collect the token/emblem ids every card in the deck can create, drop any
+            // we already have (existing tokens + those pasted in the list), fetch the
+            // rest, and add them so players don't have to hunt for tokens by hand.
+            const haveTokenIds = new Set<string>([...stagedTokens, ...tokens].map(t => t.scryfallId));
+            const wantedIds = Array.from(new Set(
+                [...deck, ...tokens].flatMap(c => c.tokenParts || [])
+            )).filter(id => !haveTokenIds.has(id));
+
+            let autoTokens: CardData[] = [];
+            if (wantedIds.length > 0) {
+                try {
+                    const fetched = await fetchCardsByIds(wantedIds);
+                    const seen = new Set(haveTokenIds);
+                    autoTokens = fetched
+                        .filter(t => { if (seen.has(t.scryfallId)) return false; seen.add(t.scryfallId); return true; })
+                        .map(t => ({ ...t, isToken: true, id: crypto.randomUUID() }));
+                } catch (e) {
+                    console.error('Token auto-import failed', e);
+                }
+            }
+
+            setStagedTokens(prev => [...prev, ...tokens, ...autoTokens]);
+            setAutoTokenMsg(autoTokens.length > 0 ? `${autoTokens.length} token${autoTokens.length > 1 ? 's' : ''} auto-added — review in the next step.` : null);
 
             if (missing.length > 0) {
                 const preview = missing.slice(0, 8).join(", ");
@@ -265,6 +290,11 @@ export const DeckBuilder: React.FC<DeckBuilderProps> = ({ initialDeck, initialTo
                             <span>Selected Tokens</span>
                             <span className="text-blue-400">{stagedTokens.length}</span>
                         </h3>
+                        {autoTokenMsg && (
+                            <div className="mb-3 p-2 bg-green-900/40 border border-green-700 rounded text-green-200 text-xs flex items-center gap-2 shrink-0">
+                                <Check size={14} /> {autoTokenMsg}
+                            </div>
+                        )}
                         <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
                             {stagedTokens.map((token, idx) => (
                                 <div key={token.id} className="flex items-center gap-2 bg-gray-800 p-2 rounded border border-gray-700">

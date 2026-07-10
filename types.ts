@@ -26,6 +26,9 @@ export interface CardData {
   manaActivationCost?: string; // Cost to activate mana ability e.g. '{1}' for '{1}, {T}: Add {G}{G}'
   isToken?: boolean;
   shortcutKey?: string;
+  // Scryfall ids of tokens/emblems this card can create (from `all_parts`), used
+  // to auto-import a deck's tokens the way Moxfield does.
+  tokenParts?: string[];
 }
 
 export interface BoardObject {
