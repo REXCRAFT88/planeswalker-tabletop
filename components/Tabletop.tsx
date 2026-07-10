@@ -1573,7 +1573,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         try {
             localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
         } catch (e) {
-            console.warn('Failed to save local backup due to storage quota:', e);
+            try {
+                const strippedBackup = { ...backupData, logs: [] };
+                localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(strippedBackup));
+            } catch (e2) {
+                // Silently fail if still too big to avoid console spam during rapid updates (e.g., dragging)
+            }
         }
     }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId]);
 
@@ -4201,7 +4206,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         turnPhaseRef.current = target;
         if (!isLocal) emitAction('PHASE_CHANGE', { phase: target });
         
-        if (target !== 'COMBAT' && combatRef.current?.active) {
+        if (target === 'COMBAT') {
+            updateCombat({ active: true, step: 'attackers', attackerSeatId: mySeatId(), attackers: [], blocks: [] });
+        } else if (combatRef.current?.active) {
             updateCombat({ ...combatRef.current, active: false });
         }
     };
@@ -4972,7 +4979,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             }
             return;
         }
-        if (key === 'tab') { e.preventDefault(); return; }
+        if (key === 'tab') { e.preventDefault(); advancePhase(); return; }
         if (key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleUndo(); return; }
         if (key === 'arrowleft') {
             if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev - 1 + (playersList.length - 1)) % (playersList.length - 1));
@@ -5920,16 +5927,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                     <div className="relative">
                         <button 
-                            onClick={() => rollDice(6)} 
+                            onClick={(e) => { setShowDiceMenu(!showDiceMenu); }} 
                             onContextMenu={(e) => { e.preventDefault(); setShowDiceMenu(!showDiceMenu); }}
                             className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500" 
-                            title="Roll D6 (Right-click for more options)"
+                            title="Roll Dice"
                         >
                             <Dices size={20} />
+                            <ChevronDown size={14} className="ml-1 opacity-70" />
                         </button>
                         
                         {showDiceMenu && (
-                            <div className="absolute bottom-full right-0 mb-2 w-32 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
+                            <div className="absolute top-full right-0 mt-2 w-32 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
                                 {[2, 4, 6, 10, 12, 20, 100].map(sides => (
                                     <button 
                                         key={sides}
@@ -6078,12 +6086,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                         </button>
                         <div className="relative">
                             <button 
-                                onClick={() => { rollDice(6); setMobileMenuOpen(false); }} 
+                                onClick={() => { setShowDiceMenu(!showDiceMenu); }} 
                                 onContextMenu={(e) => { e.preventDefault(); setShowDiceMenu(!showDiceMenu); }}
                                 className="w-full bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2"
                             >
                                 <Dices size={24} className="text-yellow-500" />
-                                <span className="text-white font-bold text-center">Roll D6<br/><span className="text-[10px] text-gray-400 font-normal">(Long press for more)</span></span>
+                                <span className="text-white font-bold text-center flex items-center gap-1">Roll Dice <ChevronDown size={14} /></span>
                             </button>
                             {showDiceMenu && (
                                 <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
@@ -7224,6 +7232,50 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 </div>
                                 <ChevronRight className="text-gray-500 group-hover:text-white" size={20} />
                             </button>
+
+                            {(() => {
+                                let total = 0;
+                                for (let i = 0; i < localStorage.length; i++) {
+                                    const key = localStorage.key(i);
+                                    if (key) total += (localStorage.getItem(key)?.length || 0) * 2;
+                                }
+                                const max = 5 * 1024 * 1024;
+                                const pct = Math.min(100, Math.max(0, (total / max) * 100));
+                                const color = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-blue-500';
+                                return (
+                                    <div className="w-full bg-gray-700/50 p-4 rounded-lg border border-gray-600 flex flex-col gap-4">
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex justify-between items-center text-xs">
+                                                <span className="text-gray-300 font-bold flex items-center gap-1"><Archive size={14} className="text-gray-400"/> Local Storage</span>
+                                                <span className={pct > 90 ? 'text-red-400 font-bold' : 'text-gray-400'}>{(total / 1024 / 1024).toFixed(2)} MB / 5.00 MB</span>
+                                            </div>
+                                            <div className="w-full bg-gray-900 rounded-full h-1.5 overflow-hidden">
+                                                <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                let cleared = 0;
+                                                Object.keys(localStorage).forEach(key => {
+                                                    if (key.startsWith('planeswalker_backup_') && key !== `planeswalker_backup_${roomId}`) {
+                                                        localStorage.removeItem(key);
+                                                        cleared++;
+                                                    }
+                                                });
+                                                addLog(`Memory cleanup complete: removed ${cleared} old backups.`, "SYSTEM");
+                                                setShowSettingsModal(false);
+                                            }}
+                                            className="w-full bg-red-900/40 hover:bg-red-800/60 p-3 rounded-lg border border-red-900/50 flex justify-between items-center transition-colors group"
+                                        >
+                                            <div className="flex flex-col items-start">
+                                                <h4 className="font-bold text-red-200 flex items-center gap-2"><Trash2 size={16} className="text-red-400" /> Clean Up Memory</h4>
+                                                <p className="text-xs text-red-300/70 group-hover:text-red-200">Remove old backups</p>
+                                            </div>
+                                            <ChevronRight className="text-red-500 group-hover:text-red-300" size={20} />
+                                        </button>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>
