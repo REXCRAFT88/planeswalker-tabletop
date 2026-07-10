@@ -403,26 +403,16 @@ const HandCard: React.FC<{
     );
 };
 
-const Die: React.FC<{ value: number, sides: number, x: number, y: number, color: string, rotation: number }> = ({ value, sides, x, y, color, rotation }) => {
-    return createPortal(
+const Die: React.FC<{ value: number, sides: number, color: string }> = ({ value, sides, color }) => {
+    return (
         <div
-            className="absolute flex items-center justify-center z-[1000] animate-in zoom-in spin-in duration-500 ease-out"
-            style={{
-                left: x, top: y,
-                width: 64, height: 64,
-                transform: 'translate(-50%, -50%)'
-            }}
+            className="flex items-center justify-center w-24 h-24 bg-gray-900 border-[6px] rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.8)] relative overflow-hidden animate-in zoom-in spin-in duration-500 ease-out"
+            style={{ borderColor: color, boxShadow: `0 0 30px ${color}80` }}
         >
-            <div
-                className="w-full h-full flex items-center justify-center bg-gray-900 border-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] relative overflow-hidden"
-                style={{ borderColor: color, boxShadow: `0 0 20px ${color}60` }}
-            >
-                <div className="absolute inset-0 bg-white/10" />
-                <span className="text-3xl font-bold text-white drop-shadow-md" style={{ transform: `rotate(${-rotation}deg)` }}>{value}</span>
-                <span className="absolute bottom-1 text-[8px] text-gray-400 font-bold">D{sides}</span>
-            </div>
-        </div>,
-        document.body
+            <div className="absolute inset-0 bg-white/10" />
+            <span className="text-5xl font-bold text-white drop-shadow-md">{value}</span>
+            <span className="absolute bottom-1.5 text-xs text-gray-400 font-bold tracking-widest">D{sides}</span>
+        </div>
     );
 };
 
@@ -1373,6 +1363,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
+    const [showDiceMenu, setShowDiceMenu] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [soundMuted, setSoundMutedState] = useState(isSoundMuted());
     const toggleSound = () => { const next = !soundMuted; setSoundMuted(next); setSoundMutedState(next); if (!next) playSound('draw'); };
@@ -1968,6 +1959,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const handleExit = () => {
         socket.emit('leave_room', { room: roomId });
         localStorage.removeItem(`game_phase_${roomId}`);
+        localStorage.removeItem(`planeswalker_backup_${roomId}`);
         sessionStorage.removeItem('active_game_session');
         onExit();
     };
@@ -2171,8 +2163,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (!order || order.length === 0) return players;
         const orderMap = new Map(order.map((id, i) => [id, i]));
         return [...players].sort((a, b) => {
-            const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : 999;
-            const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : 999;
+            const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : (a.userId && orderMap.has(a.userId) ? orderMap.get(a.userId)! : 999);
+            const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : (b.userId && orderMap.has(b.userId) ? orderMap.get(b.userId)! : 999);
             return idxA - idxB;
         });
     };
@@ -2330,7 +2322,9 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     logs: logsRef.current.slice(0, 50),
                     allPlayerLife: { ...opponentsLife, [socket.id]: lifeRef.current },
                     allPlayerCounts: { ...opponentsCounts, [socket.id]: { library: libraryRef.current.length, graveyard: graveyard.length, exile: exile.length, hand: hand.filter(c => !c.isToken).length, command: commandZone.length } },
-                    allPlayerCommanders: { ...opponentsCommanders, [socket.id]: commandZone }
+                    allPlayerCommanders: { ...opponentsCommanders, [socket.id]: commandZone },
+                    turnPhase: turnPhaseRef.current,
+                    combat: combatRef.current
                 };
                 socket.emit('game_action', { room: roomId, action: 'GAME_STATE_SYNC', data: fullPublicState });
 
@@ -2628,7 +2622,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 }
             }
             else if (action === 'GAME_STATE_SYNC') {
-                setGamePhase(data.phase);
+                if (data.phase === 'PLAYING' && gamePhaseRef.current === 'MULLIGAN') {
+                    // Keep local player in MULLIGAN phase until they keep their hand
+                } else {
+                    setGamePhase(data.phase);
+                }
                 setBoardObjects(data.boardObjects);
                 setTurn(data.turn);
                 setRound(data.round);
@@ -2640,6 +2638,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     setPlayersList(prev => sortPlayers(prev, data.turnOrder));
                 }
                 if (data.logs) setLogs(data.logs);
+                if (data.turnPhase) {
+                    setTurnPhase(data.turnPhase);
+                    turnPhaseRef.current = data.turnPhase;
+                }
+                if (data.combat !== undefined) {
+                    setCombat(data.combat);
+                    combatRef.current = data.combat;
+                }
 
                 const myId = socket.id;
                 if (data.allPlayerLife) {
@@ -2789,6 +2795,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const handleGameMeta = (meta: { turnNumber?: number; currentTurnPlayerId?: string; turnOrder?: string[] }) => {
             if (typeof meta.turnNumber === 'number') setTurn(meta.turnNumber);
             if (meta.currentTurnPlayerId) setCurrentTurnPlayerId(meta.currentTurnPlayerId);
+            if (meta.turnOrder) {
+                setTurnOrder(meta.turnOrder);
+                setPlayersList(prev => sortPlayers(prev, meta.turnOrder));
+            }
         };
 
         socket.on('room_players_update', handleRoomUpdate);
@@ -3004,7 +3014,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             // Load P1 state
             loadLocalPlayerState(playersList[0].id);
         } else {
-            const lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
+            let lib = libraryRef.current.length > 0 ? libraryRef.current : initialDeck;
+            if (lib === initialDeck || (lib.length === initialDeck.length && commandZone.length === 0)) {
+                const commanders = initialDeck.filter(isCmdZoneCard);
+                const deck = initialDeck.filter(c => !isCmdZoneCard(c));
+                lib = [...deck].sort(() => Math.random() - 0.5);
+                setCommandZone(commanders);
+            }
+
             if (lib.length >= 7) {
                 const initialHand = lib.slice(0, 7);
                 const remaining = lib.slice(7);
@@ -4002,7 +4019,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             if (!nextPlayer) return;
 
             setCurrentTurnPlayerId(nextPlayer.id);
-            if (gamePhase === 'PLAYING') setTurn(turn + 1);
+            if (gamePhase === 'PLAYING' && nextIndex <= currentIndex) setTurn(turn + 1);
             setTurnStartTime(Date.now());
 
             // Switch View to Next Player
@@ -5449,23 +5466,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     );
                 })}
 
-                {activeDice.map(die => {
-                    const ownerIdx = playersList.findIndex(p => p.id === die.playerId);
-                    const pos = layout[ownerIdx];
-                    if (!pos) return null;
-                    const dieRotation = pos.rot;
-                    const x = pos.x + MAT_W / 2;
-                    const y = pos.y + MAT_H / 2;
 
-                    return (
-                        <Die
-                            key={die.id}
-                            value={die.value} sides={die.sides} x={isLocal ? x : die.x} y={isLocal ? y : die.y}
-                            color={playersList[ownerIdx]?.color || '#fff'}
-                            rotation={dieRotation}
-                        />
-                    );
-                })}
 
                 {boardObjects.map(obj => {
                     const isOwnerInGame = playersList.some(p => p.id === obj.controllerId);
@@ -5917,9 +5918,30 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
                     <div className="hidden md:block w-px h-6 bg-gray-700 mx-2" />
 
-                    <button onClick={() => rollDice(6)} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500" title="Roll D6">
-                        <Dices size={20} />
-                    </button>
+                    <div className="relative">
+                        <button 
+                            onClick={() => rollDice(6)} 
+                            onContextMenu={(e) => { e.preventDefault(); setShowDiceMenu(!showDiceMenu); }}
+                            className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-yellow-500" 
+                            title="Roll D6 (Right-click for more options)"
+                        >
+                            <Dices size={20} />
+                        </button>
+                        
+                        {showDiceMenu && (
+                            <div className="absolute bottom-full right-0 mb-2 w-32 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
+                                {[2, 4, 6, 10, 12, 20, 100].map(sides => (
+                                    <button 
+                                        key={sides}
+                                        onClick={() => { rollDice(sides); setShowDiceMenu(false); }}
+                                        className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white font-bold text-sm"
+                                    >
+                                        {sides === 2 ? 'Coin Flip' : `D${sides}`}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
                     <button onClick={spawnCounter} className="hidden md:flex items-center gap-2 px-3 py-1 bg-gray-800 border border-gray-600 rounded hover:bg-gray-700 text-cyan-400" title="Add Counter">
                         <Disc size={20} />
@@ -6054,10 +6076,29 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <Swords size={24} className="text-red-400" />
                             <span className="text-white font-bold">Cmdr Dmg</span>
                         </button>
-                        <button onClick={() => { rollDice(6); setMobileMenuOpen(false); }} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2">
-                            <Dices size={24} className="text-yellow-500" />
-                            <span className="text-white font-bold">Roll D6</span>
-                        </button>
+                        <div className="relative">
+                            <button 
+                                onClick={() => { rollDice(6); setMobileMenuOpen(false); }} 
+                                onContextMenu={(e) => { e.preventDefault(); setShowDiceMenu(!showDiceMenu); }}
+                                className="w-full bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2"
+                            >
+                                <Dices size={24} className="text-yellow-500" />
+                                <span className="text-white font-bold text-center">Roll D6<br/><span className="text-[10px] text-gray-400 font-normal">(Long press for more)</span></span>
+                            </button>
+                            {showDiceMenu && (
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden z-[9000]">
+                                    {[2, 4, 6, 10, 12, 20, 100].map(sides => (
+                                        <button 
+                                            key={sides}
+                                            onClick={() => { rollDice(sides); setShowDiceMenu(false); setMobileMenuOpen(false); }}
+                                            className="w-full text-center px-4 py-3 hover:bg-gray-700 border-b border-gray-700 last:border-b-0 text-white font-bold"
+                                        >
+                                            {sides === 2 ? 'Coin Flip' : `D${sides}`}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                         <button onClick={() => { spawnCounter(); setMobileMenuOpen(false); }} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col items-center gap-2">
                             <Disc size={24} className="text-cyan-400" />
                             <span className="text-white font-bold">Counter</span>
@@ -7080,6 +7121,23 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             </div>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {activeDice.length > 0 && (
+                <div className="fixed inset-0 pointer-events-none z-[11000] flex flex-wrap items-center justify-center gap-6 p-10 bg-black/20">
+                    {activeDice.map(die => {
+                        const ownerIdx = playersList.findIndex(p => p.id === die.playerId);
+                        const color = playersList[ownerIdx]?.color || '#fff';
+                        return (
+                            <Die
+                                key={die.id}
+                                value={die.value} 
+                                sides={die.sides} 
+                                color={color}
+                            />
+                        );
+                    })}
                 </div>
             )}
 

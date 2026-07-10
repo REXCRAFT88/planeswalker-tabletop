@@ -245,7 +245,11 @@ const advanceTurnServer = (room: string, prevDuration?: string) => {
     const prevPlayer = prevUserId ? rooms[room]?.find(p => p.userId === prevUserId) : undefined;
 
     meta.currentTurnUserId = nextUserId;
-    meta.turnNumber += 1;
+    
+    const nextIdx = order.indexOf(nextUserId);
+    if (nextIdx <= currentIdx && meta.started) {
+        meta.turnNumber += 1;
+    }
 
     serverBroadcast(room, 'PASS_TURN', {
         nextPlayerSocketId: socketIdForUser(room, nextUserId),
@@ -554,6 +558,8 @@ io.on('connection', (socket) => {
                 if (rooms[room].every(p => p.disconnected)) {
                     delete rooms[room];
                     delete roomMeta[room];
+                    delete roomStates[room];
+                    delete roomActionLog[room];
                 }
             }
         }
