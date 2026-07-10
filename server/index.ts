@@ -71,6 +71,11 @@ interface Player {
     color: string;
     disconnected: boolean;
     disconnectedAt?: number;
+    // Optional custom table appearance, relayed to everyone via room_players_update.
+    customMatUrl?: string;
+    customSleeveUrl?: string;
+    matTransform?: { x: number; y: number; scale: number };
+    sleeveTransform?: { x: number; y: number; scale: number };
 }
 
 interface RoomMeta {
@@ -485,6 +490,20 @@ io.on('connection', (socket) => {
                 io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
             }
         }
+    });
+
+    // Relay a player's custom table appearance (mat/sleeve image + transforms) to
+    // the whole room. Persisted on the player object so reconnects and late joins
+    // see it via the normal room_players_update payload.
+    socket.on('update_player_appearance', ({ room, matUrl, sleeveUrl, matTransform, sleeveTransform }) => {
+        if (room) room = room.trim().toUpperCase();
+        const player = rooms[room]?.find(p => p.id === socket.id);
+        if (!player) return;
+        player.customMatUrl = matUrl || undefined;
+        player.customSleeveUrl = sleeveUrl || undefined;
+        player.matTransform = matTransform || undefined;
+        player.sleeveTransform = sleeveTransform || undefined;
+        io.to(room).emit('room_players_update', { players: rooms[room], hostId: roomMeta[room]?.hostId });
     });
 
     socket.on('kick_player', ({ room, targetId }) => {

@@ -15,12 +15,13 @@ export const MAX_UNDO_HISTORY = 10;
 import { aiStatus, requestTurn, continueTurn, requestMulligan } from '../services/ai';
 import { buildGameStateView, deckToSummaryCards, deckStrategySummary } from '../services/aiState';
 import { getVoiceBackend, voiceInputSupported, requestVoiceReply } from '../services/voice';
+import { playSound, isSoundMuted, setSoundMuted } from '../services/sounds';
 import { RealtimeVoiceSession, requestConsult } from '../services/voiceRealtime';
 import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId, VoiceChatTurn, VoiceBackendId } from '../services/aiTypes';
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2, Upload
 } from 'lucide-react';
 
 // Cards that start in the command-zone area rather than the library: commanders
@@ -69,6 +70,59 @@ export type TurnPhase = typeof TURN_PHASES[number];
 export const PHASE_LABELS: Record<TurnPhase, string> = {
     UNTAP: 'Untap', UPKEEP: 'Upkeep', DRAW: 'Draw', MAIN1: 'Main 1',
     COMBAT: 'Combat', MAIN2: 'Main 2', END: 'End',
+};
+
+// --- Table appearance (custom mat / sleeve) ---
+export interface ImgTransform { x: number; y: number; scale: number; }
+export const DEFAULT_TRANSFORM: ImgTransform = { x: 50, y: 50, scale: 100 };
+// Turn an ImgTransform into CSS background props so mats/sleeves position the same
+// way everywhere they render.
+export const transformToBg = (t?: ImgTransform) => ({
+    backgroundPosition: `${t?.x ?? 50}% ${t?.y ?? 50}%`,
+    backgroundSize: `${t?.scale ?? 100}%`,
+    backgroundRepeat: 'no-repeat' as const,
+});
+
+// Downscale an uploaded image to a data URL that stays well under the server's
+// per-player state budget (target ≤ ~200KB). Big art should be linked by URL
+// instead; this keeps casual uploads (screenshots, photos) from bloating sync.
+export const downscaleImage = (file: File, maxDim = 900, targetBytes = 200_000): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read file'));
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('Could not decode image'));
+            img.onload = () => {
+                let { width, height } = img;
+                const scale = Math.min(1, maxDim / Math.max(width, height));
+                width = Math.round(width * scale); height = Math.round(height * scale);
+                const canvas = document.createElement('canvas');
+                canvas.width = width; canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return reject(new Error('Canvas unsupported'));
+                ctx.drawImage(img, 0, 0, width, height);
+                // Step JPEG quality down until under the byte budget.
+                let quality = 0.85;
+                let out = canvas.toDataURL('image/jpeg', quality);
+                while (out.length * 0.75 > targetBytes && quality > 0.35) {
+                    quality -= 0.1;
+                    out = canvas.toDataURL('image/jpeg', quality);
+                }
+                resolve(out);
+            };
+            img.src = reader.result as string;
+        };
+        reader.readAsDataURL(file);
+    });
+
+// YIQ luminance test — pick black or white text for legibility on a given hex
+// background (used for player-name contrast on custom mats / sleeves).
+export const contrastText = (hex: string): string => {
+    const h = hex.replace('#', '');
+    if (h.length < 6) return '#ffffff';
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 >= 140 ? '#000000' : '#ffffff';
 };
 
 const defaultKeyBindings = (): Record<string, string> => {
@@ -388,6 +442,10 @@ interface PlaymatProps {
     zones: ZoneLayout;
     counts: ZoneCounts;
     sleeveColor: string;
+    matUrl?: string;
+    sleeveUrl?: string;
+    matTransform?: ImgTransform;
+    sleeveTransform?: ImgTransform;
     topGraveyardCard?: CardData;
     isShuffling: boolean;
     isControlled: boolean;
@@ -408,6 +466,7 @@ interface PlaymatProps {
 
 const Playmat: React.FC<PlaymatProps> = ({
     x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
+    matUrl, sleeveUrl, matTransform, sleeveTransform,
     topGraveyardCard, isShuffling, isControlled, commanders,
     onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander, onViewHand,
     isMobile, onMobileZoneAction, onDoubleClickZone, disconnected
@@ -498,7 +557,7 @@ const Playmat: React.FC<PlaymatProps> = ({
 
     return (
         <div
-            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 ${disconnected ? 'opacity-50' : ''}`}
+            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 overflow-hidden ${disconnected ? 'opacity-50' : ''}`}
             style={{
                 left: x, top: y, width, height,
                 borderColor: sleeveColor,
@@ -506,7 +565,18 @@ const Playmat: React.FC<PlaymatProps> = ({
                 transform: `rotate(${rotation}deg)`
             }}
         >
-            <div className="absolute bottom-4 left-6 text-white/30 font-bold text-xl uppercase tracking-widest pointer-events-none">
+            {/* Custom playmat image (behind everything) */}
+            {matUrl && (
+                <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ backgroundImage: `url("${matUrl}")`, ...transformToBg(matTransform) }}
+                />
+            )}
+
+            <div
+                className="absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none"
+                style={{ color: matUrl ? '#ffffff' : contrastText(sleeveColor), textShadow: matUrl ? '0 1px 4px rgba(0,0,0,0.9)' : 'none', opacity: matUrl ? 0.85 : 0.3 }}
+            >
                 {playerName}
             </div>
 
@@ -526,9 +596,11 @@ const Playmat: React.FC<PlaymatProps> = ({
                     onClick={handleLibraryClick}
                     onTouchStart={isMobile ? (e) => handleZoneTouchStart('LIBRARY', e) : undefined}
                     onTouchEnd={isMobile ? () => handleZoneTouchEnd('LIBRARY') : undefined}
-                    style={{ backgroundColor: sleeveColor }}
+                    style={sleeveUrl
+                        ? { backgroundImage: `url("${sleeveUrl}")`, ...transformToBg(sleeveTransform), backgroundColor: sleeveColor }
+                        : { backgroundColor: sleeveColor }}
                 >
-                    <div className="text-white font-bold text-2xl z-10 pointer-events-none">{counts.library}</div>
+                    <div className="text-white font-bold text-2xl z-10 pointer-events-none" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>{counts.library}</div>
                     {isShuffling && <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white z-20">Shuffling...</div>}
 
                     {isControlled && !isMobile && <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-bold px-1.5 rounded border border-white/20 pointer-events-none z-20 shadow-sm">X</div>}
@@ -884,6 +956,87 @@ const HealthModal: React.FC<{
     );
 };
 
+// Picker for one custom image (mat or sleeve): URL or upload, with a draggable /
+// scroll-zoomable preview that edits the stored transform. Touch works too (drag
+// to pan, pinch handled by the browser's default on the preview is not needed —
+// scroll/drag covers desktop; on touch, drag repositions).
+const AppearancePicker: React.FC<{
+    label: string;
+    url: string;
+    transform: ImgTransform;
+    aspect: string;
+    onUrl: (u: string) => void;
+    onTransform: (t: ImgTransform) => void;
+}> = ({ label, url, transform, aspect, onUrl, onTransform }) => {
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState('');
+    const dragRef = useRef<{ x: number; y: number } | null>(null);
+
+    const handleFile = async (f?: File | null) => {
+        if (!f) return;
+        setBusy(true); setErr('');
+        try { onUrl(await downscaleImage(f)); onTransform({ ...DEFAULT_TRANSFORM }); }
+        catch (e: any) { setErr(e?.message || 'Upload failed'); }
+        finally { setBusy(false); }
+    };
+
+    const onWheel = (e: React.WheelEvent) => {
+        const scale = Math.min(400, Math.max(30, transform.scale + (e.deltaY < 0 ? 8 : -8)));
+        onTransform({ ...transform, scale });
+    };
+    const onPointerDown = (e: React.PointerEvent) => {
+        dragRef.current = { x: e.clientX, y: e.clientY };
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: React.PointerEvent) => {
+        if (!dragRef.current) return;
+        const dx = e.clientX - dragRef.current.x, dy = e.clientY - dragRef.current.y;
+        dragRef.current = { x: e.clientX, y: e.clientY };
+        onTransform({
+            ...transform,
+            x: Math.min(100, Math.max(0, transform.x - dx * 0.25)),
+            y: Math.min(100, Math.max(0, transform.y - dy * 0.25)),
+        });
+    };
+    const onPointerUp = () => { dragRef.current = null; };
+
+    return (
+        <div className="bg-gray-900/50 rounded-lg border border-gray-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+                <h4 className="font-bold text-white text-sm">{label}</h4>
+                {url && <button onClick={() => { onUrl(''); onTransform({ ...DEFAULT_TRANSFORM }); }} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"><Trash2 size={12} /> Remove</button>}
+            </div>
+            {url ? (
+                <div
+                    className="w-full rounded-lg overflow-hidden border border-gray-600 cursor-move touch-none select-none bg-gray-800"
+                    style={{ aspectRatio: aspect, backgroundImage: `url("${url}")`, ...transformToBg(transform) }}
+                    onWheel={onWheel}
+                    onPointerDown={onPointerDown}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    title="Drag to position, scroll to zoom"
+                />
+            ) : (
+                <div className="w-full rounded-lg border border-dashed border-gray-600 flex items-center justify-center text-gray-500 text-xs" style={{ aspectRatio: aspect }}>No image</div>
+            )}
+            <div className="flex gap-2">
+                <input
+                    value={url.startsWith('data:') ? '' : url}
+                    onChange={e => onUrl(e.target.value)}
+                    placeholder="Paste image URL"
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-blue-500 outline-none"
+                />
+                <label className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white cursor-pointer flex items-center gap-1 shrink-0">
+                    {busy ? <Loader size={12} className="animate-spin" /> : <Upload size={12} />} Upload
+                    <input type="file" accept="image/*" className="hidden" onChange={e => handleFile(e.target.files?.[0])} />
+                </label>
+            </div>
+            {url && <p className="text-[10px] text-gray-500">Drag the preview to reposition, scroll to zoom. Uploads are downscaled; link a URL for large art.</p>}
+            {err && <p className="text-[10px] text-red-400">{err}</p>}
+        </div>
+    );
+};
+
 const emptyStats: PlayerStats = {
     damageDealt: {}, damageReceived: 0, healingGiven: 0, healingReceived: 0, selfHealing: 0,
     tappedCounts: {},
@@ -1191,6 +1344,40 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [isFullScreen, setIsFullScreen] = useState(false);
     const [showHealthModal, setShowHealthModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [soundMuted, setSoundMutedState] = useState(isSoundMuted());
+    const toggleSound = () => { const next = !soundMuted; setSoundMuted(next); setSoundMutedState(next); if (!next) playSound('draw'); };
+
+    // --- Table appearance (custom playmat / sleeve) ---
+    const [showCustomizeModal, setShowCustomizeModal] = useState(false);
+    const lsGet = (k: string, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+    const lsGetJSON = <T,>(k: string, d: T): T => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch { return d; } };
+    const [customMatUrl, setCustomMatUrl] = useState<string>(() => lsGet('planeswalker_mat_url'));
+    const [customSleeveUrl, setCustomSleeveUrl] = useState<string>(() => lsGet('planeswalker_sleeve_url'));
+    const [matTransform, setMatTransform] = useState<ImgTransform>(() => lsGetJSON('planeswalker_mat_tf', DEFAULT_TRANSFORM));
+    const [sleeveTransform, setSleeveTransform] = useState<ImgTransform>(() => lsGetJSON('planeswalker_sleeve_tf', DEFAULT_TRANSFORM));
+    // Opponents' appearance, keyed by seat/socket id, learned from the server.
+    const [opponentAppearance, setOpponentAppearance] = useState<Record<string, { matUrl?: string; sleeveUrl?: string; matTransform?: ImgTransform; sleeveTransform?: ImgTransform }>>({});
+
+    // Persist my appearance and broadcast it so opponents can render it.
+    useEffect(() => {
+        try {
+            localStorage.setItem('planeswalker_mat_url', customMatUrl);
+            localStorage.setItem('planeswalker_sleeve_url', customSleeveUrl);
+            localStorage.setItem('planeswalker_mat_tf', JSON.stringify(matTransform));
+            localStorage.setItem('planeswalker_sleeve_tf', JSON.stringify(sleeveTransform));
+        } catch { /* ignore */ }
+        if (!isLocal && socket.connected) {
+            socket.emit('update_player_appearance', { room: roomId, matUrl: customMatUrl, sleeveUrl: customSleeveUrl, matTransform, sleeveTransform });
+        }
+    }, [customMatUrl, customSleeveUrl, matTransform, sleeveTransform]);
+
+    // Appearance for a given seat id: my own live state for me, else what that
+    // opponent last broadcast.
+    const appearanceFor = (seatId: string) => {
+        const myId = isLocal ? playersList[mySeatIndex]?.id : (socket.id || 'local-player');
+        if (seatId === myId) return { matUrl: customMatUrl, sleeveUrl: customSleeveUrl, matTransform, sleeveTransform };
+        return opponentAppearance[seatId] || {};
+    };
 
     // Local Game State Storage
     const localPlayerStates = useRef<Record<string, LocalPlayerState>>({});
@@ -1690,11 +1877,26 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return localStorage.getItem(`planeswalker_user_id_${room}`);
         };
 
+        // Push my saved custom appearance to the room (read from storage so it works
+        // regardless of this effect's closure). Called after every (re)join.
+        const emitAppearance = () => {
+            try {
+                socket.emit('update_player_appearance', {
+                    room: roomId,
+                    matUrl: localStorage.getItem('planeswalker_mat_url') || '',
+                    sleeveUrl: localStorage.getItem('planeswalker_sleeve_url') || '',
+                    matTransform: JSON.parse(localStorage.getItem('planeswalker_mat_tf') || 'null') || undefined,
+                    sleeveTransform: JSON.parse(localStorage.getItem('planeswalker_sleeve_tf') || 'null') || undefined,
+                });
+            } catch { /* ignore */ }
+        };
+
         // Handle socket reconnection
         const handleReconnection = () => {
             console.log("Socket reconnected, re-joining room...");
             const userId = getUserIdForRoom(roomId);
             socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId });
+            emitAppearance();
             // Pull anything we missed while offline: the server replays buffered actions
             // after our last applied sequence, or falls back to a full snapshot if the
             // gap is too old.
@@ -1707,6 +1909,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Initial join
         const userId = getUserIdForRoom(roomId);
         socket.emit('join_room', { room: roomId, name: playerName, color: sleeveColor, userId });
+        emitAppearance();
 
 
         return () => {
@@ -1897,9 +2100,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (amount < 0) {
             damageTakenThisTurn.current += Math.abs(amount);
             addLog(`lost ${Math.abs(amount)} life`);
+            playSound('damage');
         } else {
             healingReceivedThisTurn.current += amount;
             addLog(`gained ${amount} life`);
+            playSound('heal');
         }
     };
 
@@ -1932,6 +2137,20 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const hostId = !Array.isArray(data) ? data.hostId : null;
 
             console.log("Room Update Received:", roomPlayers);
+
+            // Learn each player's custom mat/sleeve from the roster so we can render
+            // opponents' tables the way they set them.
+            setOpponentAppearance(prev => {
+                const next = { ...prev };
+                for (const p of roomPlayers as any[]) {
+                    if (p.id === socket.id) continue;
+                    next[p.id] = {
+                        matUrl: p.customMatUrl, sleeveUrl: p.customSleeveUrl,
+                        matTransform: p.matTransform, sleeveTransform: p.sleeveTransform,
+                    };
+                }
+                return next;
+            });
 
             // Detect left players — only consider truly gone players (not just disconnected)
             const prevPlayers = playersListRef.current;
@@ -2902,6 +3121,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             const newLib = cardsToShuffle.slice(7);
             setHand([...newHandCards, ...currentTokensInHand]);
             setLibrary(newLib);
+            playSound('mulligan');
             setMulliganCount(prev => prev + 1);
             addLog("took a mulligan");
         }
@@ -3807,6 +4027,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (key === lastTurnKeyRef.current) return;
         lastTurnKeyRef.current = key;
         setTurnPhase('UNTAP');
+        playSound('turnStart');
         if (!isMyTurn()) return;
         const myId = isLocal ? playersList[mySeatIndex]?.id : (socket.id || 'local-player');
         const myRot = layout[mySeatIndex]?.rot || 0;
@@ -4010,6 +4231,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         pushUndo({ type: 'PLAY_CARD', objectId: newObject.id, card, fromZone: 'HAND' });
 
         addLog(`played ${card.name} ${card.isToken ? '(Token)' : ''}`);
+        playSound('cardPlay');
     };
 
 
@@ -4107,6 +4329,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         });
         updateMyStats({ cardsDrawn: (gameStats[getMyId()]?.cardsDrawn || 0) + count });
         addLog(`drew ${count} card${count > 1 ? 's' : ''}`);
+        playSound('draw');
     };
 
     const playCommander = (card: CardData) => {
@@ -4126,6 +4349,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         emitAction('ADD_OBJECT', newObject);
         updateMyStats({ cardsPlayed: (gameStats[getMyId()]?.cardsPlayed || 0) + 1 });
         addLog(`cast commander ${card.name}`);
+        playSound('cardPlay');
     };
 
     const handleDamageReport = (damageReport: Record<string, number>, healingReport: Record<string, number>) => {
@@ -4882,6 +5106,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 zones={{ library: ZONE_LIBRARY_OFFSET, graveyard: ZONE_GRAVEYARD_OFFSET, exile: ZONE_EXILE_OFFSET, command: ZONE_COMMAND_OFFSET }}
                                 counts={counts}
                                 sleeveColor={p.color}
+                                matUrl={appearanceFor(p.id).matUrl}
+                                sleeveUrl={appearanceFor(p.id).sleeveUrl}
+                                matTransform={appearanceFor(p.id).matTransform}
+                                sleeveTransform={appearanceFor(p.id).sleeveTransform}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 isControlled={isMe}
@@ -4952,6 +5180,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <Card
                                 object={obj}
                                 sleeveColor={objSleeveColor}
+                                sleeveUrl={appearanceFor(obj.controllerId).sleeveUrl}
+                                sleeveTransform={appearanceFor(obj.controllerId).sleeveTransform}
                                 isControlledByMe={isControlled}
                                 players={playersList}
                                 onUpdate={updateBoardObject}
@@ -6063,6 +6293,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 </div>
             )}
 
+            {showCustomizeModal && (
+                <div className="fixed inset-0 z-[12000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowCustomizeModal(false)}>
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2"><Palette className="text-purple-400" /> Table Appearance</h3>
+                            <button onClick={() => setShowCustomizeModal(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-4">Set a custom playmat and card sleeve. {isLocal ? 'Applies to your board.' : 'Other players see them too.'}</p>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1">
+                            <AppearancePicker label="Playmat" url={customMatUrl} transform={matTransform} aspect="16 / 10" onUrl={setCustomMatUrl} onTransform={setMatTransform} />
+                            <AppearancePicker label="Card Sleeve" url={customSleeveUrl} transform={sleeveTransform} aspect="5 / 7" onUrl={setCustomSleeveUrl} onTransform={setSleeveTransform} />
+                        </div>
+                        <div className="pt-4 mt-2 border-t border-gray-700 flex justify-end">
+                            <button onClick={() => setShowCustomizeModal(false)} className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-sm">Done</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showShortcuts && (
                 <div className="fixed inset-0 z-[11000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowShortcuts(false); setRebindingActionId(null); }}>
                     <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
@@ -6426,6 +6675,34 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                     </div>
                                 </label>
                             </div>
+
+                            <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600">
+                                <label className="flex justify-between items-center cursor-pointer">
+                                    <div>
+                                        <h4 className="font-bold text-white flex items-center gap-2">
+                                            {soundMuted ? <Volume2 size={16} className="text-gray-500" /> : <Volume2 size={16} className="text-green-400" />} Sound Effects
+                                        </h4>
+                                        <p className="text-xs text-gray-400">Procedural cues for turns, plays, draws, and life changes.</p>
+                                    </div>
+                                    <div
+                                        onClick={toggleSound}
+                                        className={`w-14 h-8 rounded-full p-1 flex items-center transition-colors ${!soundMuted ? 'bg-green-600 justify-end' : 'bg-gray-600 justify-start'}`}
+                                    >
+                                        <div className="w-6 h-6 bg-white rounded-full shadow-md transform transition-transform" />
+                                    </div>
+                                </label>
+                            </div>
+
+                            <button
+                                onClick={() => { setShowCustomizeModal(true); setShowSettingsModal(false); }}
+                                className="w-full bg-gray-700/50 hover:bg-gray-700 p-4 rounded-lg border border-gray-600 flex justify-between items-center transition-colors group"
+                            >
+                                <div className="flex flex-col items-start">
+                                    <h4 className="font-bold text-white flex items-center gap-2"><Palette size={16} className="text-purple-400" /> Table Appearance</h4>
+                                    <p className="text-xs text-gray-400 group-hover:text-gray-300">Custom playmat &amp; card sleeve</p>
+                                </div>
+                                <ChevronRight className="text-gray-500 group-hover:text-white" size={20} />
+                            </button>
 
                             <button
                                 onClick={() => { setShowShortcuts(true); setShowSettingsModal(false); }}

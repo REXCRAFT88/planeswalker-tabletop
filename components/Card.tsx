@@ -12,6 +12,8 @@ interface PlayerProfile {
 interface CardProps {
     object: BoardObject;
     sleeveColor: string;
+    sleeveUrl?: string;
+    sleeveTransform?: { x: number; y: number; scale: number };
     players?: PlayerProfile[];
     isControlledByMe: boolean;
     onUpdate: (id: string, updates: Partial<BoardObject>) => void;
@@ -39,7 +41,7 @@ interface CardProps {
     onHover?: (id: string | null) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -417,14 +419,18 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, players = [], i
             <div className="relative w-full h-full group perspective-1000">
                 <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border ${object.cardData.isToken ? 'border-yellow-400' : 'border-black/50'}`}>
                     {object.isFaceDown ? (
-                        // Render Sleeve
+                        // Render Sleeve (custom image if the controller set one)
                         <div
                             className="w-full h-full flex items-center justify-center border-4 border-white/10"
-                            style={{ backgroundColor: sleeveColor }}
+                            style={sleeveUrl
+                                ? { backgroundColor: sleeveColor, backgroundImage: `url("${sleeveUrl}")`, backgroundPosition: `${sleeveTransform?.x ?? 50}% ${sleeveTransform?.y ?? 50}%`, backgroundSize: `${sleeveTransform?.scale ?? 100}%`, backgroundRepeat: 'no-repeat' }
+                                : { backgroundColor: sleeveColor }}
                         >
-                            <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
-                                <div className="w-12 h-12 rounded-full border-2 border-white/20" />
-                            </div>
+                            {!sleeveUrl && (
+                                <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                                    <div className="w-12 h-12 rounded-full border-2 border-white/20" />
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <img
