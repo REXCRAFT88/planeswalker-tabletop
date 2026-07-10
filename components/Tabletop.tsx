@@ -752,10 +752,10 @@ const Playmat: React.FC<PlaymatProps> = ({
                     className="absolute flex items-center justify-center cursor-help group"
                     style={{
                         left: '50%',
-                        bottom: -90,
+                        top: -CARD_HEIGHT - 20,
                         transform: 'translateX(-50%)',
-                        width: Math.min(counts.hand * 15 + CARD_WIDTH * 0.6, 200),
-                        height: CARD_HEIGHT * 0.6,
+                        width: counts.hand * 25 + CARD_WIDTH,
+                        height: CARD_HEIGHT,
                         zIndex: 50
                     }}
                     onClick={(e) => {
@@ -774,9 +774,9 @@ const Playmat: React.FC<PlaymatProps> = ({
                                 key={`hand-card-${i}`}
                                 className="absolute bg-blue-900 border border-white/50 rounded shadow-lg transition-transform group-hover:-translate-y-2 pointer-events-none"
                                 style={{
-                                    width: CARD_WIDTH * 0.6,
-                                    height: CARD_HEIGHT * 0.6,
-                                    left: i * 15,
+                                    width: CARD_WIDTH,
+                                    height: CARD_HEIGHT,
+                                    left: i * 25,
                                     transform: `rotate(${rot}deg)`,
                                     transformOrigin: 'bottom center'
                                 }}
@@ -4759,17 +4759,25 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         // Check My Zones
         if (checkZoneCollision(x, y, mySeatIndex, 'LIBRARY')) { setLibraryAction({ isOpen: true, cardId: id }); return; }
         if (checkZoneCollision(x, y, mySeatIndex, 'GRAVEYARD')) {
-            setGraveyard(prev => [obj.cardData, ...prev]);
+            if (!obj.cardData.isToken && !obj.cardData.isCopy) {
+                setGraveyard(prev => [obj.cardData, ...prev]);
+                addLog(`moved ${obj.cardData.name} from battlefield to graveyard`);
+            } else {
+                addLog(`token ${obj.cardData.name} vanished upon entering graveyard`);
+            }
             setBoardObjects(prev => prev.filter(o => o.id !== id));
             emitAction('REMOVE_OBJECT', { id });
-            addLog(`moved ${obj.cardData.name} from battlefield to graveyard`);
             return;
         }
         if (checkZoneCollision(x, y, mySeatIndex, 'EXILE')) {
-            setExile(prev => [obj.cardData, ...prev]);
+            if (!obj.cardData.isToken && !obj.cardData.isCopy) {
+                setExile(prev => [obj.cardData, ...prev]);
+                addLog(`exiled ${obj.cardData.name} from battlefield`);
+            } else {
+                addLog(`token ${obj.cardData.name} vanished into exile`);
+            }
             setBoardObjects(prev => prev.filter(o => o.id !== id));
             emitAction('REMOVE_OBJECT', { id });
-            addLog(`exiled ${obj.cardData.name} from battlefield`);
             return;
         }
         if (checkZoneCollision(x, y, mySeatIndex, 'COMMAND') && obj.cardData.isCommander) {

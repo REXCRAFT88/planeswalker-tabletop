@@ -98,6 +98,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
             return;
         }
 
+        if (e.button === 2) return;
+
         e.preventDefault();
         e.stopPropagation();
         onBringToFront(object.id);
@@ -235,7 +237,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
                 onInspect(object.cardData);
             }
         } else {
-            onInspect(object.cardData);
+            if (onCopy) onCopy(object.id);
+            else onInspect(object.cardData);
         }
     }
 
@@ -289,10 +292,9 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
     };
 
     const handleContextMenu = (e: React.MouseEvent) => {
-        if (!isControlledByMe) return;
         e.preventDefault();
         e.stopPropagation();
-        if (!isMobile) toggleTap(e);
+        onInspect(object.cardData);
     };
 
     // Determine Image to Show
@@ -512,7 +514,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
                             </div>
                         ) : null}
 
-                        <div className="flex gap-1 interactive-ui">
+                        <div className="flex flex-wrap justify-center gap-1 interactive-ui max-w-[90%]">
                             {isControlledByMe && (
                                 <>
                                     <button onClick={() => onReturnToHand(object.id)} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-blue-500" title="Return to Hand">
