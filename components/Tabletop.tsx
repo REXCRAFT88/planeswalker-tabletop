@@ -1579,7 +1579,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             opponentsCommanders,
             currentTurnPlayerId
         };
-        localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
+        try {
+            localStorage.setItem(`planeswalker_backup_${roomId}`, JSON.stringify(backupData));
+        } catch (e) {
+            console.warn('Failed to save local backup due to storage quota:', e);
+        }
     }, [hand, library, graveyard, exile, commandZone, life, boardObjects, gamePhase, turn, round, commanderDamage, turnOrder, playersList, mySeatIndex, isLocal, roomId, logs, opponentsLife, opponentsCounts, opponentsCommanders, currentTurnPlayerId]);
 
     const restoreGameFromBackup = () => {
