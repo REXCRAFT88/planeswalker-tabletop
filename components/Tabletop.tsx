@@ -578,7 +578,7 @@ const Playmat: React.FC<PlaymatProps> = ({
     return (
         <div
             data-combat-target={combatTargetId}
-            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 overflow-hidden ${disconnected ? 'opacity-50' : ''}`}
+            className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 overflow-visible ${disconnected ? 'opacity-50' : ''}`}
             style={{
                 left: x, top: y, width, height,
                 borderColor: sleeveColor,
@@ -587,15 +587,17 @@ const Playmat: React.FC<PlaymatProps> = ({
             }}
         >
             {/* Custom playmat image (behind everything) */}
-            {matUrl && (
-                <div
-                    className="absolute inset-0 pointer-events-none"
-                    style={{ backgroundImage: `url("${matUrl}")`, ...transformToBg(matTransform) }}
-                />
-            )}
+            <div className="absolute inset-0 pointer-events-none rounded-3xl overflow-hidden z-0">
+                {matUrl && (
+                    <div
+                        className="absolute inset-0"
+                        style={{ backgroundImage: `url("${matUrl}")`, ...transformToBg(matTransform) }}
+                    />
+                )}
+            </div>
 
             <div
-                className="absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none"
+                className="absolute bottom-4 left-6 font-bold text-xl uppercase tracking-widest pointer-events-none z-10"
                 style={{ color: matUrl ? '#ffffff' : contrastText(sleeveColor), textShadow: matUrl ? '0 1px 4px rgba(0,0,0,0.9)' : 'none', opacity: matUrl ? 0.85 : 0.3 }}
             >
                 {playerName}
