@@ -1094,8 +1094,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // the current pointer position (for the transient assignment line).
     const [combatDragFrom, setCombatDragFrom] = useState<string | null>(null);
     const [combatDragPos, setCombatDragPos] = useState<{ x: number; y: number } | null>(null);
-    // Ensures combat damage is applied exactly once per resolve transition.
-    const combatResolvedRef = useRef<string>('');
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -2470,19 +2468,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 }
             }
             else if (action === 'COMBAT_UPDATE') {
-                // Mirror the shared combat state. When it transitions into 'resolve',
-                // each client self-applies the damage targeting its own seat (once).
+                // Mirror the shared combat state (tracking only — no damage applied).
                 const incoming = (data.combat ?? null) as CombatState | null;
-                const prev = combatRef.current;
                 setCombat(incoming);
                 combatRef.current = incoming;
-                if (incoming?.active && incoming.step === 'resolve') {
-                    const token = `${incoming.attackerSeatId}:${incoming.attackers.length}:${incoming.blocks.length}`;
-                    if (prev?.step !== 'resolve' && combatResolvedRef.current !== token) {
-                        combatResolvedRef.current = token;
-                        resolveCombatForMe(incoming);
-                    }
-                }
             }
             else if (action === 'UPDATE_LIFE') {
                 if (sender && sender.id !== socket.id) {
@@ -4082,58 +4071,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         updateCombat({ ...c, blocks: c.blocks.filter(b => b.blockerObjectId !== blockerObjectId) });
     };
 
-    // Unblocked attacker damage per defending seat (blocked attackers deal no
-    // player damage — creature trades stay manual).
-    const computeCombatDamage = (c: CombatState) => {
-        const blocked = new Set(c.blocks.map(b => b.attackerObjectId));
-        const perDefender: Record<string, { total: number; commander: number; names: string[] }> = {};
-        for (const a of c.attackers) {
-            if (blocked.has(a.objectId)) continue;
-            const obj = boardObjectsRef.current.find(o => o.id === a.objectId);
-            if (!obj) continue;
-            const pow = parsePower(obj.cardData.power);
-            if (pow <= 0) continue;
-            const d = perDefender[a.defenderSeatId] || { total: 0, commander: 0, names: [] };
-            d.total += pow;
-            if (obj.cardData.isCommander) d.commander += pow;
-            d.names.push(obj.cardData.name);
-            perDefender[a.defenderSeatId] = d;
-        }
-        return perDefender;
-    };
-
-    // Local play: one client applies unblocked damage to every defender.
-    const resolveCombatLocalAll = (c: CombatState) => {
-        const dmg = computeCombatDamage(c);
-        Object.entries(dmg).forEach(([defId, d]) => {
-            const st = localPlayerStates.current[defId];
-            if (st) st.life = (st.life ?? 40) - d.total;
-            if (playersList[mySeatIndex]?.id === defId) setLife(prev => prev - d.total);
-            else setOpponentsLife(prev => ({ ...prev, [defId]: (prev[defId] ?? 40) - d.total }));
-            if (d.commander > 0) updateCommanderDamage(`cmd-${c.attackerSeatId}`, defId, d.commander);
-            const name = playersList.find(p => p.id === defId)?.name || 'a player';
-            addLog(`combat: ${name} takes ${d.total} damage${d.commander ? ` (${d.commander} commander)` : ''}`, 'SYSTEM');
-        });
-    };
-
-    // Online play: each client self-applies the damage targeting its own seat.
-    const resolveCombatForMe = (c: CombatState) => {
-        const myId = socket.id || 'local-player';
-        const d = computeCombatDamage(c)[myId];
-        if (!d || d.total <= 0) return;
-        setLife(prev => {
-            const nl = prev - d.total;
-            socket.emit('game_action', { room: roomId, action: 'UPDATE_LIFE', data: { life: nl } });
-            return nl;
-        });
-        if (d.commander > 0) updateCommanderDamage(`cmd-${c.attackerSeatId}`, myId, d.commander);
-        addLog(`took ${d.total} combat damage`, 'SYSTEM');
-    };
-
     // Advance one turn sub-phase. Combat expands into declare-attackers ->
-    // declare-blockers -> resolve before continuing to Main 2. Past END passes the
-    // turn. Auto-draw fires on entering DRAW (except the opening turn). Only the
-    // active player may advance.
+    // declare-blockers -> resolve before continuing to Main 2. The combat panel is
+    // a tracking aid only — it does not attribute damage or tap anything; players
+    // apply results by hand. Past END passes the turn. Only the active player may
+    // advance.
     const advancePhase = () => {
         if (gamePhase !== 'PLAYING') { nextTurn(); return; }
         if (!isMyTurn()) return;
@@ -4142,13 +4084,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         const c = combatRef.current;
         if (turnPhaseRef.current === 'COMBAT' && c?.active) {
             if (c.step === 'attackers') { updateCombat({ ...c, step: 'blockers' }); return; }
-            if (c.step === 'blockers') {
-                const resolved: CombatState = { ...c, step: 'resolve' };
-                if (isLocal) resolveCombatLocalAll(resolved);
-                combatResolvedRef.current = `${turn}:${c.attackerSeatId}`;
-                updateCombat(resolved);
-                return;
-            }
+            if (c.step === 'blockers') { updateCombat({ ...c, step: 'resolve' }); return; }
             if (c.step === 'resolve') {
                 updateCombat({ ...c, active: false });
                 setTurnPhase('MAIN2'); turnPhaseRef.current = 'MAIN2';
@@ -6635,7 +6571,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                             const canUndoAtk = combat.step === 'attackers' && (isLocal || atk.controllerId === socket.id);
                                             return (
                                                 <div key={a.objectId} className="flex flex-col items-center gap-1">
-                                                    <div className="relative group" onDoubleClick={() => setInspectCard(atk.cardData)} title={`${atk.cardData.name} — dbl-click to inspect`}>
+                                                    <div data-combat-obj={a.objectId} className={`relative group ${combat.step === 'blockers' ? 'ring-2 ring-amber-300/60 rounded' : ''}`} onDoubleClick={() => setInspectCard(atk.cardData)} title={`${atk.cardData.name} — dbl-click to inspect${combat.step === 'blockers' ? ' · drag a blocker here' : ''}`}>
                                                         <img src={atk.cardData.imageUrl} className="w-11 h-[62px] object-cover rounded border-2 border-red-500" />
                                                         {parsePower(atk.cardData.power) > 0 && <span className="absolute bottom-0 right-0 bg-black/80 text-white text-[9px] font-bold px-1 rounded-tl">{atk.cardData.power}</span>}
                                                         {canUndoAtk && <button onClick={() => removeAttacker(a.objectId)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={10} /></button>}
