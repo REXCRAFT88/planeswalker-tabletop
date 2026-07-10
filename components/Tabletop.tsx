@@ -790,9 +790,6 @@ const Playmat: React.FC<PlaymatProps> = ({
                             +{counts.hand - 7}
                         </div>
                     )}
-                    <div className="absolute -bottom-6 w-full text-center text-[10px] text-gray-300 font-bold bg-black/70 rounded px-2 py-0.5 pointer-events-none">
-                        {counts.hand} Cards In Hand
-                    </div>
                 </div>
             )}
         </div>

@@ -205,12 +205,29 @@ const transformScryfallData = (data: any): CardData => {
 export const fetchPrints = async (cardName: string): Promise<CardData[]> => {
     try {
         const q = `!"${cardName.replace(/"/g, '')}"`;
-        const resp = await fetch(`${BASE_URL}/cards/search?q=${encodeURIComponent(q)}&unique=prints&order=released&dir=desc`, {
-            mode: 'cors', credentials: 'omit', headers: { 'Accept': 'application/json' },
-        });
-        if (!resp.ok) return [];
-        const data = await resp.json();
-        return (data.data || []).map((c: any) => transformScryfallData(c));
+        let url = `${BASE_URL}/cards/search?q=${encodeURIComponent(q)}&unique=prints&order=released&dir=desc`;
+        const allPrints: CardData[] = [];
+
+        while (url) {
+            const resp = await fetch(url, {
+                mode: 'cors', credentials: 'omit', headers: { 'Accept': 'application/json' },
+            });
+            if (!resp.ok) break;
+            
+            const data = await resp.json();
+            if (data.data) {
+                const chunk = data.data.map((c: any) => transformScryfallData(c));
+                allPrints.push(...chunk);
+            }
+            
+            if (data.has_more && data.next_page) {
+                url = data.next_page;
+            } else {
+                break;
+            }
+        }
+        
+        return allPrints;
     } catch (e) {
         console.error('fetchPrints failed', e);
         return [];
