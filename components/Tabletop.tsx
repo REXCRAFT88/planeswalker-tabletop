@@ -981,7 +981,7 @@ const HealthModal: React.FC<{
 // scroll-zoomable preview that edits the stored transform. Touch works too (drag
 // to pan, pinch handled by the browser's default on the preview is not needed —
 // scroll/drag covers desktop; on touch, drag repositions).
-const AppearancePicker: React.FC<{
+export const AppearancePicker: React.FC<{
     label: string;
     url: string;
     transform: ImgTransform;
@@ -1528,6 +1528,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     useEffect(() => { libraryRef.current = library; }, [library]);
     useEffect(() => { playersListRef.current = playersList; }, [playersList]);
+
+    // Ensure mySeatIndex correctly tracks our socket ID when playing online
+    useEffect(() => {
+        if (isLocal || !socket.id) return;
+        const myIdx = playersList.findIndex(p => p.id === socket.id);
+        if (myIdx !== -1 && myIdx !== mySeatIndex) {
+            setMySeatIndex(myIdx);
+        }
+    }, [playersList, socket.id, isLocal, mySeatIndex]);
     useEffect(() => { turnStartTimeRef.current = turnStartTime; }, [turnStartTime]);
     useEffect(() => { gamePhaseRef.current = gamePhase; }, [gamePhase]);
 
@@ -4533,6 +4542,13 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const playCommander = (card: CardData) => {
         setCommandZone(prev => prev.filter(c => c.id !== card.id));
+        if (card.isCompanion) {
+            setHand(prev => [...prev, card]);
+            addLog(`put companion ${card.name} into hand`);
+            playSound('cardDraw');
+            return;
+        }
+        
         const myPos = layout[mySeatIndex];
         if (!myPos) return;
         const defaultX = myPos.x + MAT_W / 2 - CARD_WIDTH / 2;
