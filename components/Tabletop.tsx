@@ -60,6 +60,17 @@ export const KEY_ACTIONS: KeyActionDef[] = [
 ];
 const KEYBINDINGS_STORAGE = 'planeswalker_keybindings_v1';
 
+// --- Turn sub-phases ---
+// The active player steps through these with Enter (or by tapping the phase
+// strip); advancing past END passes the turn. Phase is display/UX only — the app
+// is honor-system and does not enforce what you may do in each phase.
+export const TURN_PHASES = ['UNTAP', 'UPKEEP', 'DRAW', 'MAIN1', 'COMBAT', 'MAIN2', 'END'] as const;
+export type TurnPhase = typeof TURN_PHASES[number];
+export const PHASE_LABELS: Record<TurnPhase, string> = {
+    UNTAP: 'Untap', UPKEEP: 'Upkeep', DRAW: 'Draw', MAIN1: 'Main 1',
+    COMBAT: 'Combat', MAIN2: 'Main 2', END: 'End',
+};
+
 const defaultKeyBindings = (): Record<string, string> => {
     const m: Record<string, string> = {};
     KEY_ACTIONS.forEach(a => { m[a.id] = a.defaultKey; });
@@ -895,6 +906,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const [round, setRound] = useState(1);
     const [turn, setTurn] = useState(1);
     const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState<string>('');
+    const [turnPhase, setTurnPhase] = useState<TurnPhase>('MAIN1');
+    const turnPhaseRef = useRef<TurnPhase>('MAIN1');
+    useEffect(() => { turnPhaseRef.current = turnPhase; }, [turnPhase]);
+    // Guards the turn-start effect so it only fires once per turn transition.
+    const lastTurnKeyRef = useRef('');
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -2186,6 +2202,14 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     }
                     setTurnStartTime(Date.now());
                     checkDamageTracking();
+                }
+            }
+            else if (action === 'PHASE_CHANGE') {
+                // The active player broadcasts intra-turn phase advances so every
+                // client's phase strip agrees. Turn-start (reset to UNTAP) is driven
+                // reactively off the synced turn pointer, not this action.
+                if (data.phase && (TURN_PHASES as readonly string[]).includes(data.phase)) {
+                    setTurnPhase(data.phase as TurnPhase);
                 }
             }
             else if (action === 'UPDATE_LIFE') {
@@ -3731,6 +3755,70 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     };
 
+    // True when this client controls the active turn. In local hotseat/AI games
+    // the human is parked at a seat, so only allow phase control when the seat
+    // being viewed is the active one (prevents driving an AI seat's phases).
+    const isMyTurn = () => {
+        if (isLocal) {
+            if (!currentTurnPlayerId) return true; // pre-assignment (game start)
+            return playersList[mySeatIndex]?.id === currentTurnPlayerId;
+        }
+        return currentTurnPlayerId === (socket.id || 'local-player');
+    };
+
+    // Advance one turn sub-phase. Past END passes the turn (which resets everyone
+    // to UNTAP via the turn-start effect). Auto-draw fires on entering DRAW,
+    // except on the opening turn. Only the active player may advance.
+    const advancePhase = () => {
+        if (gamePhase !== 'PLAYING') { nextTurn(); return; }
+        if (!isMyTurn()) return;
+        const idx = TURN_PHASES.indexOf(turnPhaseRef.current);
+        if (idx < 0 || idx >= TURN_PHASES.length - 1) {
+            nextTurn();
+            return;
+        }
+        const next = TURN_PHASES[idx + 1];
+        setTurnPhase(next);
+        turnPhaseRef.current = next;
+        if (!isLocal) emitAction('PHASE_CHANGE', { phase: next });
+        if (next === 'DRAW' && turn > 1) drawCard(1);
+    };
+
+    // Advance forward to a specific phase (clicking ahead on the phase strip),
+    // firing each phase's auto-behavior along the way. Never steps backward and
+    // never passes the turn (stops at the target).
+    const goToPhase = (target: TurnPhase) => {
+        if (gamePhase !== 'PLAYING' || !isMyTurn()) return;
+        let guard = 0;
+        while (turnPhaseRef.current !== target &&
+            TURN_PHASES.indexOf(turnPhaseRef.current) < TURN_PHASES.indexOf(target) &&
+            guard++ < TURN_PHASES.length) {
+            advancePhase();
+        }
+    };
+
+    // Turn-start: when the synced turn pointer advances to a new turn, reset the
+    // phase strip to UNTAP on every client, and auto-untap the active player's
+    // permanents. Driven off the already-synced turn number + current player, so
+    // it needs no extra broadcast. The key-guard makes the body run once per turn.
+    useEffect(() => {
+        if (gamePhase !== 'PLAYING') return;
+        const key = `${turn}:${currentTurnPlayerId}`;
+        if (key === lastTurnKeyRef.current) return;
+        lastTurnKeyRef.current = key;
+        setTurnPhase('UNTAP');
+        if (!isMyTurn()) return;
+        const myId = isLocal ? playersList[mySeatIndex]?.id : (socket.id || 'local-player');
+        const myRot = layout[mySeatIndex]?.rot || 0;
+        const mine = boardObjectsRef.current.filter(o => o.controllerId === myId && (o.tappedQuantity > 0 || o.rotation !== myRot));
+        if (mine.length === 0) return;
+        setBoardObjects(prev => prev.map(o =>
+            (o.controllerId === myId && (o.tappedQuantity > 0 || o.rotation !== myRot))
+                ? { ...o, rotation: myRot, tappedQuantity: 0 } : o));
+        if (!isLocal) mine.forEach(o => emitAction('UPDATE_OBJECT', { id: o.id, updates: { rotation: myRot, tappedQuantity: 0 } }));
+        addLog('untapped for turn');
+    }, [turn, currentTurnPlayerId, gamePhase]);
+
     const untapAll = () => {
         const myDefaultRotation = layout[mySeatIndex]?.rot || 0;
         const myId = isLocal ? playersList[mySeatIndex].id : (socket.id || 'local-player');
@@ -4331,7 +4419,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 break;
             case 'rollDice': rollDice(6); break;
             case 'spawnCounter': spawnCounter(); break;
-            case 'nextTurn': nextTurn(); break;
+            case 'nextTurn': advancePhase(); break;
             case 'lifeUp': handleLifeChange(1); break;
             case 'lifeDown': handleLifeChange(-1); break;
             case 'searchLibrary': openSearch('LIBRARY'); break;
@@ -5229,6 +5317,38 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             <ChevronRight size={16} />
                         </button>
                     </div>
+
+                    {/* Turn sub-phase strip. Enter (or a click) advances; advancing
+                        past End passes the turn. Read-only when it isn't your turn. */}
+                    {gamePhase === 'PLAYING' && (
+                        <>
+                            <div className="hidden lg:flex items-center gap-0.5 bg-gray-800 rounded-lg p-1 border border-gray-600">
+                                {TURN_PHASES.map(p => {
+                                    const active = turnPhase === p;
+                                    const mine = isMyTurn();
+                                    return (
+                                        <button
+                                            key={p}
+                                            onClick={() => goToPhase(p)}
+                                            disabled={!mine}
+                                            className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${active ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white hover:bg-gray-700'} ${!mine ? 'opacity-60 cursor-not-allowed hover:bg-transparent hover:text-gray-400' : ''}`}
+                                            title={mine ? `Advance to ${PHASE_LABELS[p]}` : `Current phase: ${PHASE_LABELS[turnPhase]}`}
+                                        >
+                                            {PHASE_LABELS[p]}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <button
+                                onClick={advancePhase}
+                                disabled={!isMyTurn()}
+                                className="lg:hidden flex items-center gap-1 px-2 py-1 bg-gray-800 rounded-lg border border-gray-600 text-[11px] font-bold text-blue-300 disabled:opacity-50 disabled:text-gray-500 active:scale-95 transition"
+                                title="Tap to advance phase"
+                            >
+                                {PHASE_LABELS[turnPhase]} <ChevronRight size={12} />
+                            </button>
+                        </>
+                    )}
 
                     {isLocal && isMobile && (
                         <>
