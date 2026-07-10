@@ -29,6 +29,62 @@ import {
 // them for free; the render splits them into a separate labeled slot.
 const isCmdZoneCard = (c: CardData) => !!c.isCommander || !!c.isCompanion;
 
+// --- Rebindable keyboard actions ---
+// A single registry drives both the key handler and the Controls editor. Each
+// action has a stable id, a label, and a default single-key binding. User
+// overrides live in localStorage; the handlers are dispatched by id, so a rebind
+// is just a change to the id->key map. Modifier/system keys (Space to pan, Tab,
+// Ctrl+Z undo, number keys, arrow-left/right opponent nav) are NOT rebindable and
+// are handled separately.
+export interface KeyActionDef { id: string; label: string; defaultKey: string; group: string; }
+export const KEY_ACTIONS: KeyActionDef[] = [
+    { id: 'tapHovered', label: 'Tap / untap hovered card', defaultKey: 't', group: 'Board' },
+    { id: 'untapAll', label: 'Untap all', defaultKey: 'u', group: 'Board' },
+    { id: 'draw', label: 'Draw a card', defaultKey: 'd', group: 'Board' },
+    { id: 'shuffle', label: 'Shuffle library', defaultKey: 's', group: 'Board' },
+    { id: 'playCommander', label: 'Play / return commander', defaultKey: 'c', group: 'Board' },
+    { id: 'rollDice', label: 'Roll a d6', defaultKey: 'r', group: 'Board' },
+    { id: 'spawnCounter', label: 'Create a counter', defaultKey: 'f', group: 'Board' },
+    { id: 'nextTurn', label: 'Pass turn / advance phase', defaultKey: 'enter', group: 'Turn' },
+    { id: 'lifeUp', label: 'Life +1', defaultKey: 'arrowup', group: 'Turn' },
+    { id: 'lifeDown', label: 'Life -1', defaultKey: 'arrowdown', group: 'Turn' },
+    { id: 'searchLibrary', label: 'Search library', defaultKey: 'x', group: 'Zones' },
+    { id: 'searchGraveyard', label: 'View graveyard', defaultKey: 'g', group: 'Zones' },
+    { id: 'searchExile', label: 'View exile', defaultKey: 'e', group: 'Zones' },
+    { id: 'searchTokens', label: 'Token search', defaultKey: 'k', group: 'Zones' },
+    { id: 'toggleLog', label: 'Toggle log', defaultKey: 'l', group: 'Panels' },
+    { id: 'toggleStats', label: 'Toggle stats', defaultKey: 'q', group: 'Panels' },
+    { id: 'toggleCmdrDamage', label: 'Toggle commander damage', defaultKey: 'w', group: 'Panels' },
+    { id: 'toggleOpponentView', label: 'Toggle opponent view', defaultKey: 'v', group: 'Panels' },
+    { id: 'toggleShortcuts', label: 'Open controls / help', defaultKey: '?', group: 'Panels' },
+];
+const KEYBINDINGS_STORAGE = 'planeswalker_keybindings_v1';
+
+const defaultKeyBindings = (): Record<string, string> => {
+    const m: Record<string, string> = {};
+    KEY_ACTIONS.forEach(a => { m[a.id] = a.defaultKey; });
+    return m;
+};
+
+const loadKeyBindings = (): Record<string, string> => {
+    const defaults = defaultKeyBindings();
+    try {
+        const stored = JSON.parse(localStorage.getItem(KEYBINDINGS_STORAGE) || '{}');
+        // Merge over defaults so newly-added actions always get a binding.
+        return { ...defaults, ...stored };
+    } catch { return defaults; }
+};
+
+// Human-readable label for a bound key ('arrowup' -> '↑', 'enter' -> 'Enter').
+const keyLabel = (key: string): string => {
+    if (!key) return '—';
+    const map: Record<string, string> = {
+        arrowup: '↑', arrowdown: '↓', arrowleft: '←', arrowright: '→',
+        enter: 'Enter', ' ': 'Space', escape: 'Esc',
+    };
+    return map[key] || key.toUpperCase();
+};
+
 interface TabletopProps {
     initialDeck: CardData[];
     initialTokens: CardData[];
@@ -909,6 +965,36 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     const pushUndo = useCallback((action: UndoableAction) => {
         setUndoHistory(prev => [...prev.slice(-(MAX_UNDO_HISTORY - 1)), action]);
     }, []);
+
+    // --- Keybindings ---
+    const [keyBindings, setKeyBindings] = useState<Record<string, string>>(loadKeyBindings);
+    // Action id currently waiting to capture a new key in the Controls editor.
+    const [rebindingActionId, setRebindingActionId] = useState<string | null>(null);
+    useEffect(() => {
+        localStorage.setItem(KEYBINDINGS_STORAGE, JSON.stringify(keyBindings));
+    }, [keyBindings]);
+    // Reverse map (key -> actionId) for O(1) dispatch in the key handler.
+    const keyToAction = useMemo(() => {
+        const m: Record<string, string> = {};
+        Object.entries(keyBindings).forEach(([id, key]) => { if (key) m[key] = id; });
+        return m;
+    }, [keyBindings]);
+
+    // Bind a key to an action, clearing that key from any other action so a key
+    // maps to at most one action (conflict resolution: last write wins).
+    const assignKeyBinding = (actionId: string, key: string) => {
+        setKeyBindings(prev => {
+            const next = { ...prev };
+            for (const id of Object.keys(next)) {
+                if (next[id] === key) next[id] = ''; // unbind the previous owner
+            }
+            next[actionId] = key;
+            return next;
+        });
+        setRebindingActionId(null);
+    };
+
+    const resetKeyBindings = () => setKeyBindings(defaultKeyBindings());
 
     // Local Table Host Logic
     useEffect(() => {
@@ -4202,22 +4288,34 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         }
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+    // Tap/untap the card currently under the pointer (bound to 'T' by default).
+    // Only affects permanents you control, mirroring the card's own tap toggle.
+    const tapHoveredCard = () => {
+        if (!hoveredCardId) return;
+        const obj = boardObjects.find(o => o.id === hoveredCardId);
+        if (!obj) return;
+        const myId = isLocal ? playersList[mySeatIndex]?.id : (socket.id || 'local-player');
+        if (obj.controllerId !== myId) return;
+        const defaultRot = layout[mySeatIndex]?.rot || 0;
+        if (obj.quantity > 1) {
+            const allTapped = obj.tappedQuantity >= obj.quantity;
+            updateBoardObject(obj.id, { tappedQuantity: allTapped ? 0 : obj.quantity });
+            addLog(`${allTapped ? 'untapped' : 'tapped'} stack of ${obj.quantity} ${obj.cardData.name}s`);
+        } else {
+            const isTapped = obj.rotation !== defaultRot;
+            updateBoardObject(obj.id, { rotation: isTapped ? defaultRot : (defaultRot + 90) % 360 });
+            addLog(`${isTapped ? 'untapped' : 'tapped'} ${obj.cardData.name}`);
+        }
+    };
 
-        switch (e.key.toLowerCase()) {
-            case ' ':
-                if (!isSpacePressed.current) {
-                    isSpacePressed.current = true;
-                    setView(v => ({ ...v })); // Force re-render for cursor update
-                }
-                break;
-            case 'd': drawCard(1); break;
-            case 'u': untapAll(); break;
-            case 's': shuffleLibrary(); break;
-            case 'l': setIsLogOpen(prev => !prev); break;
-            case '?': setShowShortcuts(prev => !prev); break;
-            case 'c':
+    // Run a rebindable action by its registry id.
+    const dispatchAction = (id: string) => {
+        switch (id) {
+            case 'tapHovered': tapHoveredCard(); break;
+            case 'untapAll': untapAll(); break;
+            case 'draw': drawCard(1); break;
+            case 'shuffle': shuffleLibrary(); break;
+            case 'playCommander':
                 if (commandZone.length > 0) {
                     playCommander(commandZone[0]);
                 } else {
@@ -4231,46 +4329,79 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     }
                 }
                 break;
-            case 'x': openSearch('LIBRARY'); break;
-            case 'e': openSearch('EXILE'); break;
-            case 'g': openSearch('GRAVEYARD'); break;
-            case 't': openSearch('TOKENS'); break;
-            case 'alt':
-                if (e.location === 1) { // Left Alt
-                    e.preventDefault();
-                    setAreTokensExpanded(prev => !prev);
-                }
-                break;
-            case 'r': rollDice(6); break;
-            case 'f': spawnCounter(); break;
-            case 'enter': nextTurn(); break;
-            case 'arrowup': handleLifeChange(1); break;
-            case 'arrowdown': handleLifeChange(-1); break;
-            case 'q': setShowStatsModal(prev => !prev); break;
-            case 'w': setShowCmdrDamage(prev => !prev); break;
+            case 'rollDice': rollDice(6); break;
+            case 'spawnCounter': spawnCounter(); break;
+            case 'nextTurn': nextTurn(); break;
+            case 'lifeUp': handleLifeChange(1); break;
+            case 'lifeDown': handleLifeChange(-1); break;
+            case 'searchLibrary': openSearch('LIBRARY'); break;
+            case 'searchExile': openSearch('EXILE'); break;
+            case 'searchGraveyard': openSearch('GRAVEYARD'); break;
+            case 'searchTokens': openSearch('TOKENS'); break;
+            case 'toggleLog': setIsLogOpen(prev => !prev); break;
+            case 'toggleStats': setShowStatsModal(prev => !prev); break;
+            case 'toggleCmdrDamage': setShowCmdrDamage(prev => !prev); break;
+            case 'toggleOpponentView': setIsOpponentViewOpen(prev => !prev); break;
+            case 'toggleShortcuts': setShowShortcuts(prev => !prev); break;
+        }
+    };
 
-            case 'tab': {
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        // Capturing a rebind takes priority over every other key.
+        if (rebindingActionId) {
+            e.preventDefault();
+            const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
+            if (k === 'escape') { setRebindingActionId(null); return; }
+            if (['shift', 'control', 'alt', 'meta'].includes(k)) return; // wait for a real key
+            if (k === ' ' || k === 'tab') return; // reserved for pan / focus
+            assignKeyBinding(rebindingActionId, k);
+            return;
+        }
+
+        if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+        const key = e.key.toLowerCase();
+
+        // Fixed, non-rebindable keys.
+        if (key === ' ') {
+            if (!isSpacePressed.current) {
+                isSpacePressed.current = true;
+                setView(v => ({ ...v })); // Force re-render for cursor update
+            }
+            return;
+        }
+        if (key === 'alt') {
+            if (e.location === 1) { // Left Alt
                 e.preventDefault();
-                break;
+                setAreTokensExpanded(prev => !prev);
             }
-            case 'z': {
-                if (e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    handleUndo();
-                }
-                break;
-            }
-            case 'v': setIsOpponentViewOpen(prev => !prev); break;
-            case 'arrowleft': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev - 1 + (playersList.length - 1)) % (playersList.length - 1)); break;
-            case 'arrowright': if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev + 1) % (playersList.length - 1)); break;
-            default:
-                const num = parseInt(e.key);
-                if (!isNaN(num)) {
-                    const idx = num === 0 ? 9 : num - 1;
-                    const cards = hand.filter(c => !c.isToken);
-                    if (cards[idx]) playCardFromHand(cards[idx]);
-                }
-                break;
+            return;
+        }
+        if (key === 'tab') { e.preventDefault(); return; }
+        if (key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleUndo(); return; }
+        if (key === 'arrowleft') {
+            if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev - 1 + (playersList.length - 1)) % (playersList.length - 1));
+            return;
+        }
+        if (key === 'arrowright') {
+            if (isOpponentViewOpen) setSelectedOpponentIndex(prev => (prev + 1) % (playersList.length - 1));
+            return;
+        }
+
+        // Number keys 1-0 play the Nth non-token hand card (fixed).
+        const num = parseInt(e.key);
+        if (!isNaN(num) && e.key.length === 1) {
+            const idx = num === 0 ? 9 : num - 1;
+            const cards = hand.filter(c => !c.isToken);
+            if (cards[idx]) playCardFromHand(cards[idx]);
+            return;
+        }
+
+        // Rebindable actions dispatch through the user's keybinding map.
+        const actionId = keyToAction[key];
+        if (actionId) {
+            if (key === 'arrowup' || key === 'arrowdown') e.preventDefault();
+            dispatchAction(actionId);
         }
     };
 
@@ -4458,7 +4589,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             isDraggingView.current = false;
         } else if (activePointers.current.size === 1) {
             const isMouse = e.pointerType === 'mouse';
-            if (e.button === 1 || (e.button === 0 && (isMobile || !isMouse || isSpacePressed.current))) {
+            // Pan with: middle button, right button (drag-pan), space+left, or any
+            // touch/pen drag. Right-button pans the board; a plain right-click (no
+            // movement) is swallowed by onContextMenu below so no browser menu shows.
+            if (e.button === 1 || e.button === 2 || (e.button === 0 && (isMobile || !isMouse || isSpacePressed.current))) {
                 isDraggingView.current = true;
                 lastMousePos.current = { x: e.clientX, y: e.clientY };
                 e.preventDefault();
@@ -4531,7 +4665,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
 
     const handleOpponentPointerDown = (e: React.PointerEvent) => {
         const isMouse = e.pointerType === 'mouse';
-        if (e.button === 1 || (e.button === 0 && (!isMouse || isSpacePressed.current))) {
+        if (e.button === 1 || e.button === 2 || (e.button === 0 && (!isMouse || isSpacePressed.current))) {
             isDraggingOpponentView.current = true;
             lastOpponentMousePos.current = { x: e.clientX, y: e.clientY };
             (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -4599,6 +4733,11 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             onPointerMove={handlers.onMove}
             onPointerUp={handlers.onUp}
             onWheel={handlers.onWheel}
+            // Right-button drags the board (see pointer-down); swallow the browser
+            // context menu on the play surface so the pan gesture feels native.
+            // Cards handle their own right-click (they stopPropagation), so their
+            // behavior is unaffected.
+            onContextMenu={(e) => e.preventDefault()}
         >
             <div
                 className="absolute inset-0 opacity-100 pointer-events-none"
@@ -5805,40 +5944,55 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             )}
 
             {showShortcuts && (
-                <div className="fixed inset-0 z-[11000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowShortcuts(false)}>
-                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-md w-full animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-6">
+                <div className="fixed inset-0 z-[11000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowShortcuts(false); setRebindingActionId(null); }}>
+                    <div className="bg-gray-800 border border-gray-600 rounded-xl p-6 shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
                             <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                <Keyboard className="text-blue-400" /> Keyboard Shortcuts
+                                <Keyboard className="text-blue-400" /> Controls
                             </h3>
-                            <button onClick={() => setShowShortcuts(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
+                            <button onClick={() => { setShowShortcuts(false); setRebindingActionId(null); }} className="text-gray-400 hover:text-white"><X size={20} /></button>
                         </div>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Draw Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">D</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Untap All</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">U</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Shuffle Library</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">S</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Log</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Help / Shortcuts</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">?</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Pan Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Space (Hold) + Drag</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Zoom Camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Mouse Wheel</kbd></div>
-
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Play Commander</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">C</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Library</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">X</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Graveyard</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">G</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Open Exile</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">E</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Token Search</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">T</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle Tokens</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L-Alt</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Roll Die</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">R</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Create Counter</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">F</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Pass Turn</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Enter</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Life +/-</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">↑ / ↓</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Stats</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Q</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Cmdr Damage</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">W</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Opponent View</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">V</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Switch Opponent</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">← / →</kbd></div>
-                            <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded col-span-2"><span className="text-gray-300">Play Hand Card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">1 - 0</kbd></div>
-                            <div className="col-span-2 pt-2 border-t border-gray-700 mt-1 text-xs text-gray-500 font-bold uppercase">Undo</div>
-                            <div className="flex justify-between items-center p-2 bg-amber-900/30 rounded border border-amber-800/30 col-span-2"><span className="text-gray-300">Undo Last Action</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
+                        <p className="text-xs text-gray-400 mb-4">Click a key to rebind it. Press the new key, or <kbd className="bg-black/40 px-1 rounded">Esc</kbd> to cancel. Assigning a key already in use clears it from the other action.</p>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4">
+                            {['Board', 'Turn', 'Zones', 'Panels'].map(group => (
+                                <div key={group}>
+                                    <div className="text-xs text-gray-500 font-bold uppercase mb-1.5">{group}</div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                        {KEY_ACTIONS.filter(a => a.group === group).map(a => {
+                                            const isRebinding = rebindingActionId === a.id;
+                                            const key = keyBindings[a.id];
+                                            return (
+                                                <div key={a.id} className="flex justify-between items-center gap-2 p-2 bg-gray-700/50 rounded">
+                                                    <span className="text-gray-300 truncate">{a.label}</span>
+                                                    <button
+                                                        onClick={() => setRebindingActionId(isRebinding ? null : a.id)}
+                                                        className={`min-w-[3rem] px-2 py-1 rounded font-mono text-sm border shrink-0 transition-colors ${isRebinding ? 'bg-blue-600 border-blue-400 text-white animate-pulse' : key ? 'bg-black/50 border-gray-600 text-white hover:border-blue-400' : 'bg-red-900/40 border-red-800 text-red-300 hover:border-red-500'}`}
+                                                        title="Click to rebind"
+                                                    >
+                                                        {isRebinding ? 'Press…' : keyLabel(key)}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                            <div>
+                                <div className="text-xs text-gray-500 font-bold uppercase mb-1.5">Fixed</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                    <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Pan camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600 text-xs">Right / Mid / Space-drag</kbd></div>
+                                    <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Zoom camera</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Wheel</kbd></div>
+                                    <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Play hand card</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">1 - 0</kbd></div>
+                                    <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Switch opponent</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">← / →</kbd></div>
+                                    <div className="flex justify-between items-center p-2 bg-gray-700/50 rounded"><span className="text-gray-300">Toggle tokens</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">L-Alt</kbd></div>
+                                    <div className="flex justify-between items-center p-2 bg-amber-900/30 rounded border border-amber-800/30"><span className="text-gray-300">Undo</span><kbd className="bg-black/50 px-2 py-1 rounded text-white font-mono border border-gray-600">Ctrl+Z</kbd></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="pt-4 mt-2 border-t border-gray-700 flex justify-end">
+                            <button onClick={resetKeyBindings} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-sm font-bold flex items-center gap-2">
+                                <RotateCcw size={14} /> Reset to defaults
+                            </button>
                         </div>
                     </div>
                 </div>
