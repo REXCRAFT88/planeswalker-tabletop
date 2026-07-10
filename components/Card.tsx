@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { BoardObject, CardData } from '../types';
 import { CARD_WIDTH, CARD_HEIGHT } from '../constants';
-import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap } from 'lucide-react';
+import { RotateCw, EyeOff, X, Maximize2, RefreshCcw, PlusCircle, MinusCircle, Reply, Layers, Copy, Plus, Minus, Zap, Hand } from 'lucide-react';
 
 interface PlayerProfile {
     id: string;
@@ -16,6 +16,8 @@ interface CardProps {
     sleeveTransform?: { x: number; y: number; scale: number };
     players?: PlayerProfile[];
     isControlledByMe: boolean;
+    onCopy?: (id: string) => void;
+    onSteal?: (id: string) => void;
     onUpdate: (id: string, updates: Partial<BoardObject>) => void;
     onBringToFront: (id: string) => void;
     onRelease: (id: string, x: number, y: number) => void;
@@ -41,7 +43,7 @@ interface CardProps {
     onHover?: (id: string | null) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onCopy, onSteal, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -417,7 +419,7 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
             )}
 
             <div className="relative w-full h-full group perspective-1000">
-                <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border ${object.cardData.isToken ? 'border-yellow-400' : 'border-black/50'}`}>
+                <div className={`relative w-full h-full rounded-[4px] overflow-hidden bg-gray-800 border ${object.cardData.isCopy ? 'border-2 border-white' : object.cardData.isToken ? 'border-yellow-400' : 'border-black/50'}`}>
                     {object.isFaceDown ? (
                         // Render Sleeve (custom image if the controller set one)
                         <div
@@ -498,7 +500,17 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
                                     <button onClick={toggleFaceDown} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-purple-600" title="Flip Face Down/Up">
                                         <EyeOff size={12} />
                                     </button>
+                                    {onCopy && (
+                                        <button onClick={(e) => { e.stopPropagation(); onCopy(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-teal-500" title="Make a copy">
+                                            <Copy size={12} />
+                                        </button>
+                                    )}
                                 </>
+                            )}
+                            {!isControlledByMe && onSteal && (
+                                <button onClick={(e) => { e.stopPropagation(); onSteal(object.id); }} className="p-1.5 bg-gray-800 text-white rounded-full hover:bg-rose-500" title="Take control">
+                                    <Hand size={12} />
+                                </button>
                             )}
                             <button
                                 onClick={(e) => {

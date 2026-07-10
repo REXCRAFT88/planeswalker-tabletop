@@ -4070,6 +4070,34 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         addLog("untapped all permanents");
     };
 
+    // Make a token copy of a permanent (white border, removable like a token).
+    const copyBoardObject = (id: string) => {
+        const obj = boardObjects.find(o => o.id === id);
+        if (!obj) return;
+        const newId = crypto.randomUUID();
+        const copy: BoardObject = {
+            ...obj, id: newId, quantity: 1, tappedQuantity: 0, counters: {},
+            x: obj.x + 30, y: obj.y + 30, z: maxZ + 1,
+            cardData: { ...obj.cardData, id: newId, isToken: true, isCopy: true },
+        };
+        setMaxZ(prev => prev + 1);
+        setBoardObjects(prev => [...prev, copy]);
+        emitAction('ADD_OBJECT', copy);
+        addLog(`copied ${obj.cardData.name}`);
+        playSound('cardPlay');
+    };
+
+    // Take control of an opponent's permanent (changes its controller to me).
+    const stealBoardObject = (id: string) => {
+        const obj = boardObjects.find(o => o.id === id);
+        if (!obj) return;
+        const myId = getMyId();
+        if (obj.controllerId === myId) return;
+        const myRot = layout[mySeatIndex]?.rot ?? 0;
+        updateBoardObject(id, { controllerId: myId, rotation: myRot });
+        addLog(`took control of ${obj.cardData.name}`);
+    };
+
     const unstackCards = (id: string) => {
         const obj = boardObjects.find(o => o.id === id);
         if (!obj || obj.quantity <= 1) return;
@@ -5183,6 +5211,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 sleeveUrl={appearanceFor(obj.controllerId).sleeveUrl}
                                 sleeveTransform={appearanceFor(obj.controllerId).sleeveTransform}
                                 isControlledByMe={isControlled}
+                                onCopy={copyBoardObject}
+                                onSteal={stealBoardObject}
                                 players={playersList}
                                 onUpdate={updateBoardObject}
                                 onBringToFront={(id) => { setMaxZ(p => p + 1); updateBoardObject(id, { z: maxZ + 1 }); }}
