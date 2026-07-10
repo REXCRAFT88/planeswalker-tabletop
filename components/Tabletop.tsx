@@ -70,7 +70,7 @@ const parsePower = (p?: string): number => { const n = parseInt(p || '0', 10); r
 // Shared definitions live in ../appearance.tsx to avoid circular imports.
 export type { ImgTransform } from '../appearance';
 export { DEFAULT_TRANSFORM, transformToBg, downscaleImage, contrastText, AppearancePicker } from '../appearance';
-import { DEFAULT_TRANSFORM, transformToBg, downscaleImage, contrastText } from '../appearance';
+import { DEFAULT_TRANSFORM, transformToBg, downscaleImage, contrastText, AppearancePicker } from '../appearance';
 import type { ImgTransform } from '../appearance';
 
 interface TabletopProps {
