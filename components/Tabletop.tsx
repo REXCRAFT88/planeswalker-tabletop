@@ -21,7 +21,7 @@ import type { AiToolCall, AiToolResult, AiPersonaId, AiDifficulty, AiProviderId,
 import {
     LogOut, Search, ZoomIn, ZoomOut, History, ArrowUp, ArrowDown, GripVertical, Palette, Menu, Maximize, Minimize,
     Archive, X, Eye, Shuffle, Crown, Dices, Layers, ChevronRight, Hand, Play, Settings, Swords, Shield,
-    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2, Upload
+    Clock, Users, CheckCircle, Ban, ArrowRight, Disc, ChevronLeft, Trash2, ArrowLeft, Minus, Plus, Keyboard, RefreshCw, Loader, RotateCcw, BarChart3, ChevronUp, ChevronDown, Heart, Undo2, Droplets, Zap, Mic, MessageSquare, Volume2, Upload, Copy
 } from 'lucide-react';
 
 // Cards that start in the command-zone area rather than the library: commanders
@@ -2562,6 +2562,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     if (prev.some(o => o.id === data.id)) return prev;
                     return [...prev, data as BoardObject];
                 });
+            } else if (action === 'STEAL_FROM_ZONE') {
+                if (data.targetPlayerId === socket.id) {
+                    const cardId = data.cardId;
+                    const zone = data.zone;
+                    if (zone === 'LIBRARY') setLibrary(prev => prev.filter(c => c.id !== cardId));
+                    else if (zone === 'GRAVEYARD') setGraveyard(prev => prev.filter(c => c.id !== cardId));
+                    else if (zone === 'EXILE') setExile(prev => prev.filter(c => c.id !== cardId));
+                    emitAction('UPDATE_COUNTS', { counts: getCounts() });
+                }
             } else if (action === 'UPDATE_OBJECT') {
                 setBoardObjects(prev => prev.map(o => {
                     if (o.id === data.id) {
@@ -4162,11 +4171,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     // never passes the turn (stops at the target).
     const goToPhase = (target: TurnPhase) => {
         if (gamePhase !== 'PLAYING' || !isMyTurn()) return;
-        let guard = 0;
-        while (turnPhaseRef.current !== target &&
-            TURN_PHASES.indexOf(turnPhaseRef.current) < TURN_PHASES.indexOf(target) &&
-            guard++ < TURN_PHASES.length) {
-            advancePhase();
+        setTurnPhase(target);
+        turnPhaseRef.current = target;
+        if (!isLocal) emitAction('PHASE_CHANGE', { phase: target });
+        
+        if (target !== 'COMBAT' && combatRef.current?.active) {
+            updateCombat({ ...combatRef.current, active: false });
         }
     };
 
@@ -5071,11 +5081,41 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
             return { ...prev, items: newItems };
         });
     };
-    const handleSearchAction = (id: string, action: 'HAND') => {
+    const handleSearchAction = (id: string, action: 'HAND' | 'STEAL' | 'CLONE') => {
         const item = searchModal.items.find(i => i.card.id === id);
         if (!item) return;
-        const newCard = { ...item.card, id: crypto.randomUUID() };
-        if (action === 'HAND') { setHand(prev => [...prev, newCard]); addLog(`added ${newCard.name} to hand`); }
+        
+        if (action === 'HAND') {
+            const newCard = { ...item.card, id: crypto.randomUUID() };
+            setHand(prev => [...prev, newCard]); 
+            addLog(`added ${newCard.name} to hand`); 
+        } else if (action === 'STEAL' || action === 'CLONE') {
+            const newObjId = crypto.randomUUID();
+            const obj: BoardObject = {
+                id: newObjId,
+                cardData: item.card,
+                x: 0, y: 0, z: maxZ + 1,
+                rotation: 0,
+                isTapped: false,
+                controllerId: socket.id,
+                counters: {}
+            };
+            setMaxZ(p => p + 1);
+            setBoardObjects(prev => [...prev, obj]);
+            emitAction('ADD_OBJECT', { object: obj });
+            
+            const targetName = playersList.find(p => p.id === searchModal.playerId)?.name || 'opponent';
+            addLog(`${action === 'STEAL' ? 'stole' : 'cloned'} ${item.card.name} from ${targetName}'s ${searchModal.source.toLowerCase()}`);
+            
+            if (action === 'STEAL' && searchModal.playerId) {
+                emitAction('STEAL_FROM_ZONE', { 
+                    targetPlayerId: searchModal.playerId, 
+                    zone: searchModal.source, 
+                    cardId: item.card.id 
+                });
+                setSearchModal(prev => ({ ...prev, items: prev.items.filter(i => i.card.id !== id) }));
+            }
+        }
     };
     const resolveLibraryAction = (action: 'TOP' | 'BOTTOM' | 'SHUFFLE') => {
         const id = libraryAction.cardId;
@@ -5333,7 +5373,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 commanders={isMe ? commandZone : (isLocal ? (localPlayerStates.current[p.id]?.commandZone || []) : (opponentsCommanders[p.id] || []))}
                                 onDraw={isMe ? () => drawCard(1) : (isLocal ? () => { } : () => requestViewZone('LIBRARY', p.id))}
                                 onShuffle={isMe ? shuffleLibrary : () => { }}
-                                onOpenSearch={isMe ? openSearch : (source) => isLocal ? openSearch(source, p.id) : requestViewZone(source, p.id)}
+                                onOpenSearch={isMe ? openSearch : (source) => isLocal ? openSearch(source, p.id) : (source === 'LIBRARY' ? requestViewZone(source, p.id) : openSearch(source, p.id))}
                                 onPlayCommander={isMe ? playCommander : (isLocal ? () => { } : () => { })}
                                 onPlayTopLibrary={isMe ? playTopLibrary : () => { }}
                                 onPlayTopGraveyard={isMe ? playTopGraveyard : () => { }}
@@ -5393,9 +5433,8 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const isSelected = mobileActionCardId === obj.id;
 
                     // Combat eligibility for this card this step.
-                    const isCreatureObj = (obj.cardData.typeLine || '').toLowerCase().includes('creature');
                     let objCombatMode: 'attack' | 'block' | null = null;
-                    if (combat?.active && isCreatureObj) {
+                    if (combat?.active) {
                         const iControlObj = isLocal || isControlled;
                         if (combat.step === 'attackers' && obj.controllerId === combat.attackerSeatId && iControlObj) objCombatMode = 'attack';
                         else if (combat.step === 'blockers' && obj.controllerId !== combat.attackerSeatId && iControlObj) objCombatMode = 'block';
@@ -5413,7 +5452,6 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 isControlledByMe={isControlled}
                                 onCopy={copyBoardObject}
                                 onSteal={stealBoardObject}
-                                onChangeArt={openChangeArt}
                                 combatMode={objCombatMode}
                                 onCombatStart={onCombatStart}
                                 isCombatAttacker={objIsAttacker}
@@ -6882,6 +6920,16 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                                                 ) : (
                                                                     <button onClick={() => addToTray(item.card.id)} className="w-full text-xs flex items-center gap-2 bg-green-700 hover:bg-green-600 px-2 py-1.5 rounded"><ArrowDown size={12} /> Add to Tray</button>
                                                                 )
+                                                            )}
+                                                            {searchModal.isReadOnly && (
+                                                                <div className="flex gap-2 w-full mt-1">
+                                                                    <button onClick={() => handleSearchAction(item.card.id, 'CLONE')} className="flex-1 text-xs flex justify-center items-center gap-1 bg-purple-700 hover:bg-purple-600 px-2 py-1.5 rounded" title="Copy to your board">
+                                                                        <Copy size={12} /> Clone
+                                                                    </button>
+                                                                    <button onClick={() => handleSearchAction(item.card.id, 'STEAL')} className="flex-1 text-xs flex justify-center items-center gap-1 bg-rose-700 hover:bg-rose-600 px-2 py-1.5 rounded" title="Take from opponent">
+                                                                        <Hand size={12} /> Steal
+                                                                    </button>
+                                                                </div>
                                                             )}
                                                         </>
                                                     ) : (
