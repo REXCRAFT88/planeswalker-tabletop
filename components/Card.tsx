@@ -19,6 +19,12 @@ interface CardProps {
     onCopy?: (id: string) => void;
     onSteal?: (id: string) => void;
     onChangeArt?: (id: string) => void;
+    // Combat: when this card is an eligible attacker/blocker source this step,
+    // combatMode is set and a pointer-down starts a combat assignment drag.
+    combatMode?: 'attack' | 'block' | null;
+    onCombatStart?: (id: string, x: number, y: number) => void;
+    isCombatAttacker?: boolean;
+    isCombatBlocker?: boolean;
     onUpdate: (id: string, updates: Partial<BoardObject>) => void;
     onBringToFront: (id: string) => void;
     onRelease: (id: string, x: number, y: number) => void;
@@ -44,7 +50,7 @@ interface CardProps {
     onHover?: (id: string | null) => void;
 }
 
-export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onCopy, onSteal, onChangeArt, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
+export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, sleeveTransform, players = [], isControlledByMe, onCopy, onSteal, onChangeArt, combatMode, onCombatStart, isCombatAttacker, isCombatBlocker, onUpdate, onBringToFront, onRelease, onInspect, onReturnToHand, onUnstack, onRemoveOne, onLog, scale = 1, viewScale = 1, viewRotation = 0, viewX = 0, viewY = 0, onPan, initialDragEvent, onLongPress, isMobile, isSelected, isAnySelected, onSelect, defaultRotation = 0, isHandVisible = true, onHover }) => {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ offsetX: number, offsetY: number, startX: number, startY: number } | null>(null);
     const cardRef = useRef<HTMLDivElement>(null);
@@ -80,6 +86,15 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
 
     const handlePointerDown = (e: React.PointerEvent) => {
         if (!isControlledByMe || (e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.interactive-ui')) {
+            return;
+        }
+
+        // In combat, an eligible attacker/blocker starts an assignment drag instead
+        // of moving. Left button (or any touch) begins the drag line.
+        if (combatMode && (e.button === 0 || e.pointerType !== 'mouse')) {
+            e.preventDefault();
+            e.stopPropagation();
+            onCombatStart?.(object.id, e.clientX, e.clientY);
             return;
         }
 
@@ -389,10 +404,15 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
     const vx = viewX || 0;
     const vy = viewY || 0;
 
+    const combatRing = isCombatAttacker ? 'ring-4 ring-red-500 shadow-[0_0_18px_rgba(239,68,68,0.8)]'
+        : isCombatBlocker ? 'ring-4 ring-sky-400 shadow-[0_0_18px_rgba(56,189,248,0.8)]'
+            : combatMode ? 'ring-2 ring-amber-300/80 cursor-crosshair' : '';
+
     const cardContent = (
         <div
             ref={cardRef}
-            className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''}`}
+            data-combat-obj={object.id}
+            className={`absolute touch-none select-none transition-shadow ${isDragging ? 'z-[9999] shadow-2xl' : 'shadow-md'} ${isControlledByMe ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isOverHand ? 'ring-4 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)]' : ''} ${isSelected ? 'ring-4 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)]' : ''} ${combatRing}`}
             style={{
                 left: object.x,
                 top: object.y,
@@ -453,8 +473,8 @@ export const Card: React.FC<CardProps> = ({ object, sleeveColor, sleeveUrl, slee
 
 
 
-                    {/* Hover Actions */}
-                    <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile ? 'hidden' : ''}`}>
+                    {/* Hover Actions (suppressed during combat so the card is a drag handle) */}
+                    <div className={`absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center gap-2 p-1 ${!isMobile && showOverlay ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isMobile || combatMode ? 'hidden' : ''}`}>
 
                         {/* Stack Controls */}
                         {isStack && isControlledByMe ? (

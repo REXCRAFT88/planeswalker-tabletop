@@ -72,6 +72,24 @@ export const PHASE_LABELS: Record<TurnPhase, string> = {
     COMBAT: 'Combat', MAIN2: 'Main 2', END: 'End',
 };
 
+// --- Combat ---
+// The shared combat state, synced to every client via a COMBAT_UPDATE action.
+// Assignments reference board-object ids; the turn player (attackerSeatId) owns
+// step transitions, the attacker owns attacker assignments, and each defender
+// owns their own blocks.
+export type CombatStep = 'attackers' | 'blockers' | 'resolve';
+export interface CombatState {
+    active: boolean;
+    step: CombatStep;
+    attackerSeatId: string;
+    attackers: { objectId: string; defenderSeatId: string }[];
+    blocks: { attackerObjectId: string; blockerObjectId: string }[];
+}
+const COMBAT_STEP_LABEL: Record<CombatStep, string> = {
+    attackers: 'Declare Attackers', blockers: 'Declare Blockers', resolve: 'Resolve',
+};
+const parsePower = (p?: string): number => { const n = parseInt(p || '0', 10); return isNaN(n) ? 0 : n; };
+
 // --- Table appearance (custom mat / sleeve) ---
 export interface ImgTransform { x: number; y: number; scale: number; }
 export const DEFAULT_TRANSFORM: ImgTransform = { x: 50, y: 50, scale: 100 };
@@ -447,6 +465,7 @@ interface PlaymatProps {
     sleeveUrl?: string;
     matTransform?: ImgTransform;
     sleeveTransform?: ImgTransform;
+    combatTargetId?: string;
     topGraveyardCard?: CardData;
     isShuffling: boolean;
     isControlled: boolean;
@@ -467,7 +486,7 @@ interface PlaymatProps {
 
 const Playmat: React.FC<PlaymatProps> = ({
     x, y, width, height, playerName, rotation, zones, counts, sleeveColor,
-    matUrl, sleeveUrl, matTransform, sleeveTransform,
+    matUrl, sleeveUrl, matTransform, sleeveTransform, combatTargetId,
     topGraveyardCard, isShuffling, isControlled, commanders,
     onDraw, onShuffle, onOpenSearch, onPlayCommander, onPlayTopLibrary, onPlayTopGraveyard, onInspectCommander, onViewHand,
     isMobile, onMobileZoneAction, onDoubleClickZone, disconnected
@@ -558,6 +577,7 @@ const Playmat: React.FC<PlaymatProps> = ({
 
     return (
         <div
+            data-combat-target={combatTargetId}
             className={`absolute bg-gray-900/40 rounded-3xl border transition-all duration-500 overflow-hidden ${disconnected ? 'opacity-50' : ''}`}
             style={{
                 left: x, top: y, width, height,
@@ -1065,6 +1085,15 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
     useEffect(() => { turnPhaseRef.current = turnPhase; }, [turnPhase]);
     // Guards the turn-start effect so it only fires once per turn transition.
     const lastTurnKeyRef = useRef('');
+
+    // --- Combat ---
+    const [combat, setCombat] = useState<CombatState | null>(null);
+    const combatRef = useRef<CombatState | null>(null);
+    useEffect(() => { combatRef.current = combat; }, [combat]);
+    // Active combat drag: the board-object id a line is being dragged from, plus
+    // the current pointer position (for the transient assignment line).
+    const [combatDragFrom, setCombatDragFrom] = useState<string | null>(null);
+    const [combatDragPos, setCombatDragPos] = useState<{ x: number; y: number } | null>(null);
 
     const [playersList, setPlayersList] = useState<Player[]>([
         { id: isLocal ? 'player-0' : 'local-player', name: playerName, color: sleeveColor }
@@ -2437,6 +2466,12 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                 if (data.phase && (TURN_PHASES as readonly string[]).includes(data.phase)) {
                     setTurnPhase(data.phase as TurnPhase);
                 }
+            }
+            else if (action === 'COMBAT_UPDATE') {
+                // Mirror the shared combat state (tracking only — no damage applied).
+                const incoming = (data.combat ?? null) as CombatState | null;
+                setCombat(incoming);
+                combatRef.current = incoming;
             }
             else if (action === 'UPDATE_LIFE') {
                 if (sender && sender.id !== socket.id) {
@@ -3993,12 +4028,71 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         return currentTurnPlayerId === (socket.id || 'local-player');
     };
 
-    // Advance one turn sub-phase. Past END passes the turn (which resets everyone
-    // to UNTAP via the turn-start effect). Auto-draw fires on entering DRAW,
-    // except on the opening turn. Only the active player may advance.
+    const mySeatId = () => isLocal ? (playersList[mySeatIndex]?.id ?? 'player-0') : (socket.id || 'local-player');
+
+    // --- Combat state + sync ---
+    const updateCombat = (next: CombatState | null) => {
+        setCombat(next);
+        combatRef.current = next;
+        if (!isLocal) emitAction('COMBAT_UPDATE', { combat: next });
+    };
+
+    const addAttacker = (objectId: string, defenderSeatId: string) => {
+        const c = combatRef.current;
+        if (!c || c.step !== 'attackers') return;
+        const obj = boardObjectsRef.current.find(o => o.id === objectId);
+        const existing = c.attackers.find(a => a.objectId === objectId);
+        if (existing) {
+            updateCombat({ ...c, attackers: c.attackers.map(a => a.objectId === objectId ? { ...a, defenderSeatId } : a) });
+        } else {
+            updateCombat({ ...c, attackers: [...c.attackers, { objectId, defenderSeatId }] });
+        }
+        const defName = playersList.find(p => p.id === defenderSeatId)?.name || 'a player';
+        addLog(`${obj?.cardData.name || 'a creature'} attacks ${defName}`);
+    };
+    const removeAttacker = (objectId: string) => {
+        const c = combatRef.current;
+        if (!c) return;
+        updateCombat({ ...c, attackers: c.attackers.filter(a => a.objectId !== objectId), blocks: c.blocks.filter(b => b.attackerObjectId !== objectId) });
+    };
+    const addBlock = (attackerObjectId: string, blockerObjectId: string) => {
+        const c = combatRef.current;
+        if (!c || c.step !== 'blockers') return;
+        // A blocker blocks at most one attacker; multiple blockers per attacker is fine.
+        const blocks = c.blocks.filter(b => b.blockerObjectId !== blockerObjectId);
+        updateCombat({ ...c, blocks: [...blocks, { attackerObjectId, blockerObjectId }] });
+        const bl = boardObjectsRef.current.find(o => o.id === blockerObjectId);
+        const at = boardObjectsRef.current.find(o => o.id === attackerObjectId);
+        addLog(`${bl?.cardData.name || 'a creature'} blocks ${at?.cardData.name || 'an attacker'}`);
+    };
+    const removeBlock = (blockerObjectId: string) => {
+        const c = combatRef.current;
+        if (!c) return;
+        updateCombat({ ...c, blocks: c.blocks.filter(b => b.blockerObjectId !== blockerObjectId) });
+    };
+
+    // Advance one turn sub-phase. Combat expands into declare-attackers ->
+    // declare-blockers -> resolve before continuing to Main 2. The combat panel is
+    // a tracking aid only — it does not attribute damage or tap anything; players
+    // apply results by hand. Past END passes the turn. Only the active player may
+    // advance.
     const advancePhase = () => {
         if (gamePhase !== 'PLAYING') { nextTurn(); return; }
         if (!isMyTurn()) return;
+
+        // Step through the combat sub-phases while in COMBAT.
+        const c = combatRef.current;
+        if (turnPhaseRef.current === 'COMBAT' && c?.active) {
+            if (c.step === 'attackers') { updateCombat({ ...c, step: 'blockers' }); return; }
+            if (c.step === 'blockers') { updateCombat({ ...c, step: 'resolve' }); return; }
+            if (c.step === 'resolve') {
+                updateCombat({ ...c, active: false });
+                setTurnPhase('MAIN2'); turnPhaseRef.current = 'MAIN2';
+                if (!isLocal) emitAction('PHASE_CHANGE', { phase: 'MAIN2' });
+                return;
+            }
+        }
+
         const idx = TURN_PHASES.indexOf(turnPhaseRef.current);
         if (idx < 0 || idx >= TURN_PHASES.length - 1) {
             nextTurn();
@@ -4009,7 +4103,51 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         turnPhaseRef.current = next;
         if (!isLocal) emitAction('PHASE_CHANGE', { phase: next });
         if (next === 'DRAW' && turn > 1) drawCard(1);
+        if (next === 'COMBAT') {
+            updateCombat({ active: true, step: 'attackers', attackerSeatId: mySeatId(), attackers: [], blocks: [] });
+        }
     };
+
+    // Begin a combat drag from a creature (called by the Card on pointer-down when
+    // it is an eligible attacker/blocker this step).
+    const onCombatStart = (objectId: string, x: number, y: number) => {
+        setCombatDragFrom(objectId);
+        setCombatDragPos({ x, y });
+    };
+
+    // Track the combat drag with window listeners; resolve the target on release.
+    useEffect(() => {
+        if (!combatDragFrom) return;
+        const move = (e: PointerEvent) => setCombatDragPos({ x: e.clientX, y: e.clientY });
+        const up = (e: PointerEvent) => {
+            const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+            const c = combatRef.current;
+            if (el && c) {
+                if (c.step === 'attackers') {
+                    // Drop on an opponent's mat, or on any permanent they control.
+                    const mat = el.closest('[data-combat-target]') as HTMLElement | null;
+                    let defId = mat?.getAttribute('data-combat-target') || undefined;
+                    if (!defId) {
+                        const oid = (el.closest('[data-combat-obj]') as HTMLElement | null)?.getAttribute('data-combat-obj');
+                        const o = oid ? boardObjectsRef.current.find(x => x.id === oid) : undefined;
+                        if (o && o.controllerId !== c.attackerSeatId) defId = o.controllerId;
+                    }
+                    if (defId && defId !== c.attackerSeatId) addAttacker(combatDragFrom, defId);
+                } else if (c.step === 'blockers') {
+                    const target = el.closest('[data-combat-obj]') as HTMLElement | null;
+                    const atkId = target?.getAttribute('data-combat-obj');
+                    if (atkId && c.attackers.some(a => a.objectId === atkId)) addBlock(atkId, combatDragFrom);
+                }
+            }
+            setCombatDragFrom(null);
+            setCombatDragPos(null);
+        };
+        // Capture phase so card/container pointer handlers (which stopPropagation)
+        // can't swallow the release before we resolve the combat target.
+        window.addEventListener('pointermove', move, true);
+        window.addEventListener('pointerup', up, true);
+        return () => { window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); };
+    }, [combatDragFrom]);
 
     // Advance forward to a specific phase (clicking ahead on the phase strip),
     // firing each phase's auto-behavior along the way. Never steps backward and
@@ -4034,6 +4172,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
         if (key === lastTurnKeyRef.current) return;
         lastTurnKeyRef.current = key;
         setTurnPhase('UNTAP');
+        if (combatRef.current) { setCombat(null); combatRef.current = null; } // combat never carries across turns
         playSound('turnStart');
         if (!isMyTurn()) return;
         const myId = isLocal ? playersList[mySeatIndex]?.id : (socket.id || 'local-player');
@@ -5172,6 +5311,7 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 sleeveUrl={appearanceFor(p.id).sleeveUrl}
                                 matTransform={appearanceFor(p.id).matTransform}
                                 sleeveTransform={appearanceFor(p.id).sleeveTransform}
+                                combatTargetId={p.id}
                                 topGraveyardCard={isMe ? graveyard[0] : undefined}
                                 isShuffling={isMe ? isShuffling : false}
                                 isControlled={isMe}
@@ -5237,6 +5377,17 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                     const objSleeveColor = controller ? controller.color : sleeveColor;
                     const isSelected = mobileActionCardId === obj.id;
 
+                    // Combat eligibility for this card this step.
+                    const isCreatureObj = (obj.cardData.typeLine || '').toLowerCase().includes('creature');
+                    let objCombatMode: 'attack' | 'block' | null = null;
+                    if (combat?.active && isCreatureObj) {
+                        const iControlObj = isLocal || isControlled;
+                        if (combat.step === 'attackers' && obj.controllerId === combat.attackerSeatId && iControlObj) objCombatMode = 'attack';
+                        else if (combat.step === 'blockers' && obj.controllerId !== combat.attackerSeatId && iControlObj) objCombatMode = 'block';
+                    }
+                    const objIsAttacker = !!combat?.attackers.some(a => a.objectId === obj.id);
+                    const objIsBlocker = !!combat?.blocks.some(b => b.blockerObjectId === obj.id);
+
                     return (
                         <div key={obj.id} className="pointer-events-auto">
                             <Card
@@ -5248,6 +5399,10 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                                 onCopy={copyBoardObject}
                                 onSteal={stealBoardObject}
                                 onChangeArt={openChangeArt}
+                                combatMode={objCombatMode}
+                                onCombatStart={onCombatStart}
+                                isCombatAttacker={objIsAttacker}
+                                isCombatBlocker={objIsBlocker}
                                 players={playersList}
                                 onUpdate={updateBoardObject}
                                 onBringToFront={(id) => { setMaxZ(p => p + 1); updateBoardObject(id, { z: maxZ + 1 }); }}
@@ -6366,6 +6521,87 @@ export const Tabletop: React.FC<TabletopProps> = ({ initialDeck, initialTokens, 
                             {playersList.filter(p => p.id !== socket.id).length === 0 && <div className="text-center text-gray-500">No opponents found.</div>}
                         </div>
                     </div>
+                </div>
+            )}
+
+            {/* Combat: transient assignment drag line */}
+            {combatDragFrom && combatDragPos && (() => {
+                const el = document.querySelector(`[data-combat-obj="${combatDragFrom}"]`);
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                const sx = r.left + r.width / 2, sy = r.top + r.height / 2;
+                const color = combat?.step === 'blockers' ? '#38bdf8' : '#ef4444';
+                return (
+                    <svg className="fixed inset-0 z-[9500] pointer-events-none w-full h-full">
+                        <line x1={sx} y1={sy} x2={combatDragPos.x} y2={combatDragPos.y} stroke={color} strokeWidth={3} strokeDasharray="6 4" strokeLinecap="round" />
+                        <circle cx={combatDragPos.x} cy={combatDragPos.y} r={5} fill={color} />
+                    </svg>
+                );
+            })()}
+
+            {/* Combat: compact assignment panel */}
+            {combat?.active && gamePhase === 'PLAYING' && (
+                <div data-attacker-seat={combat.attackerSeatId} className="fixed top-16 left-1/2 -translate-x-1/2 z-[9000] w-[min(94vw,760px)] bg-gray-900/95 border border-gray-700 rounded-xl shadow-2xl p-3 backdrop-blur animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                            <Swords size={16} className="text-red-400 shrink-0" />
+                            <span className="font-bold text-white text-sm truncate">Combat — {COMBAT_STEP_LABEL[combat.step]}</span>
+                            <span className="text-xs text-gray-400 hidden sm:inline truncate">({playersList.find(p => p.id === combat.attackerSeatId)?.name || 'Player'}'s attack)</span>
+                        </div>
+                        {isMyTurn() && (
+                            <button onClick={advancePhase} className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1 shrink-0">
+                                {combat.step === 'attackers' ? 'To Blockers' : combat.step === 'blockers' ? 'Resolve' : 'End Combat'} <ChevronRight size={14} />
+                            </button>
+                        )}
+                    </div>
+                    {combat.attackers.length === 0 ? (
+                        <div className="text-xs text-gray-500 py-1.5">
+                            {combat.step === 'attackers' ? 'Drag from your creatures onto an opponent to attack.' : 'No attackers were declared.'}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-2 max-h-[42vh] overflow-y-auto custom-scrollbar">
+                            {Array.from(new Set(combat.attackers.map(a => a.defenderSeatId))).map(defId => (
+                                <div key={defId} className="flex items-start gap-2 bg-gray-800/60 rounded-lg p-2">
+                                    <div className="text-[10px] text-gray-300 font-bold uppercase min-w-[64px] pt-2 flex items-center gap-1"><ArrowRight size={10} /> {playersList.find(p => p.id === defId)?.name || 'Player'}</div>
+                                    <div className="flex flex-wrap gap-3">
+                                        {combat.attackers.filter(a => a.defenderSeatId === defId).map(a => {
+                                            const atk = boardObjects.find(o => o.id === a.objectId);
+                                            if (!atk) return null;
+                                            const blks = combat.blocks.filter(b => b.attackerObjectId === a.objectId);
+                                            const canUndoAtk = combat.step === 'attackers' && (isLocal || atk.controllerId === socket.id);
+                                            return (
+                                                <div key={a.objectId} className="flex flex-col items-center gap-1">
+                                                    <div data-combat-obj={a.objectId} className={`relative group ${combat.step === 'blockers' ? 'ring-2 ring-amber-300/60 rounded' : ''}`} onDoubleClick={() => setInspectCard(atk.cardData)} title={`${atk.cardData.name} — dbl-click to inspect${combat.step === 'blockers' ? ' · drag a blocker here' : ''}`}>
+                                                        <img src={atk.cardData.imageUrl} className="w-11 h-[62px] object-cover rounded border-2 border-red-500" />
+                                                        {parsePower(atk.cardData.power) > 0 && <span className="absolute bottom-0 right-0 bg-black/80 text-white text-[9px] font-bold px-1 rounded-tl">{atk.cardData.power}</span>}
+                                                        {canUndoAtk && <button onClick={() => removeAttacker(a.objectId)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={10} /></button>}
+                                                    </div>
+                                                    {blks.length > 0 ? (
+                                                        <div className="flex gap-1">
+                                                            {blks.map(b => {
+                                                                const bl = boardObjects.find(o => o.id === b.blockerObjectId);
+                                                                if (!bl) return null;
+                                                                const canUndoBlk = combat.step === 'blockers' && (isLocal || bl.controllerId === socket.id);
+                                                                return (
+                                                                    <div key={b.blockerObjectId} className="relative group" onDoubleClick={() => setInspectCard(bl.cardData)} title={`${bl.cardData.name} — dbl-click to inspect`}>
+                                                                        <img src={bl.cardData.imageUrl} className="w-8 h-11 object-cover rounded border-2 border-sky-400" />
+                                                                        {canUndoBlk && <button onClick={() => removeBlock(b.blockerObjectId)} className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 shadow"><X size={9} /></button>}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : combat.step !== 'attackers' ? (
+                                                        <span className="text-[9px] text-red-300 font-bold uppercase">Unblocked</span>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {combat.step === 'blockers' && <div className="text-[10px] text-gray-500 mt-1.5">Drag from your creatures onto an attacker to block. Multiple blockers per attacker allowed.</div>}
                 </div>
             )}
 
